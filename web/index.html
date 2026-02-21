@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video Automation Studio</title>
+    <style>
+      :root {
+        --bg: #f4f0e8;
+        --card: #fffaf2;
+        --text: #1f1b16;
+        --accent: #0f766e;
+        --accent-2: #b45309;
+        --border: #d9cdbf;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 10% 10%, #f2d6a2 0%, transparent 28%),
+          radial-gradient(circle at 88% 12%, #b7e4d8 0%, transparent 24%),
+          var(--bg);
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 20px auto;
+        padding: 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        gap: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+        min-width: 0;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        font-size: 24px;
+      }
+      p.meta { margin-top: 0; color: #544f47; }
+      textarea {
+        width: 100%;
+        min-height: 420px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        resize: vertical;
+        background: #fffdf8;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      input, button {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      input { width: 130px; }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #fff7ed;
+        color: var(--accent-2);
+        border-color: #f3d2a8;
+      }
+      .status {
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+      pre {
+        margin: 0;
+        max-height: 560px;
+        overflow: auto;
+        min-width: 0;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #fff;
+        padding: 10px;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+      @media (max-width: 960px) {
+        .grid { grid-template-columns: 1fr; }
+        textarea { min-height: 280px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Video Automation Studio</h1>
+      <p class="meta">Pipeline de roteiro → blocos visuais → chunks TTS (<=200) com validação de cobertura.</p>
+      <div class="grid">
+        <section class="card">
+          <div class="controls">
+            <label>Visual chars <input id="maxVisual" type="number" value="320" /></label>
+            <label>TTS chars <input id="maxTts" type="number" value="200" /></label>
+            <button id="buildBtn">Gerar Manifest</button>
+            <button id="loadExampleBtn" class="secondary">Carregar Exemplo</button>
+          </div>
+          <textarea id="scriptInput" placeholder="Cole o roteiro aqui..."></textarea>
+        </section>
+        <section class="card">
+          <div id="status" class="status">Aguardando...</div>
+          <pre id="output"></pre>
+        </section>
+      </div>
+    </div>
+    <script>
+      const scriptInput = document.getElementById("scriptInput");
+      const output = document.getElementById("output");
+      const status = document.getElementById("status");
+
+      async function buildManifest() {
+        status.textContent = "Processando...";
+        output.textContent = "";
+        const payload = {
+          script: scriptInput.value,
+          max_visual_chars: Number(document.getElementById("maxVisual").value || 320),
+          max_tts_chars: Number(document.getElementById("maxTts").value || 200),
+        };
+        const res = await fetch("/api/manifest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          status.textContent = "Erro";
+          output.textContent = JSON.stringify(data, null, 2);
+          return;
+        }
+        const v = data.validation;
+        status.textContent = v.valid
+          ? `OK: ${data.manifest.blocks.length} blocos`
+          : `Falha: ${v.errors.length} erro(s)`;
+        output.textContent = JSON.stringify(data, null, 2);
+      }
+
+      async function loadExample() {
+        const payload = {
+          path: "d:\\channels\\Dieta\\Videos\\V1-Cardio em Jejum Acelera ou Destrói Seu Metabolismo\\Cardio em Jejum Acelera ou Destrói Seu Metabolismo_.md"
+        };
+        const res = await fetch("/api/manifest/from-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          status.textContent = "Erro ao carregar exemplo";
+          output.textContent = JSON.stringify(data, null, 2);
+          return;
+        }
+        scriptInput.value = data.manifest.script;
+        status.textContent = "Exemplo carregado";
+        output.textContent = JSON.stringify(data.validation, null, 2);
+      }
+
+      document.getElementById("buildBtn").addEventListener("click", buildManifest);
+      document.getElementById("loadExampleBtn").addEventListener("click", loadExample);
+    </script>
+  </body>
+</html>
