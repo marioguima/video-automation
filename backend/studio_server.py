@@ -1,15 +1,13 @@
 import json
-import sys
+import argparse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import urlparse
 
-from script_pipeline import build_manifest, load_script_file, validate_manifest
-
-
-ROOT = Path(__file__).parent
-STATIC_DIR = ROOT / "web"
+try:
+    from .script_pipeline import build_manifest, load_script_file, validate_manifest
+except ImportError:
+    from script_pipeline import build_manifest, load_script_file, validate_manifest
 
 
 class StudioHandler(BaseHTTPRequestHandler):
@@ -44,8 +42,17 @@ class StudioHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            html_path = STATIC_DIR / "index.html"
-            self._send_text(html_path.read_text(encoding="utf-8"), content_type="text/html")
+            self._send_json(
+                {
+                    "service": "video-automation-api",
+                    "status": "ok",
+                    "endpoints": [
+                        "GET /api/health",
+                        "POST /api/manifest",
+                        "POST /api/manifest/from-file",
+                    ],
+                }
+            )
             return
         if parsed.path == "/api/health":
             self._send_json({"ok": True})
@@ -62,8 +69,11 @@ class StudioHandler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json()
                 script_text = payload.get("script", "")
-                max_visual_chars = int(payload.get("max_visual_chars", 320))
+                max_visual_chars = int(payload.get("max_visual_chars", 0))
                 max_tts_chars = int(payload.get("max_tts_chars", 200))
+                split_mode = str(payload.get("split_mode", "topic"))
+                topic_min_chars = int(payload.get("topic_min_chars", 120))
+                topic_similarity_threshold = float(payload.get("topic_similarity_threshold", 0.16))
                 if not script_text.strip():
                     self._send_json({"error": "script is required"}, status=400)
                     return
@@ -72,6 +82,9 @@ class StudioHandler(BaseHTTPRequestHandler):
                     script_text=script_text,
                     max_visual_chars=max_visual_chars,
                     max_tts_chars=max_tts_chars,
+                    split_mode=split_mode,
+                    topic_min_chars=topic_min_chars,
+                    topic_similarity_threshold=topic_similarity_threshold,
                 )
                 validation = validate_manifest(manifest)
                 self._send_json({"manifest": manifest, "validation": validation})
@@ -84,11 +97,19 @@ class StudioHandler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json()
                 file_path = payload.get("path", "")
+                split_mode = str(payload.get("split_mode", "topic"))
+                topic_min_chars = int(payload.get("topic_min_chars", 120))
+                topic_similarity_threshold = float(payload.get("topic_similarity_threshold", 0.16))
                 if not file_path:
                     self._send_json({"error": "path is required"}, status=400)
                     return
                 script_text = load_script_file(file_path)
-                manifest = build_manifest(script_text=script_text)
+                manifest = build_manifest(
+                    script_text=script_text,
+                    split_mode=split_mode,
+                    topic_min_chars=topic_min_chars,
+                    topic_similarity_threshold=topic_similarity_threshold,
+                )
                 validation = validate_manifest(manifest)
                 self._send_json({"manifest": manifest, "validation": validation})
                 return
@@ -106,10 +127,29 @@ def run_server(host: str = "127.0.0.1", port: int = 8080) -> None:
 
 
 if __name__ == "__main__":
-    host = "127.0.0.1"
-    port = 8080
-    if len(sys.argv) >= 2:
-        host = sys.argv[1]
-    if len(sys.argv) >= 3:
-        port = int(sys.argv[2])
-    run_server(host=host, port=port)
+    parser = argparse.ArgumentParser(description="Video Automation API server")
+    parser.add_argument("host", nargs="?", default="127.0.0.1")
+    parser.add_argument("port", nargs="?", type=int, default=8080)
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload when Python files change (requires watchfiles).",
+    )
+    args = parser.parse_args()
+
+    if args.reload:
+        try:
+            from watchfiles import run_process
+        except ImportError as exc:
+            raise SystemExit(
+                "Auto-reload requires watchfiles. Install with: pip install watchfiles"
+            ) from exc
+
+        print(f"Studio reload mode on http://{args.host}:{args.port}")
+        run_process(
+            ".",
+            target=run_server,
+            kwargs={"host": args.host, "port": args.port},
+        )
+    else:
+        run_server(host=args.host, port=args.port)

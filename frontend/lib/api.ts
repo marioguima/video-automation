@@ -6,6 +6,9 @@ export async function buildManifest(payload: {
   script: string;
   max_visual_chars: number;
   max_tts_chars: number;
+  split_mode?: "length" | "topic";
+  topic_min_chars?: number;
+  topic_similarity_threshold?: number;
 }): Promise<ManifestResponse> {
   const res = await fetch(`${BASE_URL}/api/manifest`, {
     method: "POST",
@@ -20,11 +23,16 @@ export async function buildManifest(payload: {
   return data;
 }
 
-export async function buildManifestFromFile(path: string): Promise<ManifestResponse> {
+export async function buildManifestFromFile(payload: {
+  path: string;
+  split_mode?: "length" | "topic";
+  topic_min_chars?: number;
+  topic_similarity_threshold?: number;
+}): Promise<ManifestResponse> {
   const res = await fetch(`${BASE_URL}/api/manifest/from-file`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify(payload),
   });
 
   const data = await res.json();

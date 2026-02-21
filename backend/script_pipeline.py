@@ -1,4 +1,5 @@
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,6 +7,16 @@ from pathlib import Path
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
+MARKUP_ONLY_LINE_RE = re.compile(r"^[\s#>*`~_\-|]+$")
+TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ0-9]+")
+
+STOPWORDS_PT = {
+    "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "é", "em", "um",
+    "uma", "para", "por", "com", "que", "na", "no", "nas", "nos", "se", "ao",
+    "à", "às", "ou", "como", "mais", "mas", "já", "não", "sim", "ser", "foi",
+    "são", "tem", "também", "quando", "onde", "isso", "essa", "esse", "seu",
+    "sua", "seus", "suas", "você", "vocês", "ele", "ela", "eles", "elas",
+}
 
 
 @dataclass
@@ -39,6 +50,13 @@ def split_markdown_into_paragraphs(markdown_text: str) -> list[dict]:
                 paragraphs.append(" ".join(current).strip())
                 current = []
             continue
+        # Ignore lines that are only markdown/control characters
+        # (e.g. "#", "##", "---", "***", ">", "```").
+        if MARKUP_ONLY_LINE_RE.match(line):
+            if current:
+                paragraphs.append(" ".join(current).strip())
+                current = []
+            continue
         if set(line) <= {"-", "_", "*"}:
             if current:
                 paragraphs.append(" ".join(current).strip())
@@ -57,6 +75,68 @@ def _split_into_sentences(text: str) -> list[str]:
     if not sentences:
         return [text.strip()] if text.strip() else []
     return sentences
+
+
+def _tokenize(text: str) -> list[str]:
+    tokens = [t.lower() for t in TOKEN_RE.findall(text)]
+    return [t for t in tokens if t not in STOPWORDS_PT and len(t) > 1]
+
+
+def _term_freq(tokens: list[str]) -> dict[str, int]:
+    tf: dict[str, int] = {}
+    for token in tokens:
+        tf[token] = tf.get(token, 0) + 1
+    return tf
+
+
+def _cosine_similarity(a: dict[str, int], b: dict[str, int]) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(a.get(k, 0) * b.get(k, 0) for k in a.keys())
+    na = math.sqrt(sum(v * v for v in a.values()))
+    nb = math.sqrt(sum(v * v for v in b.values()))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _split_long_sentence(sentence: str, max_chars: int) -> list[str]:
+    if len(sentence) <= max_chars:
+        return [sentence]
+
+    parts = re.split(r"(?<=,)\s+", sentence)
+    blocks: list[str] = []
+    buf = ""
+
+    for part in parts:
+        candidate = f"{buf} {part}".strip() if buf else part
+        if len(candidate) <= max_chars:
+            buf = candidate
+            continue
+
+        if buf:
+            blocks.append(buf)
+            buf = ""
+
+        if len(part) <= max_chars:
+            buf = part
+            continue
+
+        words = part.split()
+        word_buf = ""
+        for word in words:
+            cand_word = f"{word_buf} {word}".strip() if word_buf else word
+            if len(cand_word) <= max_chars:
+                word_buf = cand_word
+            else:
+                if word_buf:
+                    blocks.append(word_buf)
+                word_buf = word
+        buf = word_buf
+
+    if buf:
+        blocks.append(buf)
+    return blocks
 
 
 def split_paragraph_into_blocks(paragraph_text: str, max_chars: int = 320) -> list[str]:
@@ -80,36 +160,82 @@ def split_paragraph_into_blocks(paragraph_text: str, max_chars: int = 320) -> li
             blocks.append(current)
             current = sentence
         else:
-            # sentence longer than max_chars: split by comma / words
-            parts = re.split(r"(?<=,)\s+", sentence)
-            buf = ""
-            for part in parts:
-                candidate_part = f"{buf} {part}".strip() if buf else part
-                if len(candidate_part) <= max_chars:
-                    buf = candidate_part
-                else:
-                    if buf:
-                        blocks.append(buf)
-                    if len(part) <= max_chars:
-                        buf = part
-                    else:
-                        words = part.split()
-                        word_buf = ""
-                        for word in words:
-                            cand_word = f"{word_buf} {word}".strip() if word_buf else word
-                            if len(cand_word) <= max_chars:
-                                word_buf = cand_word
-                            else:
-                                if word_buf:
-                                    blocks.append(word_buf)
-                                word_buf = word
-                        buf = word_buf
-            current = buf
+            parts = _split_long_sentence(sentence, max_chars=max_chars)
+            blocks.extend(parts[:-1])
+            current = parts[-1] if parts else ""
 
     if current:
         blocks.append(current)
 
     return blocks
+
+
+def split_paragraph_into_blocks_by_topic(
+    paragraph_text: str,
+    max_chars: int | None = None,
+    min_chars: int = 120,
+    similarity_threshold: float = 0.16,
+) -> list[str]:
+    """
+    Splits paragraph by topical cohesion between neighboring sentences.
+    No LLM: uses token-frequency cosine similarity.
+    """
+    sentences = _split_into_sentences(paragraph_text)
+    if not sentences:
+        return []
+
+    blocks: list[str] = []
+    cur_sentences: list[str] = [sentences[0]]
+    prev_tf = _term_freq(_tokenize(sentences[0]))
+
+    for sentence in sentences[1:]:
+        sent_tf = _term_freq(_tokenize(sentence))
+        sim = _cosine_similarity(prev_tf, sent_tf)
+        current_text = " ".join(cur_sentences).strip()
+        candidate = f"{current_text} {sentence}".strip()
+
+        must_split_by_size = bool(max_chars and len(candidate) > max_chars)
+        can_split_by_topic = len(current_text) >= min_chars and sim < similarity_threshold
+
+        if must_split_by_size or can_split_by_topic:
+            if current_text:
+                blocks.append(current_text)
+            cur_sentences = [sentence]
+        else:
+            cur_sentences.append(sentence)
+
+        prev_tf = sent_tf
+
+    if cur_sentences:
+        blocks.append(" ".join(cur_sentences).strip())
+
+    # Optional guardrail: split oversized blocks only if max_chars is active
+    if not max_chars:
+        return blocks
+
+    final_blocks: list[str] = []
+    for block in blocks:
+        if len(block) <= max_chars:
+            final_blocks.append(block)
+            continue
+        split_sentences = _split_into_sentences(block)
+        temp = ""
+        for sent in split_sentences:
+            cand = f"{temp} {sent}".strip() if temp else sent
+            if len(cand) <= max_chars:
+                temp = cand
+            else:
+                if temp:
+                    final_blocks.append(temp)
+                if len(sent) <= max_chars:
+                    temp = sent
+                else:
+                    parts = _split_long_sentence(sent, max_chars=max_chars)
+                    final_blocks.extend(parts[:-1])
+                    temp = parts[-1] if parts else ""
+        if temp:
+            final_blocks.append(temp)
+    return final_blocks
 
 
 def _find_spans(full_text: str, parts: list[str]) -> list[Span]:
@@ -168,14 +294,30 @@ def _estimate_duration(text: str, chars_per_second: float = 14.5) -> float:
     return round(max(1.0, len(text) / chars_per_second), 2)
 
 
-def build_manifest(script_text: str, max_visual_chars: int = 320, max_tts_chars: int = 200) -> dict:
+def build_manifest(
+    script_text: str,
+    max_visual_chars: int = 0,
+    max_tts_chars: int = 200,
+    split_mode: str = "topic",
+    topic_min_chars: int = 120,
+    topic_similarity_threshold: float = 0.16,
+) -> dict:
     script = normalize_space(script_text)
     paragraphs = split_markdown_into_paragraphs(script)
     manifest_blocks: list[dict] = []
 
     for paragraph in paragraphs:
         p_text = paragraph["text"]
-        visual_parts = split_paragraph_into_blocks(p_text, max_chars=max_visual_chars)
+        if split_mode == "topic":
+            topic_max_chars = max_visual_chars if max_visual_chars > 0 else None
+            visual_parts = split_paragraph_into_blocks_by_topic(
+                p_text,
+                max_chars=topic_max_chars,
+                min_chars=topic_min_chars,
+                similarity_threshold=topic_similarity_threshold,
+            )
+        else:
+            visual_parts = split_paragraph_into_blocks(p_text, max_chars=max_visual_chars)
         spans = _find_spans(p_text, visual_parts)
 
         for j, (part, span) in enumerate(zip(visual_parts, spans), start=1):
@@ -208,6 +350,7 @@ def build_manifest(script_text: str, max_visual_chars: int = 320, max_tts_chars:
 
     return {
         "schema_version": "1.0",
+        "split_mode": split_mode,
         "script": script,
         "paragraphs": paragraphs,
         "blocks": manifest_blocks,

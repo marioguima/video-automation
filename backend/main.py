@@ -3,9 +3,14 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from audio import add_audio
-from effects import ken_burns_filter
-from transitions import apply_overlay_transition, apply_xfade_chain
+try:
+    from .audio import add_audio
+    from .effects import ken_burns_filter
+    from .transitions import apply_overlay_transition, apply_xfade_chain
+except ImportError:
+    from audio import add_audio
+    from effects import ken_burns_filter
+    from transitions import apply_overlay_transition, apply_xfade_chain
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 

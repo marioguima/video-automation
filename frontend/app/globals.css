@@ -74,8 +74,14 @@ label {
   color: var(--muted);
 }
 
+small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 input,
 textarea,
+select,
 button {
   border: 1px solid var(--stroke);
   border-radius: 8px;
@@ -83,7 +89,8 @@ button {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   padding: 8px 9px;
   background: #fffdf8;

@@ -10,8 +10,11 @@ const DEFAULT_EXAMPLE_PATH =
 
 export default function HomePage() {
   const [script, setScript] = useState("");
-  const [maxVisualChars, setMaxVisualChars] = useState(320);
+  const [maxVisualChars, setMaxVisualChars] = useState(0);
   const [maxTtsChars, setMaxTtsChars] = useState(200);
+  const [splitMode, setSplitMode] = useState<"length" | "topic">("topic");
+  const [topicMinChars, setTopicMinChars] = useState(120);
+  const [topicSimilarityThreshold, setTopicSimilarityThreshold] = useState(0.16);
   const [examplePath, setExamplePath] = useState(DEFAULT_EXAMPLE_PATH);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +41,9 @@ export default function HomePage() {
         script,
         max_visual_chars: maxVisualChars,
         max_tts_chars: maxTtsChars,
+        split_mode: splitMode,
+        topic_min_chars: topicMinChars,
+        topic_similarity_threshold: topicSimilarityThreshold,
       });
       setResult(data);
     } catch (err) {
@@ -51,7 +57,12 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await buildManifestFromFile(examplePath);
+      const data = await buildManifestFromFile({
+        path: examplePath,
+        split_mode: splitMode,
+        topic_min_chars: topicMinChars,
+        topic_similarity_threshold: topicSimilarityThreshold,
+      });
       setScript(data.manifest.script);
       setResult(data);
     } catch (err) {
@@ -65,7 +76,7 @@ export default function HomePage() {
     <main className="page">
       <header className="topBar">
         <h1>Video Automation Studio</h1>
-        <p>Roteiro -> blocos visuais -> chunks TTS (<=200) com validação.</p>
+        <p>Roteiro {"->"} blocos visuais {"->"} chunks TTS (&lt;=200) com validação.</p>
       </header>
 
       <section className="workspace">
@@ -76,7 +87,7 @@ export default function HomePage() {
               <input
                 type="number"
                 value={maxVisualChars}
-                onChange={(e) => setMaxVisualChars(Number(e.target.value || 320))}
+                onChange={(e) => setMaxVisualChars(Number(e.target.value || 0))}
               />
             </label>
             <label>
@@ -85,6 +96,33 @@ export default function HomePage() {
                 type="number"
                 value={maxTtsChars}
                 onChange={(e) => setMaxTtsChars(Number(e.target.value || 200))}
+              />
+            </label>
+            <label>
+              Split mode
+              <select
+                value={splitMode}
+                onChange={(e) => setSplitMode(e.target.value as "length" | "topic")}
+              >
+                <option value="topic">topic</option>
+                <option value="length">length</option>
+              </select>
+            </label>
+            <label>
+              Topic min chars
+              <input
+                type="number"
+                value={topicMinChars}
+                onChange={(e) => setTopicMinChars(Number(e.target.value || 120))}
+              />
+            </label>
+            <label>
+              Topic threshold
+              <input
+                type="number"
+                step="0.01"
+                value={topicSimilarityThreshold}
+                onChange={(e) => setTopicSimilarityThreshold(Number(e.target.value || 0.16))}
               />
             </label>
           </div>
@@ -115,6 +153,10 @@ export default function HomePage() {
               placeholder="Cole aqui seu roteiro markdown/texto"
             />
           </label>
+          <small>
+            Dica: em <strong>topic</strong>, use Visual chars = <strong>0</strong> para dividir so por semelhanca.
+            O limite de 200 e aplicado apenas nos chunks de TTS.
+          </small>
         </aside>
 
         <section className="panel viewer">
