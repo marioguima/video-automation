@@ -110,6 +110,13 @@ Padrao de API no front:
 
 - `NEXT_PUBLIC_STUDIO_API=http://127.0.0.1:8765`
 
+## Variaveis de ambiente (servidor backend)
+
+Para a pipeline LLM local via Ollama:
+
+- `OLLAMA_AUTO_PULL_MISSING=1` (padrao): baixa automaticamente modelos locais ausentes.
+- `OLLAMA_AUTO_PULL_MISSING=0`: desliga auto-download de modelos.
+
 ## Exemplo: gerar manifesto via script
 
 ```powershell
@@ -151,6 +158,19 @@ out = create_video_pipeline(
 print(out)
 '@ | python -
 ```
+
+## Testes de integracao (pipeline LLM)
+
+Executar a suite de integracao da pipeline A->B->C:
+
+```powershell
+backend\.venv\Scripts\python.exe -m unittest backend.tests.integration.test_llm_pipeline_integration -v
+```
+
+Observacoes:
+
+- O teste usa um servidor fake OpenAI-compatible para validar fluxo, cache e persistencia sem custo de API.
+- Existe um teste opcional com roteiro real (`d:\channels\...`); ele e pulado automaticamente quando o arquivo nao existe.
 
 ## Como a divisao por topicos funciona (explicacao para leigo)
 

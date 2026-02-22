@@ -42,12 +42,15 @@ logs/
 
 # Runtime output (generated media/manifests)
 output/
+backend/tests/manual_video/output/
 tmp/
 temp/
 *.tmp
 
 # Local database/cache files
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 *.cache

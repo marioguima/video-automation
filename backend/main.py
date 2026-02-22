@@ -5,11 +5,11 @@ from pathlib import Path
 
 try:
     from .audio import add_audio
-    from .effects import ken_burns_filter
+    from .effects import ken_burns_filter, zoom_transition_filter
     from .transitions import apply_overlay_transition, apply_xfade_chain
 except ImportError:
     from audio import add_audio
-    from effects import ken_burns_filter
+    from effects import ken_burns_filter, zoom_transition_filter
     from transitions import apply_overlay_transition, apply_xfade_chain
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -32,12 +32,36 @@ def _render_clip(
     width: int,
     height: int,
     fps: int,
+    motion_preset: str = "B_zoom_balanced_hold",
+    zoom_transition_preset: str = "none",
 ) -> str:
     base_vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
 
     if _is_image(media):
-        kb = ken_burns_filter(duration=duration, width=width, height=height, fps=fps)
-        vf = f"{base_vf},{kb}"
+        # Build a larger virtual canvas before zoompan to reduce sub-pixel stepping.
+        super_w = width * 4
+        super_h = height * 4
+        pre_vf = (
+            f"scale={super_w}:{super_h}:force_original_aspect_ratio=increase,"
+            f"crop={super_w}:{super_h}"
+        )
+        if zoom_transition_preset != "none":
+            kb = zoom_transition_filter(
+                duration=duration,
+                width=width,
+                height=height,
+                fps=fps,
+                preset=zoom_transition_preset,
+            )
+        else:
+            kb = ken_burns_filter(
+                duration=duration,
+                width=width,
+                height=height,
+                fps=fps,
+                style=motion_preset,
+            )
+        vf = f"{pre_vf},{kb}"
         cmd = [
             "ffmpeg",
             "-y",
@@ -95,6 +119,8 @@ def create_video_pipeline(
     width: int = 1920,
     height: int = 1080,
     fps: int = 25,
+    motion_preset: str = "B_zoom_balanced_hold",
+    zoom_transition_preset: str = "none",
 ) -> str:
     """Builds a cinematic video from media, transitions and optional audio."""
     if len(media_files) == 0:
@@ -117,7 +143,16 @@ def create_video_pipeline(
 
         for i, (media, duration) in enumerate(zip(media_files, durations)):
             clip_out = temp_dir / f"clip_{i}.mp4"
-            _render_clip(media, duration, str(clip_out), width, height, fps)
+            _render_clip(
+                media,
+                duration,
+                str(clip_out),
+                width,
+                height,
+                fps,
+                motion_preset=motion_preset,
+                zoom_transition_preset=zoom_transition_preset,
+            )
             rendered_clips.append(str(clip_out))
 
         merged = temp_dir / "merged.mp4"

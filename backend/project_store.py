@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .llm.pipeline import LLMPipeline
     from .script_pipeline import build_manifest, validate_manifest
 except ImportError:
+    from llm.pipeline import LLMPipeline
     from script_pipeline import build_manifest, validate_manifest
 
 
@@ -364,3 +366,151 @@ def create_pipeline_job(video_id: int, stage: str, payload: dict[str, Any] | Non
         job_id = cur.lastrowid
         row = conn.execute("SELECT * FROM pipeline_jobs WHERE id = ?", (job_id,)).fetchone()
     return _row_to_dict(row)
+
+
+def update_pipeline_job(
+    job_id: int,
+    status: str,
+    attempts_inc: bool = False,
+    last_error: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        current = conn.execute("SELECT * FROM pipeline_jobs WHERE id = ?", (job_id,)).fetchone()
+        if not current:
+            raise ValueError(f"job_id {job_id} not found")
+        attempts = int(current["attempts"]) + (1 if attempts_inc else 0)
+        payload_json = current["payload_json"]
+        if payload is not None:
+            payload_json = json.dumps(payload, ensure_ascii=False)
+        conn.execute(
+            """
+            UPDATE pipeline_jobs
+            SET status = ?, attempts = ?, last_error = ?, payload_json = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE id = ?
+            """,
+            (status, attempts, last_error, payload_json, job_id),
+        )
+        row = conn.execute("SELECT * FROM pipeline_jobs WHERE id = ?", (job_id,)).fetchone()
+    return _row_to_dict(row)
+
+
+def list_video_blocks(video_id: int) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, block_order, block_code, source_text, analysis_json, storyboard_json, image_prompt
+            FROM video_blocks
+            WHERE video_id = ?
+            ORDER BY block_order
+            """,
+            (video_id,),
+        ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def update_video_blocks_llm(video_id: int, updates: list[dict[str, Any]]) -> None:
+    if not updates:
+        return
+    with get_connection() as conn:
+        for item in updates:
+            conn.execute(
+                """
+                UPDATE video_blocks
+                SET analysis_json = ?, storyboard_json = ?, image_prompt = ?
+                WHERE id = ? AND video_id = ?
+                """,
+                (
+                    item["analysis_json"],
+                    item["storyboard_json"],
+                    item["image_prompt"],
+                    item["id"],
+                    video_id,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE block_assets
+                SET provider = ?, model = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE video_block_id = ? AND asset_type = 'image'
+                """,
+                (
+                    item["storyboard_provider"],
+                    item["storyboard_model"],
+                    item["id"],
+                ),
+            )
+
+
+def run_llm_prompt_pipeline(
+    video_id: int,
+    style_notes: str = "",
+    reference_images: list[str] | None = None,
+    visual_dna: dict[str, Any] | None = None,
+    aesthetic_anchor: str | None = None,
+    force_reprocess: bool = False,
+    block_codes: list[str] | None = None,
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        video = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not video:
+        raise ValueError(f"video_id {video_id} not found")
+
+    blocks = list_video_blocks(video_id)
+    if not blocks:
+        raise ValueError("video has no blocks; run ingest-script first")
+
+    style_payload = None
+    if visual_dna is not None or aesthetic_anchor is not None:
+        style_payload = {
+            "aesthetic_anchor": aesthetic_anchor or "estilo editorial didatico",
+            "visual_dna": visual_dna or {},
+        }
+
+    pipeline = LLMPipeline()
+    job = create_pipeline_job(video_id=video_id, stage="llm_analysis", payload={"force_reprocess": force_reprocess})
+
+    try:
+        update_pipeline_job(job_id=job["id"], status="running")
+        result = pipeline.run_for_video_blocks(
+            blocks=blocks,
+            style_notes=style_notes,
+            reference_images=reference_images or [],
+            style_payload=style_payload,
+            force_reprocess=force_reprocess,
+            selected_block_codes=block_codes,
+        )
+        update_video_blocks_llm(video_id, result["updates"])
+        with get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE videos
+                SET status = 'llm_ready', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE id = ?
+                """,
+                (video_id,),
+            )
+        update_pipeline_job(
+            job_id=job["id"],
+            status="done",
+            payload={
+                "processed_blocks": result["meta"]["processed_blocks"],
+                "cache_hits": result["meta"]["cache_hits"],
+            },
+        )
+        return {
+            "video_id": video_id,
+            "job_id": job["id"],
+            "status": "llm_ready",
+            "processed_blocks": result["meta"]["processed_blocks"],
+            "cache_hits": result["meta"]["cache_hits"],
+        }
+    except Exception as exc:
+        update_pipeline_job(
+            job_id=job["id"],
+            status="failed",
+            attempts_inc=True,
+            last_error=str(exc),
+        )
+        raise

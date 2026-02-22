@@ -11,6 +11,7 @@ try:
         init_db,
         list_channels,
         list_videos,
+        run_llm_prompt_pipeline,
     )
     from .script_pipeline import build_manifest, load_script_file, validate_manifest
 except ImportError:
@@ -22,6 +23,7 @@ except ImportError:
         init_db,
         list_channels,
         list_videos,
+        run_llm_prompt_pipeline,
     )
     from script_pipeline import build_manifest, load_script_file, validate_manifest
 
@@ -60,6 +62,15 @@ class CreateVideoRequest(BaseModel):
     source_type: str = "external_script"
 
 
+class RunLlmPromptPipelineRequest(BaseModel):
+    style_notes: str = ""
+    reference_images: list[str] = Field(default_factory=list)
+    visual_dna: dict | None = None
+    aesthetic_anchor: str | None = None
+    force_reprocess: bool = False
+    block_codes: list[str] | None = None
+
+
 app = FastAPI(title="Video Automation API", version="1.0.0")
 
 app.add_middleware(
@@ -88,6 +99,7 @@ def root() -> dict:
             "POST /api/videos",
             "GET /api/videos/{id}",
             "POST /api/videos/{id}/ingest-script",
+            "POST /api/videos/{id}/llm/prompts",
             "POST /api/manifest",
             "POST /api/manifest/from-file",
         ],
@@ -153,6 +165,24 @@ def videos_get(video_id: int) -> dict:
 def videos_ingest_script(video_id: int) -> dict:
     try:
         return ingest_video_script(video_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/videos/{video_id}/llm/prompts")
+def videos_llm_prompts(video_id: int, payload: RunLlmPromptPipelineRequest) -> dict:
+    try:
+        return run_llm_prompt_pipeline(
+            video_id=video_id,
+            style_notes=payload.style_notes,
+            reference_images=payload.reference_images,
+            visual_dna=payload.visual_dna,
+            aesthetic_anchor=payload.aesthetic_anchor,
+            force_reprocess=payload.force_reprocess,
+            block_codes=payload.block_codes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

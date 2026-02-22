@@ -42,19 +42,30 @@ Trocar pipeline 2+3+4 separado por uma unica chamada por bloco:
 
 ### 2.2 Tarefas tecnicas
 
-- [ ] Criar `backend/llm/providers.py` (interface unica OpenAI-compatible).
-- [ ] Criar `backend/llm/router.py` (roteamento local vs cloud, fallback).
-- [ ] Criar `backend/llm/prompts.py` (templates versionados de prompts).
-- [ ] Criar `backend/llm/schemas.py` (JSON schema esperado por camada).
-- [ ] Criar `backend/llm/pipeline.py` (orquestracao A -> B -> C).
-- [ ] Persistir saidas em cache por hash de entrada (`backend/cache/*.json`).
-- [ ] Reprocessar apenas blocos alterados.
+- [x] Criar `backend/llm/providers.py` (interface unica OpenAI-compatible).
+- [x] Criar `backend/llm/router.py` (roteamento local vs cloud, fallback).
+- [x] Criar `backend/llm/prompts.py` (templates versionados de prompts).
+- [x] Criar `backend/llm/schemas.py` (JSON schema esperado por camada).
+- [x] Criar `backend/llm/pipeline.py` (orquestracao A -> B -> C).
+- [x] Persistir saidas em cache por hash de entrada (`backend/cache/*.json`).
+- [x] Reprocessar apenas blocos alterados (por `block_codes` + hash de entrada por bloco).
+
+### 2.2.1 Implementado ate agora
+
+- Pacote `backend/llm/` criado com `providers.py`, `router.py`, `prompts.py`, `schemas.py`, `pipeline.py`.
+- Orquestracao A -> B -> C integrada com fallback por etapa/modelo.
+- Cache em arquivo por hash no diretorio `backend/cache/`.
+- Reuso de resultado por hash (`input_hash`) para `analysis_json` e `storyboard_json`.
+- Atualizacao de `video_blocks.analysis_json`, `video_blocks.storyboard_json` e `video_blocks.image_prompt`.
+- Atualizacao de metadados de modelo/provider em `block_assets` (asset `image`).
+- Job tracking para etapa `llm_analysis` em `pipeline_jobs`.
+- Endpoint novo: `POST /api/videos/{video_id}/llm/prompts`.
 
 ### 2.3 Criterios de aceite
 
 - [ ] Para 1 roteiro completo, gerar JSON final sem quebra de schema.
 - [ ] Taxa de erro de parsing JSON < 2%.
-- [ ] Reexecucao parcial funcionando (bloco alterado nao invalida todos).
+- [x] Reexecucao parcial funcionando (bloco alterado nao invalida todos).
 
 ---
 
@@ -113,8 +124,17 @@ Problema atual:
 ### 4.2 Estrategias recomendadas
 
 - [ ] Selecionar 1 keyframe principal por unidade dramatica.
-- [ ] Preencher duracao com movimento (Ken Burns, crop, pan) no editor de video.
+- [~] Preencher duracao com movimento (Ken Burns, crop, pan) no editor de video.
 - [ ] Evitar gerar n imagens para texto linear sem mudanca visual real.
+
+### 4.2.1 Base de movimento (implementada para testes manuais)
+
+- `backend/effects.py` agora possui base de movimentos reutilizaveis:
+  - Zooms (`A..D`, `G`, `H`) para exploracao
+  - Pans (`E`, `F`) como base de movimento em cena
+- Runner manual de comparacao em `backend/tests/manual_video/render_test_video.py`
+- Assets locais de smoke test em `backend/tests/manual_video/assets/` para iteracao rapida
+
 
 ### 4.3 Criterios de aceite
 
@@ -132,8 +152,28 @@ Status: `TODO` (TTS base ja resolvido, falta acoplamento final robusto)
 
 - [ ] Integrar retorno real de duracao da API de TTS no manifesto.
 - [ ] Mapear cenas -> chunks de audio -> timeline final.
-- [ ] Definir regra de transicao por NIV/intensidade.
+- [~] Definir regra de transicao por NIV/intensidade.
 - [ ] Inserir overlays/transicoes somente em cortes de maior impacto.
+
+### 5.1.1 Base de transicoes (parcial implementada)
+
+- Transicao zoom in/out de referencia (`T6_inertial_ref`) implementada em `backend/effects.py`
+  - blur de borda (edge-only) na entrada
+  - envelope de entrada/saida com timing por frames (15f blur / ~46f in-out)
+- Transicoes entre imagens (`xfade`) com aliases explicitos:
+  - `fade`
+  - `flash_white` (`fadewhite`)
+  - `flash_black` (`fadeblack`)
+- Transicao premium em teste manual (sem ghosting A+B):
+  - `XF3_flash_white_occluded_5f` (custom `filter_complex`, centrada no corte, 5 frames)
+  - `XF3b_flash_white_occluded_6f` (custom `filter_complex`, centrada no corte, 6 frames)
+  - `XF3b_flash_black_occluded_6f` (mesma logica da `XF3b` white, mudando apenas a cor)
+  - Observacao validada em teste visual: envelope percebido proximo de `1 opacidade -> 3 frames de flash -> 1 opacidade`
+- Comparacao manual suportada no runner:
+  - `--transition T6`
+  - `--xfade flash_white|flash_black|fade`
+  - `--xfade all_flash_premium` (compara variantes premium white)
+  - `--xfade all_flash_premium_wb` (compara premium white vs black)
 
 ### 5.2 Criterios de aceite
 
