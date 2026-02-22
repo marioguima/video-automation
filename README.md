@@ -22,7 +22,9 @@ npm --version
 
 ## Estrutura
 
-- `backend/studio_server.py`: API HTTP (`/api/manifest`, `/api/manifest/from-file`)
+- `backend/studio_server.py`: runner do servidor FastAPI (uvicorn)
+- `backend/api.py`: rotas HTTP da API
+- `backend/project_store.py`: persistencia SQLite (canal, video, blocos, assets, jobs)
 - `backend/script_pipeline.py`: parser + divisao em blocos + validacao
 - `backend/main.py`: montagem de video (xfade, overlays opcionais, audio)
 - `backend/effects.py`: Ken Burns
@@ -80,8 +82,16 @@ python backend/studio_server.py 127.0.0.1 8765 --reload
 Endpoints:
 
 - `GET /api/health`
+- `GET /api/channels`
+- `POST /api/channels`
+- `GET /api/videos?channel_id=1`
+- `POST /api/videos`
+- `GET /api/videos/{id}`
+- `POST /api/videos/{id}/ingest-script`
 - `POST /api/manifest`
 - `POST /api/manifest/from-file`
+- `GET /docs` (Swagger UI)
+- `GET /redoc`
 
 ### 2) Frontend Next.js
 
@@ -187,3 +197,12 @@ Guia tecnico detalhado:
   - rode em outra porta, ex.: `python backend/studio_server.py 127.0.0.1 8766`
 - `ffmpeg` nao encontrado:
   - instale FFmpeg e confirme no `PATH`.
+
+Arquitetura de dados/persistencia:
+
+- `backend/DATA_ARCHITECTURE.md`
+
+Nota sobre ORM:
+
+- Nesta fase, o backend usa `sqlite3` nativo para manter stack Python simples.
+- Prisma pode ser avaliado depois se houver necessidade forte de ecossistema Node/TypeScript no backend.
