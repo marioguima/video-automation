@@ -1,0 +1,126 @@
+{
+  "9": {
+    "inputs": {
+      "filename_prefix": "VizLec/2026-02-13_z_image_turbo_Q8_0_gguf",
+      "images": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "39": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "40": {
+    "inputs": {
+      "width": 1280,
+      "height": 1280,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "41": {
+    "inputs": {
+      "conditioning": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "42": {
+    "inputs": {
+      "samples": [
+        "43",
+        0
+      ],
+      "vae": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "43": {
+    "inputs": {
+      "seed": 1004844899336665,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "46",
+        0
+      ],
+      "positive": [
+        "44",
+        0
+      ],
+      "negative": [
+        "41",
+        0
+      ],
+      "latent_image": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "44": {
+    "inputs": {
+      "text": "A dynamic and energetic photo of shakira, performing on stage in Las Vegas. She was captured in motion—hair blowing in the wind, guitar raised as she intensely surrenders to the moment. Bright stage lights surround her. In the background, the Las Vegas skyline is clearly recognizable: the illuminated replica of the Eiffel Tower, flashy neon signs, and gleaming hotel facades. The night sky reflects the vibrant colors of the city, giving the photo a kinetic, electrifying, live-show feel.",
+      "clip": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Input Prompt"
+    }
+  },
+  "46": {
+    "inputs": {
+      "unet_name": "z-image\\z_image_turbo-Q8_0.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "47": {
+    "inputs": {
+      "clip_name": "qwen\\qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  }
+}

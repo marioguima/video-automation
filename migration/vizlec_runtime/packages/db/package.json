@@ -1,0 +1,21 @@
+{
+  "name": "@vizlec/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.0.0",
+    "@prisma/client": "^7.3.0",
+    "better-sqlite3": "^11.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "prisma": "^7.3.0"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  }
+}

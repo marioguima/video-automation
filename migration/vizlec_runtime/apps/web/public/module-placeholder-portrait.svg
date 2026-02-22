@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1600" viewBox="0 0 900 1600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2436"/>
+      <stop offset="1" stop-color="#101827"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#25314a"/>
+      <stop offset="1" stop-color="#1c273b"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1600" fill="url(#bg)"/>
+  <rect x="80" y="120" width="740" height="520" rx="32" fill="url(#panel)" stroke="#2b3852" stroke-width="2"/>
+  <g fill="#9fb0cc" opacity="0.35">
+    <circle cx="720" cy="260" r="120"/>
+    <circle cx="220" cy="560" r="160"/>
+  </g>
+  <g fill="#d8e0f0" opacity="0.7">
+    <rect x="140" y="220" width="320" height="18" rx="9"/>
+    <rect x="140" y="260" width="420" height="14" rx="7" opacity="0.6"/>
+    <rect x="140" y="300" width="360" height="14" rx="7" opacity="0.6"/>
+  </g>
+  <text x="140" y="820" font-family="Inter, Arial, sans-serif" font-size="40" fill="#e8eef9" font-weight="600">Module Cover</text>
+  <text x="140" y="870" font-family="Inter, Arial, sans-serif" font-size="22" fill="#9fb0cc">9:16 placeholder</text>
+</svg>

@@ -1,0 +1,1 @@
+-- no-op: Lesson.order and indexes are already provided by prior migration.

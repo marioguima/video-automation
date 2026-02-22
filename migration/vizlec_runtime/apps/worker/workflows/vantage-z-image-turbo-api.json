@@ -1,0 +1,126 @@
+{
+  "9": {
+    "inputs": {
+      "filename_prefix": "z-image/i",
+      "images": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "39": {
+    "inputs": {
+      "conditioning": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "40": {
+    "inputs": {
+      "samples": [
+        "41",
+        0
+      ],
+      "vae": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "41": {
+    "inputs": {
+      "seed": 723000840185489,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "48",
+        0
+      ],
+      "positive": [
+        "42",
+        0
+      ],
+      "negative": [
+        "39",
+        0
+      ],
+      "latent_image": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "42": {
+    "inputs": {
+      "text": "A movie poster for the fictional English-language film *The Shape of Forever*. The scene is set in a rustic 19th-century garden. In the center of the image, a middle-aged man (played by Bruce Willis) stands behind a wooden table, wearing a white shirt, black waistcoat, watching a woman while grilling a steak on an outdoor grill. To his right, a dark-haired woman with a high bun (played by Demi Moore) leans against the table, smiling gently at him. She wears a light-colored shirt and a long white and blue skirt. Besides the grill with chopped onions and cabbage, there is a white ceramic plate, fresh herbs, and a bunch of black olives on a wooden crate to the left. The background is a serene green garden with trees and flower beds. The poster contains a large amount of text. The top left corner features the words \"VANTAGE FILMS PRESENTS\" in white sans-serif font, below which are \"DEMI MOORE\" and \"ACADEMY AWARD® WINNER\". The top right corner reads \"BRUCE WILLIS\" and \"GOLDEN GLOBE® AWARD WINNER\". At the top center is the Sundance Film Festival laurel wreath logo, below which reads \"SUNDANCE FILM FESTIVAL GRAND JURY PRIZE 2025\". The main title, \"THE SHAPE OF FOREVER\", is prominently displayed in large white serif font in the lower half. Below the title is \"A FILM BY Vantage with AI\". The bottom area lists the full cast and crew in small white text, including \"SCREENPLAY BY FRANCIS FORD COPPOLA\", \"DIRECTED BY JAMES CAMERON\", and logos of numerous production companies such as Artisan Films, Riverstone Pictures, and Heritage Media. The overall style is realistic, employing a warm and soft lighting scheme to create an intimate atmosphere. The color palette is dominated by earth tones such as brown, beige, and soft green. Both actors' bodies are severed at the waist.",
+      "clip": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Input Prompt"
+    }
+  },
+  "44": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "45": {
+    "inputs": {
+      "width": 1024,
+      "height": 576,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "46": {
+    "inputs": {
+      "clip_name": "qwen\\qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "48": {
+    "inputs": {
+      "unet_name": "z-image\\z_image_turbo-Q4_K_M.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  }
+}

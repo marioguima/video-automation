@@ -1,0 +1,1 @@
+-- no-op: superseded by later course table redefinition migration chain.

@@ -1,6 +1,6 @@
 import { ManifestResponse } from "@/lib/types";
 
-const BASE_URL = process.env.NEXT_PUBLIC_STUDIO_API ?? "http://127.0.0.1:8765";
+const BASE_URL = process.env.NEXT_PUBLIC_STUDIO_API ?? "http://127.0.0.1:8001";
 
 export async function buildManifest(payload: {
   script: string;

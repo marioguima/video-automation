@@ -8,6 +8,61 @@ Baseado na conversa em `chat.md` e no estado atual do projeto.
 2. Gerar prompts de imagem por bloco via LLM.
 3. Gerar audio por bloco/chunk via API de TTS.
 4. Montar video final com timing correto, transicoes e coesao visual.
+5. Permitir revisao humana (blocos, texto TTS, audio, transicoes) com persistencia total.
+
+---
+
+## MVP (Prioridade Atual) - "Roteiro -> Video Local"
+
+Status: `IN_PROGRESS`
+
+Escopo fechado do MVP (local-first):
+
+- [x] Flash transitions white/black premium (base visual aprovada em teste manual).
+- [ ] Efeito de transicao "luzes coloridas" (light leaks / color flash overlay).
+- [ ] Extrair timestamps do audio para legenda (word/segment timing).
+- [ ] Aplicar legenda estatica no video final (burned-in subtitles).
+- [ ] Selecionar musica de fundo + ajustar volume + persistir configuracao.
+- [ ] Gerar video final respeitando mix de volume TTS + BGM.
+- [ ] Remover dependencia de `on-screen` do fluxo atual (legenda como texto principal em tela).
+
+### MVP Frontend (fluxo minimo)
+
+- [ ] Cadastro de canal -> videos -> roteiro.
+- [ ] Tela de roteiro com revisao de blocos:
+  - [ ] unir blocos
+  - [ ] separar bloco (criar novo bloco)
+  - [ ] salvar alteracoes na base
+- [ ] Acao por bloco para gerar/regerar prompt de imagem.
+- [ ] Revisao por bloco do texto de TTS (separado do texto exibido em tela).
+- [ ] Fluxo de audio/imagem/video baseado em legenda (sem exigir `on-screen`).
+- [ ] Gerar audio via API de TTS por bloco/lote.
+- [ ] Listar audios gerados e reproduzir no frontend.
+- [ ] Revisao de audio gerado com marcação para regerar.
+- [ ] Persistir estados de revisao (texto editado, flags de regerar, voice/params).
+
+### MVP Backend/Timeline (fluxo minimo)
+
+- [ ] Persistir "texto exibido" vs "texto narrado (TTS)" por bloco (campos separados e versionados).
+- [ ] Remover validacoes que bloqueiam o fluxo por ausencia de `on-screen`.
+- [ ] Persistir assets e metadados de audio por bloco (duracao real, status, revisao).
+- [ ] Pipeline de legendas:
+  - [ ] gerar arquivo de timestamps (SRT/VTT ou JSON de timings)
+  - [ ] gerar estilo de legenda fixa
+  - [ ] burn-in com ffmpeg
+- [ ] Pipeline de musica de fundo:
+  - [ ] asset de BGM por video
+  - [ ] ganho/volume configuravel
+  - [ ] mix final com TTS
+- [ ] Render final via job persistido (retomavel), nao apenas script manual.
+
+### Criterios de aceite do MVP
+
+- [ ] Um roteiro completo pode ser processado localmente ate video final.
+- [ ] Usuario pode interromper e voltar depois sem perder revisoes (DB).
+- [ ] Video final sai com: audio TTS, transicao, legenda estatica, musica de fundo.
+- [ ] Video final do MVP e gerado sem `on-screen` (titulos/bullets), usando legenda como camada principal.
+- [ ] Fluxo principal roda sem depender de worker distribuido.
 
 ---
 
@@ -152,6 +207,10 @@ Status: `TODO` (TTS base ja resolvido, falta acoplamento final robusto)
 
 - [ ] Integrar retorno real de duracao da API de TTS no manifesto.
 - [ ] Mapear cenas -> chunks de audio -> timeline final.
+- [ ] Extrair timestamps de audio para legenda (SRT/VTT/JSON).
+- [ ] Burn-in de legenda estatica no render final.
+- [ ] Mixar musica de fundo com TTS (ganho configuravel por video).
+- [ ] Reintroduzir `on-screen` como recurso opcional por tipo de video (ex.: educativo usa bullets; narrativo usa apenas legenda).
 - [~] Definir regra de transicao por NIV/intensidade.
 - [ ] Inserir overlays/transicoes somente em cortes de maior impacto.
 
@@ -179,6 +238,8 @@ Status: `TODO` (TTS base ja resolvido, falta acoplamento final robusto)
 
 - [ ] Timeline final sem gaps de audio/video.
 - [ ] Duracao total bate com soma de audios (+ transicoes).
+- [ ] Legendas sincronizadas com audio (erro visual aceitavel).
+- [ ] Mix TTS + musica respeita volumes configurados.
 - [ ] Video final reproduzivel de ponta a ponta sem ajuste manual.
 
 ---
@@ -204,11 +265,82 @@ Status: `TODO`
 
 ## Ordem de implementacao (pratica)
 
-1. Finalizar Fase 2 (motor LLM por bloco + schemas + cache).
-2. Implementar Fase 3 (router local/cloud).
-3. Atacar Fase 4 (reducao de imagens, maior ganho de tempo).
-4. Consolidar Fase 5 (timeline final automatica).
-5. Fechar Fase 6 (robustez e manutencao).
+1. Fechar MVP local-first (legenda + TTS revisavel + mix BGM + render final persistido).
+2. Finalizar criterios de aceite da Fase 2 (LLM por bloco com metricas reais).
+3. Consolidar Fase 5 (timeline final automatica integrada ao backend/API).
+4. Atacar Fase 4 (reducao de imagens, maior ganho de tempo).
+5. Fechar Fase 3/6 de operacao (fila/rate-limit/logs/observabilidade).
+
+---
+
+## Reaproveitamento do projeto `vizlec` (analise inicial)
+
+Status: `ANALISADO (alto potencial de reaproveitamento)`
+
+Objetivo desta analise:
+
+- Reaproveitar frontend e fluxo de revisao de blocos/audio ja maduros.
+- Adaptar dominio de `course -> module -> lesson` para `channel -> video`.
+- Manter foco local-first (sem exigir worker distribuido no MVP).
+
+### O que ja existe no `vizlec` e pode ser reaproveitado
+
+- Frontend avancado de gestao e editor de blocos (`apps/web/src/components/Editor.tsx`):
+  - revisao de blocos
+  - edicao de `ttsText` separado do texto original
+  - player/lista de audios
+  - fluxo de review de audio com marcacao para regerar
+  - edicao de prompt de imagem por bloco
+  - monitoramento de jobs e estados de geracao
+- API Fastify madura (`apps/api/src/index.ts`) com endpoints para:
+  - segmentacao de blocos
+  - TTS por bloco/lote
+  - imagem por bloco/lote
+  - assets por bloco (audio/imagem)
+  - jobs e eventos websocket
+- Schema Prisma rico (`packages/db/prisma/schema.prisma`) com entidades reutilizaveis:
+  - `LessonVersion`, `Block`, `Asset`, `Job`
+  - campos relevantes ja existentes: `sourceText`, `ttsText`, `audioDurationS`, `imagePromptJson`
+
+### O que precisa adaptar (vizlec -> video-automation)
+
+- Dominio:
+  - `Course` -> `Channel`
+  - `Lesson`/`LessonVersion` -> `Video`/`VideoVersion` (ou `Video` + `VideoBlocks`)
+  - remover acoplamentos de "modulos" no MVP (opcional futuro)
+- Fluxo visual:
+  - manter melhorias cinematicas daqui (`effects.py`, `transitions.py`, ffmpeg pipeline)
+  - substituir render "slide/aula" do vizlec pela pipeline de video cinematografico deste projeto
+- Infra:
+  - manter local-first no MVP
+  - worker distribuido/websocket do vizlec vira opcional (nao prioridade)
+
+### Estrategia de migracao recomendada (pratica)
+
+- [x] Clonar/copiar `G:\\tool\\vizlec` para pasta segura em `migration/vizlec_runtime` (sem mexer no original).
+- [x] Trazer primeiro o "kernel" funcional do `vizlec` (auth/workspace + blocos/assets/jobs + editor), mesmo com dominio antigo temporariamente.
+- [~] Rodar o kernel reutilizado localmente (sem focar em worker distribuido no MVP).
+  - [x] `@vizlec/api` da copia sobe localmente (porta `4110`) com `/health` respondendo.
+  - [x] `@vizlec/web` da copia sobe localmente (porta `4273`) com Vite.
+  - [ ] Validar fluxo funcional pela UI (login/workspace/curso/aula) dentro da copia.
+- [ ] Extrair mapa de componentes reutilizaveis do frontend (`Editor`, players, review de audio, job UI).
+- [ ] Extrair contrato minimo de API para o MVP local (`channel/video/blocks/audio/image/render`).
+- [ ] Implementar camada de compatibilidade de dominio (`lesson` -> `video`) para acelerar port.
+- [ ] Recontextualizar frontend/rotas para `channel -> video` (segunda etapa, apos fluxo base funcionando).
+- [ ] Decidir abordagem:
+  - [ ] A) portar frontend do vizlec para este backend
+  - [ ] B) portar partes do backend vizlec (schema/API) para este projeto
+  - [ ] C) hibrido (recomendado): reaproveitar UI/UX do vizlec + manter motor ffmpeg/transicoes daqui
+
+### Decisao arquitetural atual (MVP)
+
+- Foco em validar estrutura e fluxo local.
+- Nao priorizar agora distribuicao/control plane/worker instalado.
+- Nao perder o ganho visual deste projeto (transicoes, motion, edicao automatizada cinematografica).
+- Manter base de usuarios/autenticacao/multitenancy do `vizlec` (ja funciona e nao precisa ser simplificada).
+- "Local-first" significa execucao local do processamento, nao remocao de auth/workspace.
+- Legenda sera a camada padrao de texto em tela no MVP.
+- `on-screen` (titulos/bullets) fica fora do MVP e podera voltar depois como recurso opcional.
 
 ---
 
@@ -218,3 +350,6 @@ Status: `TODO`
 - Limite de 200 chars apenas no TTS.
 - Front separado (`frontend/`) e backend separado (`backend/`).
 - Hot-reload no backend via `watchfiles`.
+- MVP local-first antes de retomar arquitetura distribuida.
+- Reaproveitamento do `vizlec` sera guiado por compatibilidade de dominio e qualidade de UX do editor de blocos.
+- Auth + multitenancy existentes no `vizlec` serao preservados como base da nova ferramenta.

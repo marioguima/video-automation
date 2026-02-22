@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Job" ADD COLUMN "canceledAt" DATETIME;
+ALTER TABLE "Job" ADD COLUMN "clientId" TEXT;
+ALTER TABLE "Job" ADD COLUMN "leaseExpiresAt" DATETIME;
+ALTER TABLE "Job" ADD COLUMN "requestId" TEXT;

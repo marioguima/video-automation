@@ -25,6 +25,21 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    names: set[str] = set()
+    for row in rows:
+        # pragma table_info columns: cid, name, type, notnull, dflt_value, pk
+        names.add(str(row[1]))
+    return names
+
+
+def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, ddl_suffix: str) -> None:
+    if column_name in _table_columns(conn, table_name):
+        return
+    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_suffix}")
+
+
 def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(
@@ -117,6 +132,11 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_jobs_video_stage ON pipeline_jobs(video_id, stage);
             """
         )
+        # Incremental columns for migration/compat support.
+        _ensure_column(conn, "video_blocks", "tts_text", "TEXT")
+        _ensure_column(conn, "video_blocks", "subtitle_json", "TEXT")
+        _ensure_column(conn, "videos", "bgm_file_path", "TEXT")
+        _ensure_column(conn, "videos", "bgm_volume", "REAL")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -260,9 +280,9 @@ def ingest_video_script(video_id: int) -> dict[str, Any]:
                 """
                 INSERT INTO video_blocks(
                     video_id, block_order, paragraph_id, block_code, source_text,
-                    span_start, span_end, image_prompt, estimated_duration_sec, tts_chunks_json
+                    span_start, span_end, image_prompt, estimated_duration_sec, tts_chunks_json, tts_text
                 )
-                VALUES(?,?,?,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     video_id,
@@ -275,6 +295,7 @@ def ingest_video_script(video_id: int) -> dict[str, Any]:
                     block["image_prompt"],
                     block["estimated_duration_sec"],
                     json.dumps(block["tts_chunks"], ensure_ascii=False),
+                    block["source_text"],
                 ),
             )
             block_db_id = cur.lastrowid
@@ -408,6 +429,204 @@ def list_video_blocks(video_id: int) -> list[dict[str, Any]]:
             (video_id,),
         ).fetchall()
     return [_row_to_dict(row) for row in rows]
+
+
+def list_video_versions_compat(video_id: int) -> list[dict[str, Any]]:
+    """Compatibility shape for the imported vizlec editor (`/videos/{id}/versions`)."""
+    with get_connection() as conn:
+        video = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not video:
+        raise ValueError(f"video_id {video_id} not found")
+    return [
+        {
+            "id": str(video_id),
+            "lessonId": str(video_id),  # compat field name expected by editor snapshot
+            "speechRateWps": 2.5,
+            "preferredVoiceId": None,
+            "preferredTemplateId": None,
+            "createdAt": str(video["created_at"]),
+        }
+    ]
+
+
+def list_video_blocks_compat(video_id: int) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                b.id,
+                b.video_id,
+                b.block_order,
+                b.source_text,
+                COALESCE(b.tts_text, b.source_text) AS tts_text,
+                b.image_prompt,
+                b.analysis_json,
+                b.storyboard_json
+            FROM video_blocks b
+            WHERE b.video_id = ?
+            ORDER BY b.block_order
+            """,
+            (video_id,),
+        ).fetchall()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        d = _row_to_dict(row)
+        image_prompt_json = None
+        if str(d.get("image_prompt", "")).strip():
+            image_prompt_json = json.dumps(
+                {
+                    "block_prompt": d["image_prompt"],
+                    "avoid": "",
+                    "seed_hint": "",
+                    "seed": 0,
+                },
+                ensure_ascii=False,
+            )
+        items.append(
+            {
+                "id": str(d["id"]),
+                "lessonVersionId": str(d["video_id"]),  # compat field name
+                "index": int(d["block_order"]),
+                "sourceText": d["source_text"],
+                "ttsText": d["tts_text"],
+                "onScreenJson": None,  # on-screen removed from MVP
+                "imagePromptJson": image_prompt_json,
+                "status": "ready" if str(d.get("image_prompt", "")).strip() else "editing",
+                "segmentError": None,
+            }
+        )
+    return items
+
+
+def patch_video_block_compat(
+    block_id: int,
+    tts_text: str | None = None,
+    image_prompt_payload: dict[str, Any] | None = None,
+    on_screen_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        current = conn.execute("SELECT * FROM video_blocks WHERE id = ?", (block_id,)).fetchone()
+        if not current:
+            raise ValueError(f"block_id {block_id} not found")
+        if tts_text is not None:
+            conn.execute(
+                """
+                UPDATE video_blocks
+                SET tts_text = ?, created_at = created_at
+                WHERE id = ?
+                """,
+                (tts_text.strip(), block_id),
+            )
+        if image_prompt_payload is not None:
+            block_prompt = str(image_prompt_payload.get("block_prompt", "")).strip()
+            conn.execute(
+                """
+                UPDATE video_blocks
+                SET image_prompt = ?
+                WHERE id = ?
+                """,
+                (block_prompt, block_id),
+            )
+        # On-screen is intentionally ignored in the MVP migration path.
+        _ = on_screen_payload
+        row = conn.execute(
+            """
+            SELECT id, video_id, block_order, source_text, COALESCE(tts_text, source_text) AS tts_text, image_prompt
+            FROM video_blocks WHERE id = ?
+            """,
+            (block_id,),
+        ).fetchone()
+    result = _row_to_dict(row)
+    return {
+        "id": str(result["id"]),
+        "lessonVersionId": str(result["video_id"]),
+        "index": int(result["block_order"]),
+        "sourceText": result["source_text"],
+        "ttsText": result["tts_text"],
+        "onScreenJson": None,
+        "imagePromptJson": (
+            json.dumps({"block_prompt": result["image_prompt"]}, ensure_ascii=False)
+            if str(result.get("image_prompt", "")).strip()
+            else None
+        ),
+        "status": "ready" if str(result.get("image_prompt", "")).strip() else "editing",
+        "segmentError": None,
+    }
+
+
+def list_video_audios_compat(video_id: int) -> dict[str, Any]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT b.id AS block_id, a.file_path, a.status
+            FROM video_blocks b
+            LEFT JOIN block_assets a
+              ON a.video_block_id = b.id AND a.asset_type = 'audio'
+            WHERE b.video_id = ?
+            ORDER BY b.block_order
+            """,
+            (video_id,),
+        ).fetchall()
+    return {
+        "blocks": [
+            {
+                "blockId": str(r["block_id"]),
+                "url": str(r["file_path"]) if r["file_path"] and str(r["status"]) == "done" else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+def list_video_images_compat(video_id: int) -> dict[str, Any]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT b.id AS block_id, a.file_path, a.status
+            FROM video_blocks b
+            LEFT JOIN block_assets a
+              ON a.video_block_id = b.id AND a.asset_type = 'image'
+            WHERE b.video_id = ?
+            ORDER BY b.block_order
+            """,
+            (video_id,),
+        ).fetchall()
+    return {
+        "blocks": [
+            {
+                "blockId": str(r["block_id"]),
+                "url": str(r["file_path"]) if r["file_path"] and str(r["status"]) == "done" else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+def list_video_slides_compat(video_id: int, template_id: str | None = None) -> dict[str, Any]:
+    _ = template_id
+    blocks = list_video_blocks_compat(video_id)
+    return {"blocks": [{"blockId": item["id"], "exists": False} for item in blocks]}
+
+
+def get_job_state_compat(video_id: int) -> dict[str, Any]:
+    _ = video_id
+    idle = {
+        "active": False,
+        "jobId": None,
+        "status": "idle",
+        "phase": "idle",
+        "current": 0,
+        "total": 0,
+    }
+    return {
+        "finalVideoReady": False,
+        "segment": dict(idle),
+        "tts": dict(idle),
+        "image": dict(idle),
+        "slides": dict(idle),
+        "finalVideo": dict(idle),
+        "blockJobs": {"segment": [], "tts": [], "image": []},
+    }
 
 
 def update_video_blocks_llm(video_id: int, updates: list[dict[str, Any]]) -> None:

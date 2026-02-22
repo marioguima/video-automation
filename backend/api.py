@@ -1,6 +1,9 @@
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import time
 
 try:
     from .project_store import (
@@ -9,8 +12,15 @@ try:
         get_video,
         ingest_video_script,
         init_db,
+        get_job_state_compat,
+        list_video_audios_compat,
         list_channels,
+        list_video_blocks_compat,
+        list_video_images_compat,
+        list_video_slides_compat,
+        list_video_versions_compat,
         list_videos,
+        patch_video_block_compat,
         run_llm_prompt_pipeline,
     )
     from .script_pipeline import build_manifest, load_script_file, validate_manifest
@@ -21,8 +31,15 @@ except ImportError:
         get_video,
         ingest_video_script,
         init_db,
+        get_job_state_compat,
+        list_video_audios_compat,
         list_channels,
+        list_video_blocks_compat,
+        list_video_images_compat,
+        list_video_slides_compat,
+        list_video_versions_compat,
         list_videos,
+        patch_video_block_compat,
         run_llm_prompt_pipeline,
     )
     from script_pipeline import build_manifest, load_script_file, validate_manifest
@@ -71,6 +88,27 @@ class RunLlmPromptPipelineRequest(BaseModel):
     block_codes: list[str] | None = None
 
 
+class CompatBlockPatchRequest(BaseModel):
+    ttsText: str | None = None
+    onScreen: dict | None = None
+    imagePrompt: dict | None = None
+
+
+class CompatJobCreateResponse(BaseModel):
+    id: str
+    status: str
+
+
+_COMPAT_JOB_STORE: dict[str, dict] = {}
+
+
+def _compat_job(status: str = "succeeded", **extra: object) -> dict:
+    job_id = f"compat-{int(time.time() * 1000)}"
+    payload = {"id": job_id, "status": status, **extra}
+    _COMPAT_JOB_STORE[job_id] = payload
+    return payload
+
+
 app = FastAPI(title="Video Automation API", version="1.0.0")
 
 app.add_middleware(
@@ -100,6 +138,9 @@ def root() -> dict:
             "GET /api/videos/{id}",
             "POST /api/videos/{id}/ingest-script",
             "POST /api/videos/{id}/llm/prompts",
+            "GET /api/videos/{id}/versions",
+            "GET /api/video-versions/{id}/blocks",
+            "PATCH /api/blocks/{id}",
             "POST /api/manifest",
             "POST /api/manifest/from-file",
         ],
@@ -185,6 +226,231 @@ def videos_llm_prompts(video_id: int, payload: RunLlmPromptPipelineRequest) -> d
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/videos/{video_id}/versions")
+def videos_versions(video_id: int) -> list[dict]:
+    try:
+        return list_video_versions_compat(video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/video-versions/{version_id}/blocks")
+def video_versions_blocks(version_id: int) -> list[dict]:
+    try:
+        return list_video_blocks_compat(version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/video-versions/{version_id}/slides")
+def video_versions_slides(version_id: int, templateId: str | None = Query(default=None)) -> dict:
+    try:
+        return list_video_slides_compat(version_id, template_id=templateId)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/video-versions/{version_id}/audios")
+def video_versions_audios(version_id: int) -> dict:
+    try:
+        return list_video_audios_compat(version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/video-versions/{version_id}/images")
+def video_versions_images(version_id: int) -> dict:
+    try:
+        return list_video_images_compat(version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/video-versions/{version_id}/job-state")
+def video_versions_job_state(version_id: int) -> dict:
+    try:
+        return get_job_state_compat(version_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.patch("/api/blocks/{block_id}")
+def blocks_patch(block_id: int, payload: CompatBlockPatchRequest) -> dict:
+    try:
+        return patch_video_block_compat(
+            block_id=block_id,
+            tts_text=payload.ttsText,
+            image_prompt_payload=payload.imagePrompt,
+            on_screen_payload=payload.onScreen,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/tts/voices")
+def tts_voices() -> dict:
+    # Minimal compat response for migrated editor while TTS integration is being wired.
+    return {"voices": []}
+
+
+@app.get("/api/integrations/xtts/health")
+def xtts_health() -> dict:
+    # Do not block the migration editor on XTTS health during kernel port.
+    return {"ok": True}
+
+
+@app.get("/api/tts/provider")
+def tts_provider() -> dict:
+    return {"provider": "xtts"}
+
+
+@app.get("/api/slide-templates")
+def slide_templates() -> list[dict]:
+    # Minimal list for migrated editor; slides are disabled in MVP migration mode.
+    return [
+        {"id": "subtitle-only", "label": "Subtitle Only (MVP)", "kind": "text"},
+    ]
+
+
+@app.get("/api/settings")
+def settings() -> dict:
+    return {"tts": {"defaultVoiceId": None}}
+
+
+@app.patch("/api/video-versions/{version_id}/preferences")
+def video_version_preferences(version_id: int, payload: dict) -> dict:
+    _ = (version_id, payload)
+    return {
+        "id": str(version_id),
+        "speechRateWps": 2.5,
+        "preferredVoiceId": payload.get("preferredVoiceId"),
+        "preferredTemplateId": payload.get("preferredTemplateId"),
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+def jobs_get(job_id: str) -> dict:
+    return _COMPAT_JOB_STORE.get(job_id, {"id": job_id, "status": "succeeded"})
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def jobs_cancel(job_id: str, payload: dict | None = None) -> dict:
+    _ = payload
+    current = _COMPAT_JOB_STORE.get(job_id, {"id": job_id})
+    current["status"] = "canceled"
+    _COMPAT_JOB_STORE[job_id] = current
+    return {"ok": True, "id": job_id, "status": "canceled"}
+
+
+@app.post("/api/video-versions/{version_id}/segment")
+def video_versions_segment(version_id: int, payload: dict | None = None) -> dict:
+    _ = payload
+    # Real action: reuse current ingest pipeline to create/update blocks.
+    ingest_video_script(version_id)
+    return _compat_job(status="succeeded")
+
+
+@app.post("/api/blocks/{block_id}/segment/retry")
+def blocks_segment_retry(block_id: int, payload: dict | None = None) -> dict:
+    _ = (block_id, payload)
+    # Stub for imported editor flow; real single-block segment regeneration comes later.
+    return _compat_job(status="succeeded")
+
+
+@app.post("/api/video-versions/{version_id}/tts")
+def video_versions_tts(version_id: int, payload: dict | None = None) -> dict:
+    _ = (version_id, payload)
+    return _compat_job(status="pending")
+
+
+@app.post("/api/blocks/{block_id}/tts")
+def blocks_tts(block_id: int, payload: dict | None = None) -> dict:
+    _ = (block_id, payload)
+    return _compat_job(status="pending")
+
+
+@app.post("/api/video-versions/{version_id}/images")
+def video_versions_images_generate(version_id: int, payload: dict | None = None) -> dict:
+    _ = (version_id, payload)
+    return _compat_job(status="pending")
+
+
+@app.post("/api/blocks/{block_id}/image")
+def blocks_image(block_id: int, payload: dict | None = None) -> dict:
+    _ = (block_id, payload)
+    return _compat_job(status="pending")
+
+
+@app.post("/api/video-versions/{version_id}/slides")
+def video_versions_slides_generate(version_id: int, payload: dict | None = None) -> dict:
+    _ = (version_id, payload)
+    return _compat_job(status="pending")
+
+
+@app.post("/api/video-versions/{version_id}/final-video")
+def video_versions_final_video_generate(version_id: int, payload: dict | None = None) -> dict:
+    _ = (version_id, payload)
+    return _compat_job(status="pending")
+
+
+@app.get("/api/blocks/{block_id}/audio/raw")
+def blocks_audio_raw(block_id: int):
+    try:
+        for video in list_videos():
+            compat = list_video_audios_compat(int(video["id"]))
+            for item in compat["blocks"]:
+                if item["blockId"] != str(block_id) or not item.get("url"):
+                    continue
+                path = Path(str(item["url"]))
+                if not path.exists():
+                    raise HTTPException(status_code=404, detail="audio file missing on disk")
+                return FileResponse(path)
+        raise HTTPException(status_code=404, detail="audio not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/blocks/{block_id}/image/raw")
+def blocks_image_raw(block_id: int):
+    try:
+        for video in list_videos():
+            compat = list_video_images_compat(int(video["id"]))
+            for item in compat["blocks"]:
+                if item["blockId"] != str(block_id) or not item.get("url"):
+                    continue
+                path = Path(str(item["url"]))
+                if not path.exists():
+                    raise HTTPException(status_code=404, detail="image file missing on disk")
+                return FileResponse(path)
+        raise HTTPException(status_code=404, detail="image not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/video-versions/{version_id}/final-video")
+def video_versions_final_video(version_id: int):
+    video = get_video(version_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="video not found")
+    raise HTTPException(status_code=404, detail="final video not generated yet")
 
 
 @app.post("/api/manifest")

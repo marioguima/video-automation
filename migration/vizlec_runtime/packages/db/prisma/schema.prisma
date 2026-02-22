@@ -1,0 +1,285 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("member")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships WorkspaceMembership[]
+  sentInvites Invitation[]        @relation("InviteCreatedBy")
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships WorkspaceMembership[]
+  agents      Agent[]
+  invitations Invitation[]
+  courses     Course[]
+  modules     Module[]
+  lessons     Lesson[]
+  lessonVersions LessonVersion[]
+  blocks      Block[]
+  assets      Asset[]
+  jobs        Job[]
+  notifications Notification[]
+}
+
+model WorkspaceMembership {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String   @default("member")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Agent {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  label             String?
+  machineFingerprint String?
+  status            String    @default("offline")
+  lastSeenAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+}
+
+model Invitation {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  inviteeName     String?
+  email           String
+  role            String
+  tokenHash       String   @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  acceptedAt      DateTime?
+  createdAt       DateTime @default(now())
+  invitedByUserId String
+
+  invitedBy User      @relation("InviteCreatedBy", fields: [invitedByUserId], references: [id])
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([email, createdAt])
+  @@index([expiresAt, revokedAt, acceptedAt])
+}
+
+model Course {
+  id                  String   @id @default(cuid())
+  workspaceId         String
+  name                String
+  description         String?
+  categoryId          String?
+  productLanguage     String?
+  emailLanguage       String?
+  primarySalesCountry String?
+  salesPageUrl        String?
+  imageAssetId        String?
+  status              String   @default("draft")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  modules   Module[]
+
+  @@index([workspaceId, createdAt])
+}
+
+model SlideTemplate {
+  id        String   @id
+  label     String
+  kind      String
+  fileName  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([isActive])
+}
+
+model Module {
+  id        String   @id @default(cuid())
+  workspaceId String
+  courseId  String
+  name      String
+  order     Int
+  createdAt DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  course     Course    @relation(fields: [courseId], references: [id])
+  lessons    Lesson[]
+
+  @@index([courseId, order])
+  @@index([workspaceId, courseId, order])
+}
+
+model Lesson {
+  id        String   @id @default(cuid())
+  workspaceId String
+  moduleId  String
+  order     Int
+  title     String
+  createdAt DateTime @default(now())
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  module    Module         @relation(fields: [moduleId], references: [id])
+  versions  LessonVersion[]
+
+  @@index([moduleId, order])
+  @@index([workspaceId, moduleId, order])
+  @@unique([moduleId, order])
+}
+
+model LessonVersion {
+  id                  String   @id @default(cuid())
+  workspaceId         String
+  lessonId            String
+  scriptText          String
+  speechRateWps       Float    @default(2.5)
+  preferredVoiceId    String?
+  preferredTemplateId String?
+  createdAt           DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lesson    Lesson    @relation(fields: [lessonId], references: [id])
+  blocks    Block[]
+  jobs      Job[]
+
+  @@index([workspaceId, lessonId, createdAt])
+  @@index([preferredTemplateId])
+}
+
+model Block {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  lessonVersionId   String
+  index             Int
+  sourceText        String
+  ttsText           String
+  wordCount         Int
+  durationEstimateS Float
+  audioDurationS    Float?
+  /// JSON string (title + bullets)
+  onScreenJson      String?
+  /// JSON string (block_prompt, avoid, seed_hint)
+  imagePromptJson   String?
+  /// ms spent generating on-screen + image prompt (LLM)
+  segmentMs         Int?
+  /// last segmentation error (if any)
+  segmentError      String?
+  status            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lessonVersion LessonVersion @relation(fields: [lessonVersionId], references: [id])
+  assets        Asset[]
+  jobs          Job[]
+
+  @@index([lessonVersionId, index])
+  @@index([workspaceId, lessonVersionId, index])
+}
+
+model Asset {
+  id        String    @id @default(cuid())
+  workspaceId String
+  blockId   String
+  /// String enum: audio_raw | image_raw | slide_png | clip_mp4 | final_mp4 | manifest_json
+  kind      String
+  path      String
+  sha256    String?
+  /// JSON string metadata
+  metaJson  String?
+  templateId String?
+  createdAt DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  block     Block     @relation(fields: [blockId], references: [id])
+
+  @@index([blockId, kind])
+  @@index([workspaceId, blockId, kind])
+  @@index([templateId])
+}
+
+model Job {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  /// String enum: lesson | block
+  scope           String
+  lessonVersionId String?
+  blockId         String?
+  /// String enum: segment | on_screen | image_prompt | tts | probe_audio | comfyui_image | render_slide | render_clip | concat_video
+  type            String
+  /// String enum: pending | running | succeeded | failed | canceled
+  status          String    @default("pending")
+  attempts        Int       @default(0)
+  error           String?
+  inputHash       String?
+  priority        Int       @default(0)
+  clientId        String?
+  requestId       String?
+  /// JSON string metadata (job options, flags, etc.)
+  metaJson        String?
+  leaseExpiresAt  DateTime?
+  canceledAt      DateTime?
+  templateId      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lessonVersion LessonVersion? @relation(fields: [lessonVersionId], references: [id])
+  block         Block?         @relation(fields: [blockId], references: [id])
+
+  @@index([status, priority])
+  @@index([workspaceId, status, priority])
+  @@index([lessonVersionId])
+  @@index([blockId])
+  @@index([workspaceId, createdAt])
+  @@index([templateId])
+}
+
+model Notification {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  title           String
+  message         String
+  type            String
+  read            Boolean  @default(false)
+  jobId           String?
+  jobType         String?
+  jobStatus       String?
+  lessonId        String?
+  lessonVersionId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, read, createdAt])
+  @@index([read, createdAt])
+  @@index([jobId, jobStatus])
+  @@index([lessonId])
+}

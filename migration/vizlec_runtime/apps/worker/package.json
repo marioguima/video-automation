@@ -1,0 +1,26 @@
+{
+  "name": "@vizlec/worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "lint": "echo 'lint not configured'",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --test test/**/*.test.ts",
+    "test:one": "tsx --test"
+  },
+  "dependencies": {
+    "@vizlec/db": "workspace:*",
+    "@vizlec/shared": "workspace:*",
+    "playwright": "^1.50.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
