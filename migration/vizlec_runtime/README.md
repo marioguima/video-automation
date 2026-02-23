@@ -102,3 +102,15 @@ pnpm dev:worker:sandbox
 Observacao:
 - Esta fase e propositalmente no contexto original (`course/module/lesson`).
 - A migracao para `channel/video` vem depois que este runtime estiver validado.
+
+## Documentacao especifica (MVP)
+- Legendas (faster-whisper + template default + cues): `docs/subtitles.md`
+
+## Render / FFmpeg / Subtitulos (env)
+As variaveis de render cinematografico, encoder FFmpeg (CPU/GPU) e subtitulos (`faster-whisper`) estao documentadas em:
+- `migration/vizlec_runtime/.env.example`
+
+As mais importantes para performance:
+- `VIDEO_AUTOMATION_FFMPEG_VCODEC` (`h264_nvenc` na RTX 3060)
+- `VIZLEC_CINEMATIC_RENDER_MODE` (`quality` / `preview`)
+- `VIDEO_AUTOMATION_SUPERSAMPLE`

@@ -428,7 +428,18 @@ async function renderCinematicFinalVideoWithPython(options: {
     motion_preset: "D_zoom_cinematic",
     zoom_transition_preset: "T6_inertial_ref",
     transition: "XF3b_flash_white_occluded_6f",
-    transition_duration: 0.2
+    transition_duration: 0.2,
+    subtitle_enabled: String(process.env.VIZLEC_SUBTITLES_ENABLED ?? "1").trim() !== "0",
+    subtitle_template_id: "subtitle-yellow-bold-bottom-v1",
+    subtitle_language: (process.env.VIZLEC_SUBTITLE_LANGUAGE ?? "pt").trim() || "pt",
+    subtitle_model: (process.env.VIZLEC_SUBTITLE_WHISPER_MODEL ?? "").trim() || undefined,
+    subtitle_device: (process.env.VIZLEC_SUBTITLE_WHISPER_DEVICE ?? "").trim() || undefined,
+    subtitle_compute_type:
+      (process.env.VIZLEC_SUBTITLE_WHISPER_COMPUTE_TYPE ?? "").trim() || undefined,
+    subtitle_vad_filter: String(process.env.VIZLEC_SUBTITLE_VAD_FILTER ?? "1").trim() !== "0",
+    subtitle_word_timestamps:
+      String(process.env.VIZLEC_SUBTITLE_WORD_TIMESTAMPS ?? "1").trim() !== "0",
+    render_mode: (process.env.VIZLEC_CINEMATIC_RENDER_MODE ?? "quality").trim().toLowerCase()
   };
   const tmpPayloadPath = path.join(
     os.tmpdir(),
@@ -445,20 +456,48 @@ async function renderCinematicFinalVideoWithPython(options: {
         logPrefix: "video:cinematic",
         onStdoutLine: (line) => {
           const match = line.match(/^__VIZLEC_RESULT__\s+clip_start\s+(\d+)\s+(\d+)$/);
-          if (!match) return;
-          const current = Number(match[1]);
-          const total = Number(match[2]);
-          if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return;
-          const pct = Math.max(1, Math.min(95, Math.trunc((current / total) * 95)));
-          if (pct <= clipProgress) return;
-          clipProgress = pct;
-          void notifyRunningProgress(options.job, pct);
+          if (match) {
+            const current = Number(match[1]);
+            const total = Number(match[2]);
+            if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return;
+            const pct = Math.max(1, Math.min(90, Math.trunc((current / total) * 90)));
+            if (pct <= clipProgress) return;
+            clipProgress = pct;
+            void notifyRunningProgress(options.job, pct);
+            return;
+          }
+          if (/^__VIZLEC_RESULT__\s+subtitle_start$/.test(line)) {
+            void notifyRunningProgress(options.job, Math.max(clipProgress, 4));
+            return;
+          }
+          if (/^__VIZLEC_RESULT__\s+subtitle_ready\b/.test(line)) {
+            void notifyRunningProgress(options.job, Math.max(clipProgress, 10));
+            return;
+          }
+          if (/^__VIZLEC_RESULT__\s+subtitle_burn_start$/.test(line)) {
+            void notifyRunningProgress(options.job, Math.max(clipProgress, 93));
+            return;
+          }
+          if (/^__VIZLEC_RESULT__\s+subtitle_burn_done$/.test(line)) {
+            void notifyRunningProgress(options.job, Math.max(clipProgress, 97));
+          }
         }
       }
     );
   } finally {
     await fs.promises.unlink(tmpPayloadPath).catch(() => null);
   }
+}
+
+async function ensureMemoryForSubtitleTranscription(job: JobRecord): Promise<void> {
+  logJobEvent("model_switch_prepare", job, {
+    target: "subtitle_transcription",
+    action: "unload_generation_models"
+  });
+  await releaseAllGenerationModels({
+    reason: "switch_to_subtitle_transcription",
+    job
+  });
 }
 
 type HttpJsonOptions = {
@@ -5071,6 +5110,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
 
   let usedCinematicBridge = false;
   try {
+    await ensureMemoryForSubtitleTranscription(job);
     await renderCinematicFinalVideoWithPython({
       outputPath,
       mediaFiles,
@@ -5172,6 +5212,12 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     await notifyRunningProgress(job, 99);
   }
 
+  const subtitleRawJsonPath = path.join(finalDir, "subtitles.raw.json");
+  const subtitleCuesJsonPath = path.join(finalDir, "subtitles.cues.json");
+  const subtitleSrtPath = path.join(finalDir, "subtitles.srt");
+  const subtitleAssPath = path.join(finalDir, "subtitles.default.ass");
+  const hasSubtitleOutput = fs.existsSync(subtitleAssPath);
+
   await prisma.asset.deleteMany({
     where: {
       kind: "final_mp4",
@@ -5191,10 +5237,42 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
         voiceVolume: voiceVolume !== 1 ? voiceVolume : null,
         masterVolume: masterVolume !== 1 ? masterVolume : null,
         bgmPath: version.bgmPath ?? null,
-        bgmVolume: bgmVolume > 0 ? bgmVolume : null
+        bgmVolume: bgmVolume > 0 ? bgmVolume : null,
+        subtitleTemplateId: hasSubtitleOutput ? "subtitle-yellow-bold-bottom-v1" : null,
+        subtitleSrtPath: fs.existsSync(subtitleSrtPath) ? subtitleSrtPath : null
       })
     }
   });
+
+  const subtitleAssetDefs: Array<{ kind: string; path: string; format: string }> = [
+    { kind: "subtitle_raw_json", path: subtitleRawJsonPath, format: "raw_json" },
+    { kind: "subtitle_cues_json", path: subtitleCuesJsonPath, format: "cues_json" },
+    { kind: "subtitle_srt", path: subtitleSrtPath, format: "srt" },
+    { kind: "subtitle_ass", path: subtitleAssPath, format: "ass" }
+  ];
+  await prisma.asset.deleteMany({
+    where: {
+      kind: { in: subtitleAssetDefs.map((d) => d.kind) },
+      block: { lessonVersionId: version.id }
+    }
+  });
+  for (const def of subtitleAssetDefs) {
+    if (!fs.existsSync(def.path)) continue;
+    await prisma.asset.create({
+      data: {
+        workspaceId: version.blocks[0].workspaceId,
+        blockId: version.blocks[0].id,
+        kind: def.kind,
+        path: def.path,
+        templateId: "subtitle-yellow-bold-bottom-v1",
+        metaJson: JSON.stringify({
+          scope: "lesson_version",
+          format: def.format,
+          templateId: "subtitle-yellow-bold-bottom-v1"
+        })
+      }
+    });
+  }
 
   const manifestPath = path.join(finalDir, "manifest.json");
   await fs.promises.writeFile(
@@ -5207,6 +5285,8 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
         masterVolume: masterVolume !== 1 ? masterVolume : null,
         bgmPath: version.bgmPath ?? null,
         bgmVolume: bgmVolume > 0 ? bgmVolume : null,
+        subtitleTemplateId: hasSubtitleOutput ? "subtitle-yellow-bold-bottom-v1" : null,
+        subtitleSrtPath: fs.existsSync(subtitleSrtPath) ? subtitleSrtPath : null,
         blockCount: version.blocks.length,
         clips: version.blocks.map((block, idx) => ({
           blockId: block.id,
@@ -5242,7 +5322,9 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     bgm_path: version.bgmPath ?? null,
     bgm_volume: bgmVolume > 0 ? bgmVolume : null,
     voice_volume: voiceVolume !== 1 ? voiceVolume : null,
-    master_volume: masterVolume !== 1 ? masterVolume : null
+    master_volume: masterVolume !== 1 ? masterVolume : null,
+    subtitles_enabled: hasSubtitleOutput,
+    subtitle_template_id: hasSubtitleOutput ? "subtitle-yellow-bold-bottom-v1" : null
   });
 }
 

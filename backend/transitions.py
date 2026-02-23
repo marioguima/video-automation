@@ -2,6 +2,7 @@ import random
 import shutil
 import subprocess
 import tempfile
+import os
 from pathlib import Path
 
 
@@ -111,10 +112,7 @@ def _make_solid_clip(
         "-i",
         f"color=c={color}:s={width}x{height}:r={fps}:d={duration:.6f}",
         "-an",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
+        *_video_encode_args(),
         "-r",
         str(fps),
         output_path,
@@ -169,10 +167,7 @@ def _xfade_two(
         ),
         "-map",
         "[v]",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
+        *_video_encode_args(),
         "-r",
         str(fps),
         output_path,
@@ -236,10 +231,7 @@ def _compose_occluded_flash_pair(
         filter_complex,
         "-map",
         "[v]",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
+        *_video_encode_args(),
         "-r",
         str(fps),
         output_path,
@@ -472,10 +464,7 @@ def apply_xfade_chain(
         ";".join(filter_parts),
         "-map",
         f"[{previous_label}]",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
+        *_video_encode_args(),
         "-r",
         str(fps),
         output_path,
@@ -504,11 +493,17 @@ def apply_overlay_transition(
             f"[1:v]format=rgba,setpts=PTS-STARTPTS+{at_second}/TB[ov];"
             f"[0:v][ov]overlay=0:0:format=auto:enable='between(t,{at_second},{at_second + duration})'"
         ),
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
+        *_video_encode_args(),
         output_path,
     ]
     _run(cmd)
     return output_path
+def _video_encode_args() -> list[str]:
+    codec = (os.getenv("VIDEO_AUTOMATION_FFMPEG_VCODEC") or "libx264").strip().lower()
+    if codec == "h264_nvenc":
+        preset = (os.getenv("VIDEO_AUTOMATION_FFMPEG_NVENC_PRESET") or "p5").strip()
+        cq = (os.getenv("VIDEO_AUTOMATION_FFMPEG_NVENC_CQ") or "21").strip()
+        return ["-c:v", "h264_nvenc", "-preset", preset, "-cq", cq, "-pix_fmt", "yuv420p"]
+    preset = (os.getenv("VIDEO_AUTOMATION_FFMPEG_X264_PRESET") or "veryfast").strip()
+    crf = (os.getenv("VIDEO_AUTOMATION_FFMPEG_X264_CRF") or "20").strip()
+    return ["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]

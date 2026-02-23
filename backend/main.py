@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 import tempfile
+import os
 from pathlib import Path
 
 try:
@@ -13,6 +14,17 @@ except ImportError:
     from transitions import apply_overlay_transition, apply_xfade_chain
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
+def _video_encode_args() -> list[str]:
+    codec = (os.getenv("VIDEO_AUTOMATION_FFMPEG_VCODEC") or "libx264").strip().lower()
+    if codec == "h264_nvenc":
+        preset = (os.getenv("VIDEO_AUTOMATION_FFMPEG_NVENC_PRESET") or "p5").strip()
+        cq = (os.getenv("VIDEO_AUTOMATION_FFMPEG_NVENC_CQ") or "21").strip()
+        return ["-c:v", "h264_nvenc", "-preset", preset, "-cq", cq, "-pix_fmt", "yuv420p"]
+    preset = (os.getenv("VIDEO_AUTOMATION_FFMPEG_X264_PRESET") or "veryfast").strip()
+    crf = (os.getenv("VIDEO_AUTOMATION_FFMPEG_X264_CRF") or "20").strip()
+    return ["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]
 
 
 def _run(cmd: list[str]) -> None:
@@ -39,8 +51,9 @@ def _render_clip(
 
     if _is_image(media):
         # Build a larger virtual canvas before zoompan to reduce sub-pixel stepping.
-        super_w = width * 4
-        super_h = height * 4
+        supersample = max(1, int(os.getenv("VIDEO_AUTOMATION_SUPERSAMPLE", "4")))
+        super_w = width * supersample
+        super_h = height * supersample
         pre_vf = (
             f"scale={super_w}:{super_h}:force_original_aspect_ratio=increase,"
             f"crop={super_w}:{super_h}"
@@ -76,10 +89,7 @@ def _render_clip(
             "-t",
             str(duration),
             "-an",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
+            *_video_encode_args(),
             "-r",
             str(fps),
             output_path,
@@ -95,10 +105,7 @@ def _render_clip(
             "-t",
             str(duration),
             "-an",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
+            *_video_encode_args(),
             "-r",
             str(fps),
             output_path,
