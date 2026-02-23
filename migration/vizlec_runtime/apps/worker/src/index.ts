@@ -300,6 +300,7 @@ function loadTtsSettings(): TtsSettings {
 const WORKER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VIDEO_AUTOMATION_ROOT = path.resolve(WORKER_ROOT, "..", "..", "..", "..");
 const CINEMATIC_FINAL_RENDER_SCRIPT = path.join(WORKER_ROOT, "scripts", "render_cinematic_final.py");
+const MAX_MIX_GAIN = Math.pow(10, 6 / 20);
 const QWEN_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "qwen_tts_generate.py");
 const CHATTERBOX_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "chatterbox_tts_generate.py");
 const COMFY_WORKFLOWS_DIR = path.join(WORKER_ROOT, "workflows");
@@ -4902,6 +4903,73 @@ function parseFfmpegTimestampToSeconds(value: string): number | null {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
+function resolveWorkerBgmLibraryPath(relativePath: string | null | undefined): string | null {
+  const raw = typeof relativePath === "string" ? relativePath.trim() : "";
+  if (!raw) return null;
+  const normalized = raw.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized || normalized.includes("\0")) return null;
+  const base = path.resolve(config.dataDir, "bgm_library");
+  const resolved = path.resolve(base, normalized);
+  if (resolved !== base && !resolved.startsWith(`${base}${path.sep}`)) return null;
+  return resolved;
+}
+
+async function applyBgmMixToFinalVideo(options: {
+  finalVideoPath: string;
+  bgmPath: string;
+  bgmVolume: number;
+  voiceVolume: number;
+  masterVolume: number;
+  job: JobRecord;
+}): Promise<void> {
+  const { finalVideoPath, bgmPath, bgmVolume, voiceVolume, masterVolume, job } = options;
+  const tmpOutput = `${finalVideoPath}.bgm_mix.tmp.mp4`;
+  await runProcess(
+    "ffmpeg",
+    [
+      "-y",
+      "-stream_loop",
+      "-1",
+      "-i",
+      bgmPath,
+      "-i",
+      finalVideoPath,
+      "-filter_complex",
+      `[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=${bgmVolume.toFixed(4)}[bgm];` +
+      `[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=${voiceVolume.toFixed(4)}[tts];` +
+      `[tts][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];` +
+      `[mix]volume=${masterVolume.toFixed(4)}[aout]`,
+      "-map",
+      "1:v:0",
+      "-map",
+      "[aout]",
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-ar",
+      "48000",
+      "-ac",
+      "2",
+      "-b:a",
+      "256k",
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      tmpOutput
+    ],
+    { logPrefix: "video:bgm_mix" }
+  );
+  await fs.promises.rename(tmpOutput, finalVideoPath);
+  logJobEvent("concat_video_bgm_mix_applied", job, {
+    bgm_path: bgmPath,
+    bgm_volume: bgmVolume,
+    voice_volume: voiceVolume,
+    master_volume: masterVolume,
+    output_path: finalVideoPath
+  });
+}
+
 async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<void> {
   const { job } = options;
   if (!job.lessonVersionId) {
@@ -4936,7 +5004,11 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   await notifyRunningPhase(job, "cleanup");
   logJobEvent("concat_video_started", job, {
     block_count: version.blocks.length,
-    visual_mode: "image_raw_only"
+    visual_mode: "image_raw_only",
+    bgm_path: version.bgmPath ?? null,
+    bgm_volume: version.bgmVolume ?? null,
+    voice_volume: version.voiceVolume ?? null,
+    master_volume: version.masterVolume ?? null
   });
   await notifyRunningPhase(job, "generation");
 
@@ -4952,6 +5024,19 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   const audioFiles: string[] = [];
   const durations: number[] = [];
   const clipPaths: string[] = [];
+  const bgmPath = resolveWorkerBgmLibraryPath(version.bgmPath);
+  const voiceVolume =
+    typeof version.voiceVolume === "number" && Number.isFinite(version.voiceVolume)
+      ? Math.max(0, Math.min(MAX_MIX_GAIN, version.voiceVolume))
+      : 1;
+  const masterVolume =
+    typeof version.masterVolume === "number" && Number.isFinite(version.masterVolume)
+      ? Math.max(0, Math.min(MAX_MIX_GAIN, version.masterVolume))
+      : 1;
+  const bgmVolume =
+    typeof version.bgmVolume === "number" && Number.isFinite(version.bgmVolume)
+      ? Math.max(0, Math.min(MAX_MIX_GAIN, version.bgmVolume))
+      : 0;
 
   for (const block of version.blocks) {
     await assertLeaseValid(job.id);
@@ -5074,6 +5159,19 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     clipPaths.push(...legacyClipPaths);
   }
 
+  if (bgmPath && fs.existsSync(bgmPath) && bgmVolume > 0) {
+    await notifyRunningPhase(job, "generation");
+    await applyBgmMixToFinalVideo({
+      finalVideoPath: outputPath,
+      bgmPath,
+      bgmVolume,
+      voiceVolume,
+      masterVolume,
+      job
+    });
+    await notifyRunningProgress(job, 99);
+  }
+
   await prisma.asset.deleteMany({
     where: {
       kind: "final_mp4",
@@ -5089,7 +5187,11 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       templateId: null,
       metaJson: JSON.stringify({
         blockCount: version.blocks.length,
-        visualMode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only"
+        visualMode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only",
+        voiceVolume: voiceVolume !== 1 ? voiceVolume : null,
+        masterVolume: masterVolume !== 1 ? masterVolume : null,
+        bgmPath: version.bgmPath ?? null,
+        bgmVolume: bgmVolume > 0 ? bgmVolume : null
       })
     }
   });
@@ -5101,6 +5203,10 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       {
         generatedAt: new Date().toISOString(),
         visualMode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only",
+        voiceVolume: voiceVolume !== 1 ? voiceVolume : null,
+        masterVolume: masterVolume !== 1 ? masterVolume : null,
+        bgmPath: version.bgmPath ?? null,
+        bgmVolume: bgmVolume > 0 ? bgmVolume : null,
         blockCount: version.blocks.length,
         clips: version.blocks.map((block, idx) => ({
           blockId: block.id,
@@ -5132,7 +5238,11 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   logJobEvent("concat_video_completed", job, {
     output_path: outputPath,
     block_count: version.blocks.length,
-    visual_mode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only"
+    visual_mode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only",
+    bgm_path: version.bgmPath ?? null,
+    bgm_volume: bgmVolume > 0 ? bgmVolume : null,
+    voice_volume: voiceVolume !== 1 ? voiceVolume : null,
+    master_volume: masterVolume !== 1 ? masterVolume : null
   });
 }
 

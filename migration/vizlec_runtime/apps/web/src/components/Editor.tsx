@@ -24,6 +24,8 @@ import {
   X,
   Search,
   Headphones,
+  Volume2,
+  VolumeX,
   Copy,
   Clapperboard,
   ExternalLink,
@@ -645,6 +647,10 @@ type ImagePromptEditorProps = {
 
 const MAX_IMAGE_SEED = 2147483647;
 const ASSETS_JOB_STORAGE_KEY = 'vizlec_assets_job';
+const MIXER_MIN_DB = -60;
+const MIXER_MAX_DB = 6;
+const MIXER_DB_TICKS = [6, 0, -6, -12, -18, -30, -60] as const;
+const MIXER_MAX_GAIN = Math.pow(10, MIXER_MAX_DB / 20);
 
 const clampSeedValue = (value: number) => {
   if (!Number.isFinite(value)) return 0;
@@ -654,6 +660,26 @@ const clampSeedValue = (value: number) => {
 };
 
 const generateRandomSeed = () => Math.floor(Math.random() * MAX_IMAGE_SEED);
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const clampMixerLinearGain = (value: number) => Math.max(0, Math.min(MIXER_MAX_GAIN, value));
+const clampMixerDb = (value: number) => Math.max(MIXER_MIN_DB, Math.min(MIXER_MAX_DB, value));
+const dbToLinearGain = (db: number) => {
+  if (!Number.isFinite(db)) return 0;
+  if (db <= MIXER_MIN_DB) return 0;
+  return Math.pow(10, db / 20);
+};
+const linearGainToDb = (gain: number) => {
+  const safe = clampMixerLinearGain(gain);
+  if (safe <= 0.000001) return MIXER_MIN_DB;
+  return clampMixerDb(20 * Math.log10(safe));
+};
+const formatDbLabel = (db: number) => {
+  if (db <= MIXER_MIN_DB) return '-inf dB';
+  const rounded = Math.round(db * 10) / 10;
+  if (Math.abs(rounded) < 0.05) return '0 dB';
+  return `${rounded > 0 ? '+' : ''}${rounded} dB`;
+};
 
 type AssetsJobStorage = {
   jobId: string;
@@ -823,7 +849,18 @@ type LegacyLessonVersion = {
   speechRateWps: number;
   preferredVoiceId?: string | null;
   preferredTemplateId?: string | null;
+  voiceVolume?: string | number | null;
+  masterVolume?: string | number | null;
+  bgmPath?: string | null;
+  bgmVolume?: number | null;
   createdAt: string;
+};
+
+type BgmLibraryItem = {
+  path: string;
+  name: string;
+  sizeBytes: number;
+  ext: string;
 };
 
 type LegacyBlock = {
@@ -993,6 +1030,16 @@ const Editor: React.FC<EditorProps> = ({
   const [isLoadingBlocks, setIsLoadingBlocks] = useState(false);
   const [slideTemplates, setSlideTemplates] = useState<SlideTemplateOption[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [bgmLibrary, setBgmLibrary] = useState<BgmLibraryItem[]>([]);
+  const [selectedBgmPath, setSelectedBgmPath] = useState<string>('');
+  const [voiceVolumeDraft, setVoiceVolumeDraft] = useState<number>(1);
+  const [masterVolumeDraft, setMasterVolumeDraft] = useState<number>(1);
+  const [bgmVolumeDraft, setBgmVolumeDraft] = useState<number>(0.2);
+  const [mixerIsPlaying, setMixerIsPlaying] = useState(false);
+  const [mixerVoiceMuted, setMixerVoiceMuted] = useState(false);
+  const [mixerMusicMuted, setMixerMusicMuted] = useState(false);
+  const [mixerVoiceIndex, setMixerVoiceIndex] = useState(0);
+  const [mixerMasterPeak, setMixerMasterPeak] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [assetsRevision, setAssetsRevision] = useState(0);
   const [audioRevisions, setAudioRevisions] = useState<Record<string, number>>({});
@@ -1100,6 +1147,19 @@ const Editor: React.FC<EditorProps> = ({
     key: null,
     armed: false
   });
+  const bgmVolumeSaveTimeoutRef = useRef<number | null>(null);
+  const voiceVolumeSaveTimeoutRef = useRef<number | null>(null);
+  const masterVolumeSaveTimeoutRef = useRef<number | null>(null);
+  const bgmPreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mixerVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mixerAudioContextRef = useRef<AudioContext | null>(null);
+  const mixerBgmSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const mixerVoiceSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const mixerBgmGainNodeRef = useRef<GainNode | null>(null);
+  const mixerVoiceGainNodeRef = useRef<GainNode | null>(null);
+  const mixerMasterGainNodeRef = useRef<GainNode | null>(null);
+  const mixerAnalyserNodeRef = useRef<AnalyserNode | null>(null);
+  const mixerMeterFrameRef = useRef<number | null>(null);
   const audioReviewRef = useRef<HTMLAudioElement | null>(null);
   const audioReviewItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const audioReviewModalRef = useRef<HTMLDivElement | null>(null);
@@ -1261,6 +1321,13 @@ const Editor: React.FC<EditorProps> = ({
         console.error(err);
         setError(err.message ?? 'Failed to load settings.');
       });
+
+    apiGet<{ items: BgmLibraryItem[] }>('/bgm/library')
+      .then((data) => setBgmLibrary(data.items ?? []))
+      .catch((err) => {
+        console.error(err);
+        setError(err.message ?? 'Failed to load BGM library.');
+      });
   }, [checkTtsHealth]);
 
   const selectedVersion = useMemo(
@@ -1269,13 +1336,24 @@ const Editor: React.FC<EditorProps> = ({
   );
 
   const updateSelectedVersionPreferences = useCallback(
-    async (payload: { preferredVoiceId?: string | null; preferredTemplateId?: string | null }) => {
+    async (payload: {
+      preferredVoiceId?: string | null;
+      preferredTemplateId?: string | null;
+      voiceVolume?: number | null;
+      masterVolume?: number | null;
+      bgmPath?: string | null;
+      bgmVolume?: number | null;
+    }) => {
       if (!selectedVersionId) return;
       try {
         const updated = await apiPatch<{
           id: string;
           preferredVoiceId?: string | null;
           preferredTemplateId?: string | null;
+          voiceVolume?: number | null;
+          masterVolume?: number | null;
+          bgmPath?: string | null;
+          bgmVolume?: number | null;
         }>(`/lesson-versions/${selectedVersionId}/preferences`, payload);
         setVersions((prev) =>
           prev.map((item) =>
@@ -1289,7 +1367,23 @@ const Editor: React.FC<EditorProps> = ({
                   preferredTemplateId:
                     payload.preferredTemplateId !== undefined
                       ? updated.preferredTemplateId ?? null
-                      : item.preferredTemplateId ?? null
+                      : item.preferredTemplateId ?? null,
+                  voiceVolume:
+                    payload.voiceVolume !== undefined
+                      ? (typeof updated.voiceVolume === 'number' ? updated.voiceVolume : null)
+                      : (typeof item.voiceVolume === 'number' ? item.voiceVolume : null),
+                  masterVolume:
+                    payload.masterVolume !== undefined
+                      ? (typeof updated.masterVolume === 'number' ? updated.masterVolume : null)
+                      : (typeof item.masterVolume === 'number' ? item.masterVolume : null),
+                  bgmPath:
+                    payload.bgmPath !== undefined
+                      ? updated.bgmPath ?? null
+                      : item.bgmPath ?? null,
+                  bgmVolume:
+                    payload.bgmVolume !== undefined
+                      ? (typeof updated.bgmVolume === 'number' ? updated.bgmVolume : null)
+                      : (typeof item.bgmVolume === 'number' ? item.bgmVolume : null)
                 }
               : item
           )
@@ -1313,6 +1407,22 @@ const Editor: React.FC<EditorProps> = ({
       Boolean(preferredTemplateId) &&
       slideTemplates.some((item) => item.id === preferredTemplateId);
     setSelectedTemplateId(hasPreferredTemplate ? (preferredTemplateId as string) : fallbackTemplateId);
+    setVoiceVolumeDraft(
+      typeof selectedVersion.voiceVolume === 'number' && Number.isFinite(selectedVersion.voiceVolume)
+        ? clampMixerLinearGain(selectedVersion.voiceVolume)
+        : 1
+    );
+    setMasterVolumeDraft(
+      typeof selectedVersion.masterVolume === 'number' && Number.isFinite(selectedVersion.masterVolume)
+        ? clampMixerLinearGain(selectedVersion.masterVolume)
+        : 1
+    );
+    setSelectedBgmPath(selectedVersion.bgmPath?.trim() || '');
+    setBgmVolumeDraft(
+      typeof selectedVersion.bgmVolume === 'number' && Number.isFinite(selectedVersion.bgmVolume)
+        ? clampMixerLinearGain(selectedVersion.bgmVolume)
+        : 0.2
+    );
   }, [selectedVersionId, selectedVersion, slideTemplates, defaultVoiceId]);
 
   useEffect(() => {
@@ -1335,6 +1445,27 @@ const Editor: React.FC<EditorProps> = ({
 
   useEffect(() => {
     return () => {
+      const mixerCtx = mixerAudioContextRef.current;
+      if (mixerMeterFrameRef.current) {
+        cancelAnimationFrame(mixerMeterFrameRef.current);
+        mixerMeterFrameRef.current = null;
+      }
+      if (mixerCtx) {
+        void mixerCtx.close().catch(() => null);
+        mixerAudioContextRef.current = null;
+      }
+      if (bgmVolumeSaveTimeoutRef.current) {
+        window.clearTimeout(bgmVolumeSaveTimeoutRef.current);
+        bgmVolumeSaveTimeoutRef.current = null;
+      }
+      if (voiceVolumeSaveTimeoutRef.current) {
+        window.clearTimeout(voiceVolumeSaveTimeoutRef.current);
+        voiceVolumeSaveTimeoutRef.current = null;
+      }
+      if (masterVolumeSaveTimeoutRef.current) {
+        window.clearTimeout(masterVolumeSaveTimeoutRef.current);
+        masterVolumeSaveTimeoutRef.current = null;
+      }
       processedTerminalJobEventsRef.current.clear();
       singleTtsJobsRef.current = {};
       singleImageJobsRef.current = {};
@@ -3288,6 +3419,252 @@ const Editor: React.FC<EditorProps> = ({
   const selectedSlideTemplateKind =
     slideTemplates.find((template) => template.id === selectedTemplateId)?.kind ?? null;
   const templateRequiresImageAsset = selectedSlideTemplateKind === 'image';
+  const selectedBgmPreviewUrl = selectedBgmPath
+    ? `${API_BASE}/bgm/library/raw?path=${encodeURIComponent(selectedBgmPath)}&v=${encodeURIComponent(
+        selectedVersionId ?? ''
+      )}`
+    : null;
+  const mixerVoiceQueue = useMemo(
+    () =>
+      blocks
+        .filter((block) => Boolean(block.audioUrl))
+        .map((block) => ({ blockId: block.id, url: block.audioUrl as string })),
+    [blocks]
+  );
+  const voiceDbDraft = useMemo(() => linearGainToDb(voiceVolumeDraft), [voiceVolumeDraft]);
+  const masterDbDraft = useMemo(() => linearGainToDb(masterVolumeDraft), [masterVolumeDraft]);
+  const musicDbDraft = useMemo(() => linearGainToDb(bgmVolumeDraft), [bgmVolumeDraft]);
+  const effectiveVoiceGain = mixerVoiceMuted ? 0 : clampMixerLinearGain(voiceVolumeDraft);
+  const effectiveMusicGain = mixerMusicMuted ? 0 : clampMixerLinearGain(bgmVolumeDraft);
+  const effectiveMasterGain = clampMixerLinearGain(masterVolumeDraft);
+  const mixerClipRisk = effectiveMasterGain * (effectiveVoiceGain + effectiveMusicGain) > 1.001 || mixerMasterPeak >= 0.99;
+
+  const scheduleBgmVolumeSave = useCallback(
+    (nextVolume: number) => {
+      if (bgmVolumeSaveTimeoutRef.current) {
+        window.clearTimeout(bgmVolumeSaveTimeoutRef.current);
+      }
+      bgmVolumeSaveTimeoutRef.current = window.setTimeout(() => {
+        bgmVolumeSaveTimeoutRef.current = null;
+        void updateSelectedVersionPreferences({ bgmVolume: nextVolume });
+      }, 300);
+    },
+    [updateSelectedVersionPreferences]
+  );
+  const scheduleVoiceVolumeSave = useCallback(
+    (nextVolume: number) => {
+      if (voiceVolumeSaveTimeoutRef.current) {
+        window.clearTimeout(voiceVolumeSaveTimeoutRef.current);
+      }
+      voiceVolumeSaveTimeoutRef.current = window.setTimeout(() => {
+        voiceVolumeSaveTimeoutRef.current = null;
+        void updateSelectedVersionPreferences({ voiceVolume: nextVolume });
+      }, 300);
+    },
+    [updateSelectedVersionPreferences]
+  );
+  const scheduleMasterVolumeSave = useCallback(
+    (nextVolume: number) => {
+      if (masterVolumeSaveTimeoutRef.current) {
+        window.clearTimeout(masterVolumeSaveTimeoutRef.current);
+      }
+      masterVolumeSaveTimeoutRef.current = window.setTimeout(() => {
+        masterVolumeSaveTimeoutRef.current = null;
+        void updateSelectedVersionPreferences({ masterVolume: nextVolume });
+      }, 300);
+    },
+    [updateSelectedVersionPreferences]
+  );
+
+  const ensureMixerAudioGraph = useCallback(async () => {
+    if (typeof window === 'undefined') return null;
+    const bgmEl = bgmPreviewAudioRef.current;
+    const voiceEl = mixerVoiceAudioRef.current;
+    if (!bgmEl || !voiceEl) return null;
+
+    let ctx = mixerAudioContextRef.current;
+    if (!ctx) {
+      const AudioCtx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return null;
+      ctx = new AudioCtx();
+      mixerAudioContextRef.current = ctx;
+    }
+
+    if (!mixerMasterGainNodeRef.current) {
+      mixerMasterGainNodeRef.current = ctx.createGain();
+    }
+    if (!mixerAnalyserNodeRef.current) {
+      mixerAnalyserNodeRef.current = ctx.createAnalyser();
+      mixerAnalyserNodeRef.current.fftSize = 2048;
+      mixerAnalyserNodeRef.current.smoothingTimeConstant = 0.75;
+    }
+    if (!mixerBgmGainNodeRef.current) {
+      mixerBgmGainNodeRef.current = ctx.createGain();
+      mixerBgmGainNodeRef.current.connect(mixerMasterGainNodeRef.current);
+    }
+    if (!mixerVoiceGainNodeRef.current) {
+      mixerVoiceGainNodeRef.current = ctx.createGain();
+      mixerVoiceGainNodeRef.current.connect(mixerMasterGainNodeRef.current);
+    }
+    if (mixerMasterGainNodeRef.current && mixerAnalyserNodeRef.current) {
+      try {
+        mixerMasterGainNodeRef.current.disconnect();
+      } catch {}
+      mixerMasterGainNodeRef.current.connect(mixerAnalyserNodeRef.current);
+      mixerAnalyserNodeRef.current.connect(ctx.destination);
+    }
+    try {
+      if (!mixerBgmSourceNodeRef.current) {
+        mixerBgmSourceNodeRef.current = ctx.createMediaElementSource(bgmEl);
+        mixerBgmSourceNodeRef.current.connect(mixerBgmGainNodeRef.current);
+      }
+      if (!mixerVoiceSourceNodeRef.current) {
+        mixerVoiceSourceNodeRef.current = ctx.createMediaElementSource(voiceEl);
+        mixerVoiceSourceNodeRef.current.connect(mixerVoiceGainNodeRef.current);
+      }
+    } catch (err) {
+      console.error('Mixer WebAudio graph init failed, using element fallback', err);
+      return null;
+    }
+
+    bgmEl.volume = 1;
+    voiceEl.volume = 1;
+
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => null);
+    }
+    return ctx;
+  }, []);
+
+  useEffect(() => {
+    const gain = mixerBgmGainNodeRef.current;
+    if (gain) {
+      gain.gain.value = mixerMusicMuted ? 0 : clampMixerLinearGain(bgmVolumeDraft);
+      return;
+    }
+    const player = bgmPreviewAudioRef.current;
+    if (!player) return;
+    player.volume = mixerMusicMuted ? 0 : clamp01(bgmVolumeDraft);
+  }, [bgmVolumeDraft, selectedBgmPreviewUrl, mixerMusicMuted]);
+
+  useEffect(() => {
+    const gain = mixerVoiceGainNodeRef.current;
+    if (gain) {
+      gain.gain.value = mixerVoiceMuted ? 0 : clampMixerLinearGain(voiceVolumeDraft);
+      return;
+    }
+    const player = mixerVoiceAudioRef.current;
+    if (!player) return;
+    player.volume = mixerVoiceMuted ? 0 : clamp01(voiceVolumeDraft);
+  }, [voiceVolumeDraft, mixerVoiceMuted]);
+
+  useEffect(() => {
+    const gain = mixerMasterGainNodeRef.current;
+    if (gain) {
+      gain.gain.value = clampMixerLinearGain(masterVolumeDraft);
+    }
+  }, [masterVolumeDraft]);
+
+  useEffect(() => {
+    if (!mixerIsPlaying) {
+      setMixerMasterPeak(0);
+      if (mixerMeterFrameRef.current) {
+        cancelAnimationFrame(mixerMeterFrameRef.current);
+        mixerMeterFrameRef.current = null;
+      }
+      return;
+    }
+    const analyser = mixerAnalyserNodeRef.current;
+    if (!analyser) return;
+    const buffer = new Float32Array(analyser.fftSize);
+    const tick = () => {
+      analyser.getFloatTimeDomainData(buffer);
+      let peak = 0;
+      for (let i = 0; i < buffer.length; i += 1) {
+        const v = Math.abs(buffer[i] ?? 0);
+        if (v > peak) peak = v;
+      }
+      setMixerMasterPeak(peak);
+      mixerMeterFrameRef.current = requestAnimationFrame(tick);
+    };
+    mixerMeterFrameRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (mixerMeterFrameRef.current) {
+        cancelAnimationFrame(mixerMeterFrameRef.current);
+        mixerMeterFrameRef.current = null;
+      }
+    };
+  }, [mixerIsPlaying]);
+
+  useEffect(() => {
+    if (mixerVoiceIndex >= mixerVoiceQueue.length) {
+      setMixerVoiceIndex(0);
+    }
+  }, [mixerVoiceIndex, mixerVoiceQueue.length]);
+
+  const stopMixer = useCallback(() => {
+    setMixerIsPlaying(false);
+    setMixerMasterPeak(0);
+    bgmPreviewAudioRef.current?.pause();
+    mixerVoiceAudioRef.current?.pause();
+  }, []);
+
+  const startMixer = useCallback(async () => {
+    const hasVoice = mixerVoiceQueue.length > 0;
+    const hasMusic = Boolean(selectedBgmPreviewUrl);
+    if (!hasVoice && !hasMusic) return;
+    setMixerIsPlaying(true);
+    const mixerCtx = await ensureMixerAudioGraph();
+    if (!mixerCtx) {
+      if (bgmPreviewAudioRef.current) {
+        bgmPreviewAudioRef.current.volume = mixerMusicMuted ? 0 : clamp01(bgmVolumeDraft);
+      }
+      if (mixerVoiceAudioRef.current) {
+        mixerVoiceAudioRef.current.volume = mixerVoiceMuted ? 0 : clamp01(voiceVolumeDraft);
+      }
+    }
+
+    if (hasMusic && bgmPreviewAudioRef.current) {
+      void bgmPreviewAudioRef.current.play().catch((err) => {
+        console.error('Mixer BGM play failed', err);
+      });
+    }
+    if (hasVoice && mixerVoiceAudioRef.current) {
+      const safeIndex = Math.max(0, Math.min(mixerVoiceIndex, mixerVoiceQueue.length - 1));
+      const nextUrl = mixerVoiceQueue[safeIndex]?.url;
+      if (nextUrl && mixerVoiceAudioRef.current.src !== nextUrl) {
+        mixerVoiceAudioRef.current.src = nextUrl;
+        setMixerVoiceIndex(safeIndex);
+      }
+      void mixerVoiceAudioRef.current.play().catch((err) => {
+        console.error('Mixer voice play failed', err);
+      });
+    }
+  }, [
+    ensureMixerAudioGraph,
+    bgmVolumeDraft,
+    mixerMusicMuted,
+    mixerVoiceIndex,
+    mixerVoiceMuted,
+    mixerVoiceQueue,
+    selectedBgmPreviewUrl,
+    voiceVolumeDraft
+  ]);
+
+  const toggleMixerPlayback = useCallback(() => {
+    if (mixerIsPlaying) {
+      stopMixer();
+      return;
+    }
+    void startMixer();
+  }, [mixerIsPlaying, startMixer, stopMixer]);
+
+  useEffect(() => {
+    if (!mixerIsPlaying || !selectedBgmPreviewUrl) return;
+    void ensureMixerAudioGraph().catch(() => null);
+    void bgmPreviewAudioRef.current?.play().catch(() => null);
+  }, [ensureMixerAudioGraph, selectedBgmPreviewUrl, mixerIsPlaying]);
+
   const missingOnScreenBlocks = blocks.filter((block) => !hasOnScreenText(block));
   const missingImagePromptBlocks = blocks.filter((block) => !hasImagePromptText(block));
   const missingAudioBlocksForFinal = blocks.filter((block) => !audioUrls[block.id]);
@@ -4927,6 +5304,239 @@ const Editor: React.FC<EditorProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="space-y-2 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/40 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    Background Music
+                  </div>
+                  <div className="text-[10px] text-muted-foreground font-medium">
+                    {formatDbLabel(musicDbDraft)}
+                  </div>
+                </div>
+                <select
+                  value={selectedBgmPath}
+                  disabled={isGeneratingFinalVideo}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSelectedBgmPath(next);
+                    void updateSelectedVersionPreferences({ bgmPath: next || null });
+                  }}
+                  className={`w-full h-8 px-2.5 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[11px] text-foreground ${toolbarDisabledLikeAudioReview}`}
+                >
+                  <option value="">No music</option>
+                  {bgmLibrary.map((item) => (
+                    <option key={item.path} value={item.path}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        Preview Mixer
+                      </div>
+                      <div className="text-[9px] text-muted-foreground">
+                        {mixerVoiceQueue.length} voice clips • loop preview
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {mixerClipRisk ? (
+                        <span className="inline-flex items-center rounded-[4px] border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-red-500">
+                          Clip
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={toggleMixerPlayback}
+                        disabled={
+                          (!selectedBgmPreviewUrl && mixerVoiceQueue.length === 0) ||
+                          (isGeneratingFinalVideo && !mixerIsPlaying)
+                        }
+                        className={`h-7 px-2.5 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-surface-2))]/40 text-[10px] font-bold flex items-center gap-1.5 ${toolbarDisabledLikeAudioReview}`}
+                      >
+                        {mixerIsPlaying ? <Pause size={12} /> : <Play size={12} />}
+                        {mixerIsPlaying ? 'Pause' : 'Play'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 items-end">
+                    <div className="flex flex-col items-center gap-2 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/20 p-2">
+                      <button
+                        type="button"
+                        onClick={() => setMixerVoiceMuted((prev) => !prev)}
+                        className="h-7 w-7 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-surface))] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                        title={mixerVoiceMuted ? 'Unmute voice' : 'Mute voice'}
+                      >
+                        {mixerVoiceMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+                      </button>
+                      <div className="h-24 flex items-center gap-1">
+                        <div className="h-24 w-7 flex flex-col justify-between items-end text-[8px] leading-none pr-0.5">
+                          {MIXER_DB_TICKS.map((tick) => (
+                            <span
+                              key={`voice-tick-${tick}`}
+                              className={tick === 0 ? 'text-foreground/80 font-semibold' : 'text-muted-foreground/80'}
+                            >
+                              {tick > 0 ? `+${tick}` : tick}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="h-24 w-7 flex items-center justify-center relative">
+                          <input
+                            type="range"
+                            min={MIXER_MIN_DB}
+                            max={MIXER_MAX_DB}
+                            step={0.5}
+                            value={voiceDbDraft}
+                            onChange={(e) => {
+                              const nextDb = clampMixerDb(Number(e.target.value));
+                              const nextGain = dbToLinearGain(nextDb);
+                              setVoiceVolumeDraft(nextGain);
+                              scheduleVoiceVolumeSave(nextGain);
+                            }}
+                            title={`Voice gain ${formatDbLabel(voiceDbDraft)}`}
+                            className="w-24 accent-orange-600"
+                            style={{ transform: 'rotate(-90deg)' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Voice</div>
+                      <div className="text-[9px] text-muted-foreground">{formatDbLabel(voiceDbDraft)}</div>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-2 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/20 p-2">
+                      <button
+                        type="button"
+                        onClick={() => setMixerMusicMuted((prev) => !prev)}
+                        className="h-7 w-7 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-surface))] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                        title={mixerMusicMuted ? 'Unmute music' : 'Mute music'}
+                      >
+                        {mixerMusicMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+                      </button>
+                      <div className="h-24 flex items-center gap-1">
+                        <div className="h-24 w-7 flex flex-col justify-between items-end text-[8px] leading-none pr-0.5">
+                          {MIXER_DB_TICKS.map((tick) => (
+                            <span
+                              key={`music-tick-${tick}`}
+                              className={tick === 0 ? 'text-foreground/80 font-semibold' : 'text-muted-foreground/80'}
+                            >
+                              {tick > 0 ? `+${tick}` : tick}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="h-24 w-7 flex items-center justify-center relative">
+                          <input
+                            type="range"
+                            min={MIXER_MIN_DB}
+                            max={MIXER_MAX_DB}
+                            step={0.5}
+                            value={musicDbDraft}
+                            onChange={(e) => {
+                              const nextDb = clampMixerDb(Number(e.target.value));
+                              const nextGain = dbToLinearGain(nextDb);
+                              setBgmVolumeDraft(nextGain);
+                              scheduleBgmVolumeSave(nextGain);
+                            }}
+                            title={`Music gain ${formatDbLabel(musicDbDraft)}`}
+                            className="w-24 accent-orange-600"
+                            style={{ transform: 'rotate(-90deg)' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Music</div>
+                      <div className="text-[9px] text-muted-foreground">{formatDbLabel(musicDbDraft)}</div>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-2 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/20 p-2">
+                      <div className="h-7 w-7 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-surface))] flex items-center justify-center text-[10px] font-bold text-muted-foreground">
+                        M
+                      </div>
+                      <div className="h-24 flex items-center gap-1">
+                        <div className="h-24 w-7 flex flex-col justify-between items-end text-[8px] leading-none pr-0.5">
+                          {MIXER_DB_TICKS.map((tick) => (
+                            <span
+                              key={`master-tick-${tick}`}
+                              className={tick === 0 ? 'text-foreground/80 font-semibold' : 'text-muted-foreground/80'}
+                            >
+                              {tick > 0 ? `+${tick}` : tick}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="h-24 w-7 flex items-center justify-center relative">
+                          <input
+                            type="range"
+                            min={MIXER_MIN_DB}
+                            max={MIXER_MAX_DB}
+                            step={0.5}
+                            value={masterDbDraft}
+                            onChange={(e) => {
+                              const nextDb = clampMixerDb(Number(e.target.value));
+                              const nextGain = dbToLinearGain(nextDb);
+                              setMasterVolumeDraft(nextGain);
+                              scheduleMasterVolumeSave(nextGain);
+                            }}
+                            title={`Master gain ${formatDbLabel(masterDbDraft)}`}
+                            className="w-24 accent-orange-600"
+                            style={{ transform: 'rotate(-90deg)' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Master</div>
+                      <div className="text-[9px] text-muted-foreground">{formatDbLabel(masterDbDraft)}</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[9px] text-muted-foreground">
+                      <span>Master peak</span>
+                      <span className={mixerMasterPeak >= 0.99 ? 'text-red-500 font-semibold' : ''}>
+                        {Math.round(mixerMasterPeak * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-[hsl(var(--editor-surface-2))] border border-[hsl(var(--editor-border))] overflow-hidden">
+                      <div
+                        className={`h-full transition-[width] duration-75 ${mixerMasterPeak >= 0.99 ? 'bg-red-500' : mixerMasterPeak >= 0.9 ? 'bg-orange-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.max(0, Math.min(100, mixerMasterPeak * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <audio
+                    ref={bgmPreviewAudioRef}
+                    crossOrigin="use-credentials"
+                    preload="none"
+                    src={selectedBgmPreviewUrl ?? undefined}
+                    loop
+                    hidden
+                    onLoadedMetadata={(e) => {
+                      e.currentTarget.volume = 1;
+                      if (mixerIsPlaying && selectedBgmPreviewUrl) {
+                        void e.currentTarget.play().catch(() => null);
+                      }
+                    }}
+                  />
+                  <audio
+                    ref={mixerVoiceAudioRef}
+                    crossOrigin="use-credentials"
+                    preload="none"
+                    hidden
+                    onLoadedMetadata={(e) => {
+                      e.currentTarget.volume = 1;
+                    }}
+                    onEnded={(e) => {
+                      if (!mixerIsPlaying || mixerVoiceQueue.length === 0) return;
+                      const nextIndex = mixerVoiceIndex + 1 >= mixerVoiceQueue.length ? 0 : mixerVoiceIndex + 1;
+                      const nextUrl = mixerVoiceQueue[nextIndex]?.url;
+                      if (!nextUrl) return;
+                      setMixerVoiceIndex(nextIndex);
+                      e.currentTarget.src = nextUrl;
+                      void e.currentTarget.play().catch(() => null);
+                    }}
+                  />
+                </div>
               </div>
             </div>
 

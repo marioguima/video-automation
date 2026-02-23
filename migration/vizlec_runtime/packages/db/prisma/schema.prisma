@@ -161,6 +161,10 @@ model LessonVersion {
   speechRateWps       Float    @default(2.5)
   preferredVoiceId    String?
   preferredTemplateId String?
+  voiceVolume         Float?
+  masterVolume        Float?
+  bgmPath             String?
+  bgmVolume           Float?
   createdAt           DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

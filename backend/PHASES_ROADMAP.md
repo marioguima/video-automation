@@ -22,8 +22,8 @@ Escopo fechado do MVP (local-first):
 - [ ] Efeito de transicao "luzes coloridas" (light leaks / color flash overlay).
 - [ ] Extrair timestamps do audio para legenda (word/segment timing).
 - [ ] Aplicar legenda estatica no video final (burned-in subtitles).
-- [ ] Selecionar musica de fundo + ajustar volume + persistir configuracao.
-- [ ] Gerar video final respeitando mix de volume TTS + BGM.
+- [x] Selecionar musica de fundo + ajustar volume + persistir configuracao (base implementada no `migration/vizlec_runtime`).
+- [x] Gerar video final respeitando mix de volume TTS + BGM (base implementada no `migration/vizlec_runtime`, faltando validacao de UX/preview).
 - [ ] Remover dependencia de `on-screen` do fluxo atual (legenda como texto principal em tela).
 
 ### MVP Frontend (fluxo minimo)
@@ -51,9 +51,9 @@ Escopo fechado do MVP (local-first):
   - [ ] gerar estilo de legenda fixa
   - [ ] burn-in com ffmpeg
 - [ ] Pipeline de musica de fundo:
-  - [ ] asset de BGM por video
-  - [ ] ganho/volume configuravel
-  - [ ] mix final com TTS
+  - [x] asset de BGM por video (path local persistido na `LessonVersion` do `vizlec_runtime`)
+  - [x] ganho/volume configuravel
+  - [x] mix final com TTS
 - [ ] Render final via job persistido (retomavel), nao apenas script manual.
 
 ### Criterios de aceite do MVP

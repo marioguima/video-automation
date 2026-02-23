@@ -5133,6 +5133,7 @@ fastify.get(
 const COURSE_STATUS_VALUES = new Set(["draft", "active", "archived"]);
 const HOTMART_PRODUCT_LANGUAGE_VALUES = new Set(["PT_BR", "ES", "EN", "FR", "PT_PT", "RU", "AR", "DE", "JA", "IT"]);
 const KIWIFY_EMAIL_LANGUAGE_VALUES = new Set(["PT", "EN", "ES"]);
+const MAX_MIX_GAIN = Math.pow(10, 6 / 20);
 const COURSE_CATEGORY_VALUES = new Set([
   "HEALTH_SPORTS",
   "FINANCE_INVESTMENTS",
@@ -6105,6 +6106,22 @@ fastify.patch(
           preferredTemplateId: {
             type: ["string", "null"],
             description: "Template preferido para slides/imagens"
+          },
+          voiceVolume: {
+            type: ["number", "null"],
+            description: "Volume da voz/TTS no mix final (0.0 a 1.0)"
+          },
+          masterVolume: {
+            type: ["number", "null"],
+            description: "Volume master do mix final (0.0 a 1.0+)"
+          },
+          bgmPath: {
+            type: ["string", "null"],
+            description: "Arquivo de música de fundo (relativo à biblioteca local)"
+          },
+          bgmVolume: {
+            type: ["number", "null"],
+            description: "Volume da música de fundo (0.0 a 1.0)"
           }
         }
       },
@@ -6115,7 +6132,11 @@ fastify.patch(
             id: { type: "string" },
             lessonId: { type: "string" },
             preferredVoiceId: { type: ["string", "null"] },
-            preferredTemplateId: { type: ["string", "null"] }
+            preferredTemplateId: { type: ["string", "null"] },
+            voiceVolume: { type: ["number", "null"] },
+            masterVolume: { type: ["number", "null"] },
+            bgmPath: { type: ["string", "null"] },
+            bgmVolume: { type: ["number", "null"] }
           }
         },
         404: {
@@ -6145,6 +6166,10 @@ fastify.patch(
       | {
           preferredVoiceId?: string | null;
           preferredTemplateId?: string | null;
+          voiceVolume?: number | null;
+          masterVolume?: number | null;
+          bgmPath?: string | null;
+          bgmVolume?: number | null;
         }
       | undefined;
 
@@ -6157,8 +6182,25 @@ fastify.patch(
 
     const preferredVoiceIdRaw = body?.preferredVoiceId;
     const preferredTemplateIdRaw = body?.preferredTemplateId;
+    const voiceVolumeRaw = body?.voiceVolume;
+    const masterVolumeRaw = body?.masterVolume;
+    const bgmPathRaw = body?.bgmPath;
+    const bgmVolumeRaw = body?.bgmVolume;
     const preferredVoiceId = typeof preferredVoiceIdRaw === "string" ? preferredVoiceIdRaw.trim() || null : (preferredVoiceIdRaw ?? undefined);
     const preferredTemplateId = typeof preferredTemplateIdRaw === "string" ? preferredTemplateIdRaw.trim() || null : (preferredTemplateIdRaw ?? undefined);
+    const voiceVolume =
+      typeof voiceVolumeRaw === "number" && Number.isFinite(voiceVolumeRaw)
+        ? Math.max(0, Math.min(MAX_MIX_GAIN, voiceVolumeRaw))
+        : (voiceVolumeRaw === null ? null : undefined);
+    const masterVolume =
+      typeof masterVolumeRaw === "number" && Number.isFinite(masterVolumeRaw)
+        ? Math.max(0, Math.min(MAX_MIX_GAIN, masterVolumeRaw))
+        : (masterVolumeRaw === null ? null : undefined);
+    const bgmPath = typeof bgmPathRaw === "string" ? bgmPathRaw.trim() || null : (bgmPathRaw ?? undefined);
+    const bgmVolume =
+      typeof bgmVolumeRaw === "number" && Number.isFinite(bgmVolumeRaw)
+        ? Math.max(0, Math.min(MAX_MIX_GAIN, bgmVolumeRaw))
+        : (bgmVolumeRaw === null ? null : undefined);
 
     if (preferredVoiceId) {
       const provider = config.ttsProvider.toLowerCase();
@@ -6187,11 +6229,23 @@ fastify.patch(
       }
     }
 
+    if (bgmPath) {
+      const bgmLibraryDir = path.resolve(config.dataDir, "bgm_library");
+      const resolved = resolveBgmLibraryPath(bgmLibraryDir, bgmPath);
+      if (!resolved || !fs.existsSync(resolved)) {
+        return reply.code(404).send({ error: "bgm file not found" });
+      }
+    }
+
     const updated = await prisma.lessonVersion.update({
       where: { id: versionId },
       data: {
         ...(preferredVoiceId !== undefined ? { preferredVoiceId } : {}),
-        ...(preferredTemplateId !== undefined ? { preferredTemplateId } : {})
+        ...(preferredTemplateId !== undefined ? { preferredTemplateId } : {}),
+        ...(voiceVolume !== undefined ? { voiceVolume } : {}),
+        ...(masterVolume !== undefined ? { masterVolume } : {}),
+        ...(bgmPath !== undefined ? { bgmPath } : {}),
+        ...(bgmVolume !== undefined ? { bgmVolume } : {})
       }
     });
 
@@ -6199,8 +6253,120 @@ fastify.patch(
       id: updated.id,
       lessonId: updated.lessonId,
       preferredVoiceId: updated.preferredVoiceId,
-      preferredTemplateId: updated.preferredTemplateId
+      preferredTemplateId: updated.preferredTemplateId,
+      voiceVolume: updated.voiceVolume,
+      masterVolume: updated.masterVolume,
+      bgmPath: updated.bgmPath,
+      bgmVolume: updated.bgmVolume
     });
+  }
+);
+
+function resolveBgmLibraryPath(baseDir: string, relativePath: string): string | null {
+  const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized || normalized.includes("\0")) return null;
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(base, normalized);
+  if (resolved !== base && !resolved.startsWith(`${base}${path.sep}`)) {
+    return null;
+  }
+  return resolved;
+}
+
+fastify.get(
+  "/bgm/library",
+  {
+    schema: {
+      tags: ["Lessons"],
+      summary: "Lista músicas de fundo locais",
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  path: { type: "string" },
+                  name: { type: "string" },
+                  sizeBytes: { type: "number" },
+                  ext: { type: "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  async (request, reply) => {
+    const auth = await getAuthenticatedScope(request, reply);
+    if (!auth) return;
+    const baseDir = path.resolve(config.dataDir, "bgm_library");
+    const items: Array<{ path: string; name: string; sizeBytes: number; ext: string }> = [];
+    try {
+      const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const ext = path.extname(entry.name).toLowerCase();
+        if (![".mp3", ".wav", ".m4a", ".ogg"].includes(ext)) continue;
+        const fullPath = path.join(baseDir, entry.name);
+        const stat = fs.statSync(fullPath);
+        items.push({
+          path: entry.name,
+          name: path.parse(entry.name).name,
+          sizeBytes: stat.size,
+          ext
+        });
+      }
+    } catch {
+      // empty library is valid for MVP
+    }
+    items.sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+    return reply.code(200).send({ items });
+  }
+);
+
+fastify.get(
+  "/bgm/library/raw",
+  {
+    schema: {
+      tags: ["Lessons"],
+      summary: "Obtém arquivo de música de fundo",
+      querystring: {
+        type: "object",
+        required: ["path"],
+        properties: {
+          path: { type: "string" }
+        }
+      },
+      response: {
+        404: {
+          type: "object",
+          properties: { error: { type: "string" } }
+        }
+      }
+    }
+  },
+  async (request, reply) => {
+    const auth = await getAuthenticatedScope(request, reply);
+    if (!auth) return;
+    const query = request.query as { path?: string };
+    const baseDir = path.resolve(config.dataDir, "bgm_library");
+    const resolved = resolveBgmLibraryPath(baseDir, query.path ?? "");
+    if (!resolved || !fs.existsSync(resolved)) {
+      return reply.code(404).send({ error: "bgm file not found" });
+    }
+    const stat = await fs.promises.stat(resolved).catch(() => null);
+    if (!stat?.isFile()) {
+      return reply.code(404).send({ error: "bgm file not found" });
+    }
+    const ext = path.extname(resolved).toLowerCase();
+    reply.header("Content-Type", mimeTypeForAudio(ext));
+    reply.header("Cache-Control", "no-store");
+    reply.header("Content-Length", String(stat.size));
+    return reply.send(fs.createReadStream(resolved));
   }
 );
 

@@ -69,3 +69,4 @@ coverage/
 assets/generated/
 assets/tmp/
 migration/vizlec_runtime/data/courses/
+migration/vizlec_runtime/data/bgm_library/
