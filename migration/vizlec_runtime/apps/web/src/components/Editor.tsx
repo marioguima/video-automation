@@ -1879,12 +1879,13 @@ const Editor: React.FC<EditorProps> = ({
         type?: string;
         blockId?: string | null;
         lessonVersionId?: string | null;
+        videoVersionId?: string | null;
         progressPercent?: number | null;
       }>(event);
       if (!detail || detail.event !== WS_EVENT.JOB_UPDATE) return;
       const payload = detail.payload;
-      const lessonVersionId = payload?.lessonVersionId?.trim();
-      if (!lessonVersionId || lessonVersionId !== selectedVersionId) return;
+      const scopedVersionId = (payload?.videoVersionId ?? payload?.lessonVersionId)?.trim();
+      if (!scopedVersionId || scopedVersionId !== selectedVersionId) return;
       const jobId = payload?.jobId?.trim();
       const status = payload?.status?.trim() ?? '';
       const type = payload?.type?.trim() ?? '';
