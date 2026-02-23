@@ -454,14 +454,25 @@ Objetivo:
   - [x] Definir estrategia Prisma da transicao (`@map/@@map` primeiro) e executar primeira passada segura (`@@map` explicito nas tabelas de dominio/reuso) em `migration/vizlec_runtime/packages/db/prisma/schema.prisma`.
   - [x] Segunda passada Prisma: models Prisma/client renomeados para `Channel/Section/Video/VideoVersion` com `@@map` preservando tabelas fisicas legacy; API/worker refatorados para `prisma.channel/section/video/videoVersion`.
   - [x] Prisma Pass 2.x (baixo risco): `Notification` migrou para campos canônicos no Prisma client (`videoId/videoVersionId`) com `@map("lessonId"/"lessonVersionId")`, mantendo colunas físicas legadas e ajustando API.
-  - [ ] Terceira passada Prisma: revisar/renomear relation field names e comments legados (`courses/modules/lessons/lessonVersions`, `courseId/moduleId/lessonId`) sem quebrar compatibilidade. (Adiado ate estabilizacao do runtime apos Pass 2; tentativa inicial aumentou blast radius no worker/API)
+  - [~] Terceira passada Prisma: revisar/renomear relation field names e comments legados (`courses/modules/lessons/lessonVersions`, `courseId/moduleId/lessonId`) sem quebrar compatibilidade.
+    - [x] Relation fields Prisma migrados para nomes canônicos (`sections/videos/videoVersions/video`, `videoVersion`)
+    - [x] FKs escalares canônicos com `@map` concluídos em `Section/Video/VideoVersion/Block/Job/Notification`
+    - [x] API/worker recompilados após migração dos FKs escalares (`prisma generate` + `typecheck`)
+    - [x] Renomeio físico SQLite executado (`Course/Module/Lesson/LessonVersion` -> `Channel/Section/Video/VideoVersion` e colunas FK correspondentes)
+    - [x] `schema.prisma` alinhado após renomeio físico (remoção de `@@map/@map` nos modelos/colunas centrais do domínio)
+    - [ ] Limpeza final de comments/enum docs legados (`scope/type` descriptions e comentários ainda citando lesson/module)
 - [~] Storage paths: avaliar migracao de `data/courses/...` para `data/channels/...`.
   - [x] Root canônico configurável (`VIZLEC_STORAGE_DOMAIN_ROOT=channels`) com fallback automático para `courses`.
   - [x] Script de migracao (`dry-run/copy/move`) criado em `migration/vizlec_runtime/scripts/migrate-storage-domain-root.cjs` + scripts `pnpm storage:migrate:*`.
-  - [ ] Executar migracao de dados/paths persistidos em ambiente validado e remover fallback legado.
-- [ ] Script de migracao de dados legacy -> novo dominio (quando schema mudar).
+  - [~] Executar migracao de dados/paths persistidos em ambiente validado e remover fallback legado.
+    - [x] Script de renomeio físico de domínio no SQLite (draft executável `dry-run/apply`) em `migration/vizlec_runtime/scripts/prisma-domain-physical-rename-sqlite.cjs`
+    - [x] `dry-run` validado na base local (`vizlec.db`)
+    - [x] `apply` executado na base local (`vizlec.db`) com backup automático
+    - [ ] Remover fallback legado `courses` após validação de leitura/escrita em `channels`
+- [~] Script de migracao de dados legacy -> novo dominio (quando schema mudar).
   - [x] Script de renomeio fisico de dominio no SQLite (draft executavel `dry-run/apply`) em `migration/vizlec_runtime/scripts/prisma-domain-physical-rename-sqlite.cjs`
   - [x] `dry-run` validado na base local (`vizlec.db`)
+  - [x] `apply` executado na base local (`vizlec.db`)
 
 ### 5.5.4 Criterios de aceite
 

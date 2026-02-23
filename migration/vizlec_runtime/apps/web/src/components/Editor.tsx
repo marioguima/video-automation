@@ -3184,6 +3184,22 @@ const Editor: React.FC<EditorProps> = ({
     });
   };
 
+  const mergeLegacyBlockRef = useRef(mergeLegacyBlock);
+  const invalidateSlidesForBlocksRef = useRef(invalidateSlidesForBlocks);
+  const clearBrokenSlidesForBlocksRef = useRef(clearBrokenSlidesForBlocks);
+
+  useEffect(() => {
+    mergeLegacyBlockRef.current = mergeLegacyBlock;
+  }, [mergeLegacyBlock]);
+
+  useEffect(() => {
+    invalidateSlidesForBlocksRef.current = invalidateSlidesForBlocks;
+  }, [invalidateSlidesForBlocks]);
+
+  useEffect(() => {
+    clearBrokenSlidesForBlocksRef.current = clearBrokenSlidesForBlocks;
+  }, [clearBrokenSlidesForBlocks]);
+
   useEffect(() => {
     const activeStreams = [
       segmentJobId ? { jobId: segmentJobId, kind: 'segment' as const } : null,
@@ -3213,7 +3229,7 @@ const Editor: React.FC<EditorProps> = ({
         const block = (data?.block ?? null) as LegacyBlock | null;
         if (!block) return;
         if (selectedVersionIdRef.current && block.lessonVersionId !== selectedVersionIdRef.current) return;
-        mergeLegacyBlock(block);
+        mergeLegacyBlockRef.current(block);
       });
 
       es.addEventListener(JOB_STREAM_EVENT.AUDIO_BLOCK, (event) => {
@@ -3228,9 +3244,9 @@ const Editor: React.FC<EditorProps> = ({
         const data = parseData(event);
         const blockId = typeof data?.blockId === 'string' ? data.blockId : '';
         if (!blockId) return;
-        invalidateSlidesForBlocks([blockId]);
+        invalidateSlidesForBlocksRef.current([blockId]);
         setBrokenRawImages((prev) => ({ ...prev, [blockId]: false }));
-        clearBrokenSlidesForBlocks([blockId]);
+        clearBrokenSlidesForBlocksRef.current([blockId]);
         setImageUrls((prev) => ({ ...prev, [blockId]: `/blocks/${blockId}/image/raw` }));
         setImageRevisions((prev) => ({ ...prev, [blockId]: (prev[blockId] ?? 0) + 1 }));
       });
@@ -3284,10 +3300,7 @@ const Editor: React.FC<EditorProps> = ({
   }, [
     assetsJobId,
     assetsJobMode,
-    clearBrokenSlidesForBlocks,
     finalVideoJobId,
-    invalidateSlidesForBlocks,
-    mergeLegacyBlock,
     segmentJobId,
     ttsJobId
   ]);

@@ -97,13 +97,20 @@ type EntityChangedPayload = {
   action?: string;
   occurredAt?: string;
   courseId?: string | null;
+  channelId?: string | null;
   moduleId?: string | null;
+  sectionId?: string | null;
   lessonId?: string | null;
+  videoId?: string | null;
   lessonVersionId?: string | null;
+  videoVersionId?: string | null;
   blockId?: string | null;
   course?: LegacyCourse;
+  channel?: LegacyCourse;
   module?: LegacyModule;
+  section?: LegacyModule;
   lesson?: LegacyLesson;
+  video?: LegacyLesson;
   modules?: Array<{
     moduleId?: string;
     lessonIds?: string[];
@@ -136,13 +143,27 @@ const applyBuildStatusToModules = (
   modules: Module[],
   buildStatus: CourseBuildStatusPayload
 ): Module[] => {
+  const buildStatusModules =
+    ((buildStatus as unknown as { sections?: CourseBuildStatusPayload['modules'] }).sections ??
+      buildStatus.modules ??
+      []) as CourseBuildStatusPayload['modules'];
   const moduleBuildMap = new Map(
-    buildStatus.modules.map((moduleItem) => [moduleItem.moduleId, moduleItem])
+    buildStatusModules.map((moduleItem) => [
+      ((moduleItem as unknown as { sectionId?: string }).sectionId ?? moduleItem.moduleId),
+      moduleItem
+    ])
   );
   return modules.map((moduleItem) => {
     const moduleBuild = moduleBuildMap.get(moduleItem.id);
+    const moduleBuildLessons =
+      ((moduleBuild as unknown as { videos?: NonNullable<typeof moduleBuild>['lessons'] })?.videos ??
+        moduleBuild?.lessons ??
+        []) as NonNullable<typeof moduleBuild>['lessons'];
     const lessonBuildMap = new Map(
-      (moduleBuild?.lessons ?? []).map((lessonItem) => [lessonItem.lessonId, lessonItem])
+      moduleBuildLessons.map((lessonItem) => [
+        ((lessonItem as unknown as { videoId?: string }).videoId ?? lessonItem.lessonId),
+        lessonItem
+      ])
     );
     return {
       ...moduleItem,
@@ -175,7 +196,9 @@ const applyBuildStatusToModules = (
           duration: formatAudioDurationLabel(build.audio.durationS),
           audioDurationSeconds: build.audio.durationS,
           build: {
-            lessonVersionId: build.lessonVersionId,
+            lessonVersionId:
+              ((build as unknown as { videoVersionId?: string | null }).videoVersionId ??
+                build.lessonVersionId),
             blocksTotal: build.blocks.total,
             blocksReady: build.blocks.ready,
             audioReady: build.audio.ready,
@@ -421,7 +444,7 @@ const App: React.FC = () => {
           if (data.event === WS_EVENT.JOB_UPDATE) {
             const payload = data.payload;
             const buildStatus = payload?.buildStatus;
-            const impactedCourseId = payload?.courseId ?? null;
+            const impactedCourseId = payload?.channelId ?? payload?.courseId ?? null;
             if (buildStatus && impactedCourseId) {
               if (selectedCourse?.id === impactedCourseId) {
                 setSelectedCourse((prev) =>
@@ -459,18 +482,20 @@ const App: React.FC = () => {
             const action = payload?.action;
 
             if (entity === 'course') {
-              if (action === 'deleted' && payload?.courseId) {
-                setCourses((prev) => prev.filter((courseItem) => courseItem.id !== payload.courseId));
-                setSelectedCourse((prev) => (prev?.id === payload.courseId ? null : prev));
-                setSelectedLesson((prev) => (selectedCourse?.id === payload.courseId ? null : prev));
-                if (selectedCourse?.id === payload.courseId) {
+              const payloadCourseId = payload?.channelId ?? payload?.courseId;
+              if (action === 'deleted' && payloadCourseId) {
+                setCourses((prev) => prev.filter((courseItem) => courseItem.id !== payloadCourseId));
+                setSelectedCourse((prev) => (prev?.id === payloadCourseId ? null : prev));
+                setSelectedLesson((prev) => (selectedCourse?.id === payloadCourseId ? null : prev));
+                if (selectedCourse?.id === payloadCourseId) {
                   setCourseModules([]);
                   setCurrentView('courses');
                 }
                 return;
               }
-              if (payload?.course) {
-                const mapped = mapCourse(payload.course);
+              const payloadCourse = (payload as typeof payload & { channel?: LegacyCourse }).channel ?? payload?.course;
+              if (payloadCourse) {
+                const mapped = mapCourse(payloadCourse);
                 setCourses((prev) => {
                   const index = prev.findIndex((courseItem) => courseItem.id === mapped.id);
                   if (index === -1) return [mapped, ...prev];
@@ -493,25 +518,30 @@ const App: React.FC = () => {
               return;
             }
 
-            if (payload?.courseId && selectedCourse?.id !== payload.courseId) {
+            const payloadCourseId = payload?.channelId ?? payload?.courseId ?? null;
+            if (payloadCourseId && selectedCourse?.id !== payloadCourseId) {
               return;
             }
 
-            if (entity === 'module' && payload?.moduleId) {
+            const payloadModuleId = payload?.sectionId ?? payload?.moduleId ?? null;
+            if ((entity === 'module' || entity === 'section') && payloadModuleId) {
               if (action === 'deleted') {
                 setCourseModules((prev) =>
                   normalizeModuleLessonsOrder(
-                    prev.filter((moduleItem) => moduleItem.id !== payload.moduleId)
+                    prev.filter((moduleItem) => moduleItem.id !== payloadModuleId)
                   )
                 );
                 return;
               }
-              if (payload.module) {
+              const payloadModule =
+                (payload ? (payload as typeof payload & { section?: LegacyModule }).section : undefined) ??
+                payload?.module;
+              if (payloadModule) {
                 setCourseModules((prev) => {
-                  const existingIndex = prev.findIndex((moduleItem) => moduleItem.id === payload.moduleId);
+                  const existingIndex = prev.findIndex((moduleItem) => moduleItem.id === payloadModuleId);
                   const nextModule: Module = {
-                    id: payload.module!.id,
-                    title: payload.module!.name,
+                    id: payloadModule.id,
+                    title: payloadModule.name,
                     thumbLandscape: '/module-placeholder.svg',
                     thumbPortrait: '/module-placeholder-portrait.svg',
                     lessons: existingIndex >= 0 ? prev[existingIndex].lessons : [],
@@ -537,33 +567,39 @@ const App: React.FC = () => {
               return;
             }
 
-            if (entity === 'lesson' && payload?.lessonId) {
+            const payloadLessonId = payload?.videoId ?? payload?.lessonId ?? null;
+            if ((entity === 'lesson' || entity === 'video') && payloadLessonId) {
               if (action === 'deleted') {
                 setCourseModules((prev) =>
                   normalizeModuleLessonsOrder(
                     prev.map((moduleItem) => ({
                       ...moduleItem,
-                      lessons: moduleItem.lessons.filter((lessonItem) => lessonItem.id !== payload.lessonId)
+                      lessons: moduleItem.lessons.filter((lessonItem) => lessonItem.id !== payloadLessonId)
                     }))
                   )
                 );
-                setSelectedLesson((prev) => (prev?.id === payload.lessonId ? null : prev));
+                setSelectedLesson((prev) => (prev?.id === payloadLessonId ? null : prev));
                 return;
               }
-              const lessonPayload = payload.lesson;
+              const lessonPayload =
+                (payload ? (payload as typeof payload & { video?: LegacyLesson }).video : undefined) ??
+                payload?.lesson;
               if (lessonPayload) {
                 setCourseModules((prev) => {
                   const next = prev.map((moduleItem) => ({
                     ...moduleItem,
-                    lessons: moduleItem.lessons.filter((lessonItem) => lessonItem.id !== payload.lessonId)
+                    lessons: moduleItem.lessons.filter((lessonItem) => lessonItem.id !== payloadLessonId)
                   }));
-                  const targetModuleIndex = next.findIndex((moduleItem) => moduleItem.id === lessonPayload.moduleId);
+                  const lessonTargetModuleId =
+                    (lessonPayload as LegacyLesson & { sectionId?: string }).sectionId ??
+                    lessonPayload.moduleId;
+                  const targetModuleIndex = next.findIndex((moduleItem) => moduleItem.id === lessonTargetModuleId);
                   if (targetModuleIndex === -1) return normalizeModuleLessonsOrder(next);
                   const moduleItem = next[targetModuleIndex];
                   const lessonStub = getLessonStub(lessonPayload.id, lessonPayload.title);
                   const existing = prev
                     .flatMap((item) => item.lessons)
-                    .find((lessonItem) => lessonItem.id === payload.lessonId);
+                    .find((lessonItem) => lessonItem.id === payloadLessonId);
                   const lessonNext: LessonBlock = {
                     ...lessonStub,
                     ...(existing ?? {}),

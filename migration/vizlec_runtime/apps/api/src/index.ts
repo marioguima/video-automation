@@ -4304,7 +4304,6 @@ async function buildLessonSnapshotsByCourse(channelId: string): Promise<LessonBu
       by: ["videoVersionId"],
       where: {
         videoVersionId: { in: versionIds },
-        onScreenJson: { not: null },
         imagePromptJson: { not: null }
       },
       _count: { _all: true }
@@ -4780,7 +4779,7 @@ fastify.get(
             },
             totals: {
               type: "object",
-              required: ["courses", "lessons", "audioCount", "contentSeconds", "storageUsedBytes"],
+              required: ["courses", "videos", "audioCount", "contentSeconds", "storageUsedBytes"],
               properties: {
                 courses: { type: "number" },
                 videos: { type: "number" },
@@ -4791,7 +4790,7 @@ fastify.get(
             },
             growth: {
               type: "object",
-              required: ["courses", "lessons", "contentSeconds", "storageUsedBytes"],
+              required: ["courses", "videos", "contentSeconds", "storageUsedBytes"],
               properties: {
                 courses: { type: "number" },
                 videos: { type: "number" },
@@ -5142,19 +5141,19 @@ fastify.patch(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { channelId } = request.params as { channelId: string };
+    const { courseId } = request.params as { courseId: string };
     const normalized = normalizeCourseWriteInput(request.body);
     if ("error" in normalized) {
       return reply.code(400).send({ error: normalized.error });
     }
     const existing = await prisma.channel.findFirst({
-      where: { id: channelId, workspaceId: auth.scope.workspaceId }
+      where: { id: courseId, workspaceId: auth.scope.workspaceId }
     });
     if (!existing) {
       return reply.code(404).send({ error: "course not found" });
     }
     const course = await prisma.channel.update({
-      where: { id: channelId },
+      where: { id: courseId },
       data: normalized
     });
     const coursePayload = await buildRealtimeCoursePayload(course.id, auth.scope.workspaceId);
@@ -5183,15 +5182,15 @@ fastify.delete(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { channelId } = request.params as { channelId: string };
-    const result = await deleteCourseCascade(channelId, auth.scope.workspaceId);
+    const { courseId } = request.params as { courseId: string };
+    const result = await deleteCourseCascade(courseId, auth.scope.workspaceId);
     if (!result.deletedCourse) {
       return reply.code(404).send({ error: "course not found" });
     }
     broadcastEntityChanged({
       entity: "course",
       action: "deleted",
-      channelId,
+      channelId: courseId,
       occurredAt: new Date().toISOString()
     });
     return reply.code(200).send({ ok: true });
@@ -5300,7 +5299,7 @@ fastify.patch(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { sectionId } = request.params as { sectionId: string };
+    const { moduleId } = request.params as { moduleId: string };
     const body = request.body as { name?: string };
     const name = body?.name?.trim();
     if (!name) {
@@ -5308,7 +5307,7 @@ fastify.patch(
     }
     const existing = await prisma.section.findFirst({
       where: {
-        id: sectionId,
+        id: moduleId,
         workspaceId: auth.scope.workspaceId
       }
     });
@@ -5316,7 +5315,7 @@ fastify.patch(
       return reply.code(404).send({ error: "module not found" });
     }
     const moduleRecord = await prisma.section.update({
-      where: { id: sectionId },
+      where: { id: moduleId },
       data: { name }
     });
     broadcastEntityChanged({
@@ -5343,22 +5342,22 @@ fastify.delete(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { sectionId } = request.params as { sectionId: string };
+    const { moduleId } = request.params as { moduleId: string };
     const existing = await prisma.section.findFirst({
       where: {
-        id: sectionId,
+        id: moduleId,
         workspaceId: auth.scope.workspaceId
       },
       select: { channelId: true }
     });
-    const result = await deleteModuleCascade(sectionId, auth.scope.workspaceId);
+    const result = await deleteModuleCascade(moduleId, auth.scope.workspaceId);
     if (!result.deletedModule) {
       return reply.code(404).send({ error: "module not found" });
     }
     broadcastEntityChanged({
       entity: "module",
       action: "deleted",
-      sectionId,
+      sectionId: moduleId,
       channelId: existing?.channelId ?? null,
       occurredAt: new Date().toISOString()
     });
@@ -5620,10 +5619,10 @@ fastify.get(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { videoId } = request.params as { videoId: string };
+    const { lessonId } = request.params as { lessonId: string };
     const lesson = await prisma.video.findFirst({
       where: {
-        id: videoId,
+        id: lessonId,
         workspaceId: auth.scope.workspaceId
       }
     });
@@ -5646,7 +5645,7 @@ fastify.patch(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { videoId } = request.params as { videoId: string };
+    const { lessonId } = request.params as { lessonId: string };
     const body = request.body as { title?: string };
     const title = body?.title?.trim();
     if (!title) {
@@ -5654,7 +5653,7 @@ fastify.patch(
     }
     const existing = await prisma.video.findFirst({
       where: {
-        id: videoId,
+        id: lessonId,
         workspaceId: auth.scope.workspaceId
       }
     });
@@ -5662,7 +5661,7 @@ fastify.patch(
       return reply.code(404).send({ error: "lesson not found" });
     }
     const lesson = await prisma.video.update({
-      where: { id: videoId },
+      where: { id: lessonId },
       data: { title }
     });
     const moduleWithCourse = await prisma.section.findUnique({
@@ -5694,10 +5693,10 @@ fastify.delete(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { videoId } = request.params as { videoId: string };
+    const { lessonId } = request.params as { lessonId: string };
     const existing = await prisma.video.findFirst({
       where: {
-        id: videoId,
+        id: lessonId,
         workspaceId: auth.scope.workspaceId
       },
       select: {
@@ -5709,7 +5708,7 @@ fastify.delete(
         }
       }
     });
-    const result = await deleteLessonCascade(videoId, auth.scope.workspaceId);
+    const result = await deleteLessonCascade(lessonId, auth.scope.workspaceId);
     if (!result.deletedLesson) {
       return reply.code(404).send({ error: "lesson not found" });
     }
@@ -5718,7 +5717,7 @@ fastify.delete(
       action: "deleted",
       channelId: existing?.section?.channelId ?? null,
       sectionId: existing?.sectionId ?? null,
-      videoId,
+      videoId: lessonId,
       occurredAt: new Date().toISOString()
     });
     if (existing?.section?.channelId) {
@@ -5769,7 +5768,7 @@ fastify.post(
       description: "Cria uma nova versão para uma lição existente",
       params: {
         type: "object",
-        required: ["lessonId"],
+        required: ["videoId"],
         properties: {
           videoId: { type: "string" }
         }
