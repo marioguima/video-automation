@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { LessonBlock, Template, Voice } from '../types';
 import { apiGet, apiPost, apiPatch, API_BASE } from '../lib/api';
+import { JOB_STREAM_EVENT, WS_EVENT, readVizlecWsDetail } from '../lib/events';
 import VoiceSelectorModal from './VoiceSelectorModal';
 
 interface EditorProps {
@@ -1173,6 +1174,24 @@ const Editor: React.FC<EditorProps> = ({
   const ttsHealthFirstFailureAtRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (blocks.length === 0) return;
+    setImagePanelTabs((prev) => {
+      let changed = false;
+      const next: Record<string, 'image' | 'prompt'> = { ...prev };
+      const blockIds = new Set(blocks.map((block) => block.id));
+
+      for (const blockId of Object.keys(next)) {
+        if (!blockIds.has(blockId)) {
+          delete next[blockId];
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [blocks]);
+
+  useEffect(() => {
     segmentJobIdRef.current = segmentJobId;
   }, [segmentJobId]);
 
@@ -1354,7 +1373,7 @@ const Editor: React.FC<EditorProps> = ({
           masterVolume?: number | null;
           bgmPath?: string | null;
           bgmVolume?: number | null;
-        }>(`/lesson-versions/${selectedVersionId}/preferences`, payload);
+        }>(`/video-versions/${selectedVersionId}/preferences`, payload);
         setVersions((prev) =>
           prev.map((item) =>
             item.id === selectedVersionId
@@ -1390,7 +1409,7 @@ const Editor: React.FC<EditorProps> = ({
         );
       } catch (err) {
         console.error(err);
-        setError((err as Error).message ?? 'Failed to save lesson generation preferences.');
+        setError((err as Error).message ?? 'Failed to save video generation preferences.');
       }
     },
     [selectedVersionId]
@@ -1484,14 +1503,14 @@ const Editor: React.FC<EditorProps> = ({
       return;
     }
     setIsLoadingVersions(true);
-    apiGet<LegacyLessonVersion[]>(`/lessons/${lessonId}/versions`)
+    apiGet<LegacyLessonVersion[]>(`/videos/${lessonId}/versions`)
       .then((items) => {
         setVersions(items);
         setSelectedVersionId(items[0]?.id ?? null);
       })
       .catch((err) => {
         console.error(err);
-        setError(err.message ?? 'Failed to load lesson versions.');
+        setError(err.message ?? 'Failed to load video versions.');
         setVersions([]);
         setSelectedVersionId(null);
       })
@@ -1521,7 +1540,7 @@ const Editor: React.FC<EditorProps> = ({
       return;
     }
     setIsLoadingBlocks(true);
-    apiGet<LegacyBlock[]>(`/lesson-versions/${selectedVersionId}/blocks`)
+    apiGet<LegacyBlock[]>(`/video-versions/${selectedVersionId}/blocks`)
       .then((items) => {
         const mapped = items.map((block) => {
           const prompt = parseImagePrompt(block.imagePromptJson);
@@ -1595,7 +1614,7 @@ const Editor: React.FC<EditorProps> = ({
         return;
       }
     apiGet<{ blocks: { blockId: string; url?: string | null }[] }>(
-      `/lesson-versions/${selectedVersionId}/audios`,
+      `/video-versions/${selectedVersionId}/audios`,
       { cacheMs: 0 }
     )
       .then((data) => {
@@ -1697,7 +1716,7 @@ const Editor: React.FC<EditorProps> = ({
     const syncJobState = async () => {
       try {
         const state = await apiGet<JobStatePayload>(
-          `/lesson-versions/${selectedVersionId}/job-state`,
+          `/video-versions/${selectedVersionId}/job-state`,
           { cacheMs: 0, dedupe: false }
         );
         if (cancelled) return;
@@ -1768,7 +1787,7 @@ const Editor: React.FC<EditorProps> = ({
           setFinalVideoProgress(null);
         }
         if (state.finalVideoReady && selectedVersionId) {
-          setFinalVideoUrl((prev) => prev ?? `${API_BASE}/lesson-versions/${selectedVersionId}/final-video?v=${Date.now()}`);
+          setFinalVideoUrl((prev) => prev ?? `${API_BASE}/video-versions/${selectedVersionId}/final-video?v=${Date.now()}`);
         } else if (!state.finalVideoReady) {
           setFinalVideoUrl(null);
           setFinalVideoLastElapsedSeconds(null);
@@ -1854,18 +1873,15 @@ const Editor: React.FC<EditorProps> = ({
     const isTerminal = (status: string) =>
       status === 'succeeded' || status === 'failed' || status === 'canceled';
     const onWsEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        event?: string;
-        payload?: {
-          jobId?: string;
-          status?: string;
-          type?: string;
-          blockId?: string | null;
-          lessonVersionId?: string | null;
-          progressPercent?: number | null;
-        };
-      }>).detail;
-      if (!detail || detail.event !== 'job_update') return;
+      const detail = readVizlecWsDetail<{
+        jobId?: string;
+        status?: string;
+        type?: string;
+        blockId?: string | null;
+        lessonVersionId?: string | null;
+        progressPercent?: number | null;
+      }>(event);
+      if (!detail || detail.event !== WS_EVENT.JOB_UPDATE) return;
       const payload = detail.payload;
       const lessonVersionId = payload?.lessonVersionId?.trim();
       if (!lessonVersionId || lessonVersionId !== selectedVersionId) return;
@@ -1921,7 +1937,7 @@ const Editor: React.FC<EditorProps> = ({
             }
           }
           if (status === 'succeeded') {
-            apiGet<LegacyBlock[]>(`/lesson-versions/${selectedVersionId}/blocks`, {
+            apiGet<LegacyBlock[]>(`/video-versions/${selectedVersionId}/blocks`, {
               cacheMs: 0,
               dedupe: false
             })
@@ -2022,7 +2038,7 @@ const Editor: React.FC<EditorProps> = ({
             return next;
           });
           if (status === 'succeeded') {
-            apiGet<LegacyBlock[]>(`/lesson-versions/${selectedVersionId}/blocks`, {
+            apiGet<LegacyBlock[]>(`/video-versions/${selectedVersionId}/blocks`, {
               cacheMs: 0,
               dedupe: false
             })
@@ -2060,7 +2076,7 @@ const Editor: React.FC<EditorProps> = ({
           if (status === 'succeeded') {
             if (selectedVersionIdRef.current) {
               apiGet<{ blocks: { blockId: string; url?: string | null }[] }>(
-                `/lesson-versions/${selectedVersionIdRef.current}/audios`,
+                `/video-versions/${selectedVersionIdRef.current}/audios`,
                 { cacheMs: 0, dedupe: false }
               )
                 .then((payload) => {
@@ -2120,7 +2136,7 @@ const Editor: React.FC<EditorProps> = ({
           if (status === 'succeeded') {
             if (type === 'image' && settledVersionId) {
               apiGet<{ blocks: { blockId: string; url?: string | null }[] }>(
-                `/lesson-versions/${settledVersionId}/images`,
+                `/video-versions/${settledVersionId}/images`,
                 { cacheMs: 0, dedupe: false }
               )
                 .then((payload) => {
@@ -2176,7 +2192,7 @@ const Editor: React.FC<EditorProps> = ({
           setFinalVideoProgress(null);
           if (status === 'succeeded') {
             setFinalVideoLastElapsedSeconds(elapsed);
-            setFinalVideoUrl(`${API_BASE}/lesson-versions/${selectedVersionId}/final-video?v=${Date.now()}`);
+            setFinalVideoUrl(`${API_BASE}/video-versions/${selectedVersionId}/final-video?v=${Date.now()}`);
           } else if (status === 'failed') {
             setFinalVideoLastElapsedSeconds(null);
             setError('Failed to generate final video.');
@@ -2213,7 +2229,7 @@ const Editor: React.FC<EditorProps> = ({
       return;
     }
     apiGet<{ blocks: { blockId: string; url?: string | null }[] }>(
-      `/lesson-versions/${selectedVersionId}/images`,
+      `/video-versions/${selectedVersionId}/images`,
       { cacheMs: 0 }
     )
       .then((data) => {
@@ -2701,7 +2717,7 @@ const Editor: React.FC<EditorProps> = ({
     setImageProgress({ current: 0, total: blocks.length });
     try {
       const job = await apiPost<{ id: string; status: string }>(
-        `/lesson-versions/${selectedVersionId}/images`,
+        `/video-versions/${selectedVersionId}/images`,
         {
           templateId: selectedTemplateId || undefined,
           clientId: dispatchAgentIdRef.current,
@@ -2796,7 +2812,7 @@ const Editor: React.FC<EditorProps> = ({
         setBrokenSlides({});
       }
       const job = await apiPost<{ id: string; status: string }>(
-        `/lesson-versions/${selectedVersionId}/segment`,
+        `/video-versions/${selectedVersionId}/segment`,
         { clientId: dispatchAgentIdRef.current, requestId: crypto.randomUUID(), purge }
       );
       setSegmentJobId(job.id);
@@ -2811,7 +2827,7 @@ const Editor: React.FC<EditorProps> = ({
 
   const startBatchTtsGeneration = useCallback(async (): Promise<boolean> => {
     if (!selectedVersionId) {
-      setError('Create a lesson version before generating audios.');
+      setError('Create a video version before generating audios.');
       return false;
     }
     setError(null);
@@ -2846,7 +2862,7 @@ const Editor: React.FC<EditorProps> = ({
       setTtsProgress((prev) => prev ?? { current: 0, total: blocks.length });
       setTtsPhase('waiting');
       const job = await apiPost<{ id: string; status: string }>(
-        `/lesson-versions/${selectedVersionId}/tts`,
+        `/video-versions/${selectedVersionId}/tts`,
         {
           clientId: dispatchAgentIdRef.current,
           voiceId: lessonVoiceId ?? undefined,
@@ -2888,7 +2904,7 @@ const Editor: React.FC<EditorProps> = ({
         return;
       }
       if (!selectedVersionId) {
-        setError('Create a lesson version before generating blocks.');
+        setError('Create a video version before generating blocks.');
         return;
       }
       await startSegmentJob(false);
@@ -2918,7 +2934,7 @@ const Editor: React.FC<EditorProps> = ({
         return;
       }
       if (!selectedVersionId) {
-        setError('Create a lesson version before generating audios.');
+        setError('Create a video version before generating audios.');
         return;
       }
       if (!blocks.length) {
@@ -2934,7 +2950,7 @@ const Editor: React.FC<EditorProps> = ({
           return;
         }
         if (!selectedVersionId) {
-          setError('Create a lesson version before generating the final video.');
+          setError('Create a video version before generating the final video.');
           return;
         }
         if (blocks.length === 0) {
@@ -2961,7 +2977,7 @@ const Editor: React.FC<EditorProps> = ({
           setFinalVideoPhase('waiting');
           setFinalVideoProgress({ current: 0, total: blocks.length });
           const job = await apiPost<{ id: string; status: string }>(
-            `/lesson-versions/${selectedVersionId}/final-video`,
+            `/video-versions/${selectedVersionId}/final-video`,
             {
               clientId: dispatchAgentIdRef.current,
               requestId: crypto.randomUUID(),
@@ -3192,7 +3208,7 @@ const Editor: React.FC<EditorProps> = ({
       const es = new EventSource(`${API_BASE}/jobs/${stream.jobId}/stream`, { withCredentials: true });
       sources.push(es);
 
-      es.addEventListener('block', (event) => {
+      es.addEventListener(JOB_STREAM_EVENT.BLOCK, (event) => {
         const data = parseData(event);
         const block = (data?.block ?? null) as LegacyBlock | null;
         if (!block) return;
@@ -3200,7 +3216,7 @@ const Editor: React.FC<EditorProps> = ({
         mergeLegacyBlock(block);
       });
 
-      es.addEventListener('audio_block', (event) => {
+      es.addEventListener(JOB_STREAM_EVENT.AUDIO_BLOCK, (event) => {
         const data = parseData(event);
         const blockId = typeof data?.blockId === 'string' ? data.blockId : '';
         if (!blockId) return;
@@ -3208,7 +3224,7 @@ const Editor: React.FC<EditorProps> = ({
         setAudioRevisions((prev) => ({ ...prev, [blockId]: (prev[blockId] ?? 0) + 1 }));
       });
 
-      es.addEventListener('image', (event) => {
+      es.addEventListener(JOB_STREAM_EVENT.IMAGE, (event) => {
         const data = parseData(event);
         const blockId = typeof data?.blockId === 'string' ? data.blockId : '';
         if (!blockId) return;
@@ -3219,7 +3235,7 @@ const Editor: React.FC<EditorProps> = ({
         setImageRevisions((prev) => ({ ...prev, [blockId]: (prev[blockId] ?? 0) + 1 }));
       });
 
-      es.addEventListener('progress', (event) => {
+      es.addEventListener(JOB_STREAM_EVENT.PROGRESS, (event) => {
         const data = parseData(event);
         const index = typeof data?.index === 'number' ? data.index : null;
         const total = typeof data?.total === 'number' ? data.total : null;
@@ -3250,14 +3266,14 @@ const Editor: React.FC<EditorProps> = ({
         }
       });
 
-      es.addEventListener('final_video', (event) => {
+      es.addEventListener(JOB_STREAM_EVENT.FINAL_VIDEO, (event) => {
         const data = parseData(event);
         const url = typeof data?.url === 'string' ? data.url : '';
         if (!url) return;
         setFinalVideoUrl(`${API_BASE}${url}?v=${Date.now()}`);
       });
 
-      es.addEventListener('done', () => {
+      es.addEventListener(JOB_STREAM_EVENT.DONE, () => {
         es.close();
       });
     }
@@ -3404,9 +3420,9 @@ const Editor: React.FC<EditorProps> = ({
   const finalVideoLink = finalVideoUrl ?? undefined;
   const topFinalComposeGaugeOffset = ((finalVideoElapsedSeconds * 16) % 140) - 40;
   const breadcrumbParts = [
-    { key: 'course' as const, label: (courseTitle ?? '').trim(), onClick: onGoCourse },
-    { key: 'module' as const, label: (moduleTitle ?? '').trim(), onClick: onGoModule },
-    { key: 'lesson' as const, label: (lessonTitle ?? '').trim(), onClick: undefined }
+    { key: 'channel' as const, label: (courseTitle ?? '').trim(), onClick: onGoCourse },
+    { key: 'section' as const, label: (moduleTitle ?? '').trim(), onClick: onGoModule },
+    { key: 'video' as const, label: (lessonTitle ?? '').trim(), onClick: undefined }
   ].filter((part) => part.label.length > 0);
   const audioReviewQueueSet = useMemo(() => new Set(audioReviewQueue), [audioReviewQueue]);
   const blocksById = useMemo(() => {
@@ -4581,14 +4597,14 @@ const Editor: React.FC<EditorProps> = ({
                 <button
                   onClick={() => setIsScriptSidebarOpen((prev) => !prev)}
                   className="h-8 w-8 inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label={isScriptSidebarOpen ? 'Hide lesson panel' : 'Show lesson panel'}
+                  aria-label={isScriptSidebarOpen ? 'Hide video panel' : 'Show video panel'}
                 >
                   <RightRailIcon open={isScriptSidebarOpen} />
                 </button>
                 <button
                   onClick={() => setIsMobileActionsMenuOpen((prev) => !prev)}
                   className="h-8 w-8 rounded-[5px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))] text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors inline-flex items-center justify-center"
-                  aria-label="Open lesson actions"
+                  aria-label="Open video actions"
                 >
                   <Ellipsis size={16} />
                 </button>
@@ -4685,15 +4701,27 @@ const Editor: React.FC<EditorProps> = ({
                   )}
 
                   {hasFinalVideoReady ? (
-                    <a
-                      href={finalVideoLink}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={() => setIsMobileActionsMenuOpen(false)}
-                      className="w-full h-9 px-3 rounded-[5px] text-left text-[11px] font-bold uppercase tracking-wide border border-emerald-500/35 bg-emerald-600 text-white inline-flex items-center"
-                    >
-                      View final video
-                    </a>
+                    <>
+                      <a
+                        href={finalVideoLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setIsMobileActionsMenuOpen(false)}
+                        className="w-full h-9 px-3 rounded-[5px] text-left text-[11px] font-bold uppercase tracking-wide border border-emerald-500/35 bg-emerald-600 text-white inline-flex items-center"
+                      >
+                        View final video
+                      </a>
+                      <button
+                        onClick={() => {
+                          handleGlobalAction('generateFinalVideo');
+                          setIsMobileActionsMenuOpen(false);
+                        }}
+                        disabled={isGenerateFinalVideoDisabled}
+                        className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-orange-500/25 bg-orange-500/10 text-muted-foreground ${toolbarDisabledLikeAudioReview}`}
+                      >
+                        Regenerate final video
+                      </button>
+                    </>
                   ) : (
                     <button
                       onClick={() => {
@@ -4880,15 +4908,25 @@ const Editor: React.FC<EditorProps> = ({
 
           {/* Primary Action */}
           {hasFinalVideoReady ? (
-            <a
-              href={finalVideoLink}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider px-5 h-8 rounded-[5px] transition-all shadow-lg bg-emerald-600 text-white border border-emerald-500/40 hover:bg-emerald-700"
-            >
-              <ExternalLink size={14} />
-              View Final Video
-            </a>
+            <div className="flex items-center h-8 rounded-[5px] border border-emerald-500/40 bg-emerald-600 shadow-lg shadow-emerald-500/10 overflow-hidden">
+              <a
+                href={finalVideoLink}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider px-5 h-8 text-white hover:bg-emerald-700 transition-colors"
+              >
+                <ExternalLink size={14} />
+                View Final Video
+              </a>
+              <button
+                onClick={() => handleGlobalAction('generateFinalVideo')}
+                disabled={isGenerateFinalVideoDisabled}
+                title="Regenerate final video"
+                className={`h-8 px-2.5 border-l border-emerald-500/35 bg-white/5 text-white/90 hover:bg-white/10 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white/5`}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
           ) : (
             <button 
               onClick={() => handleGlobalAction('generateFinalVideo')}
@@ -4941,8 +4979,8 @@ const Editor: React.FC<EditorProps> = ({
           <button
             onClick={() => setIsScriptSidebarOpen((prev) => !prev)}
             className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-            aria-label={isScriptSidebarOpen ? 'Hide lesson panel' : 'Show lesson panel'}
-            title={isScriptSidebarOpen ? 'Hide lesson panel' : 'Show lesson panel'}
+            aria-label={isScriptSidebarOpen ? 'Hide video panel' : 'Show video panel'}
+            title={isScriptSidebarOpen ? 'Hide video panel' : 'Show video panel'}
           >
             <RightRailIcon open={isScriptSidebarOpen} />
           </button>
@@ -4989,19 +5027,19 @@ const Editor: React.FC<EditorProps> = ({
 
           {!lessonId && (
             <div className="max-w-[1200px] mx-auto rounded-[5px] border border-border bg-[hsl(var(--editor-surface))] p-8 text-center text-muted-foreground">
-              Select a lesson to start editing.
+              Select a video to start editing.
             </div>
           )}
 
           {lessonId && (isLoadingVersions || isLoadingBlocks) && (
             <div className="max-w-[1200px] mx-auto rounded-[5px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] p-10 flex items-center justify-center">
-              <div className="w-8 h-8 border-2 border-orange-600 border-t-transparent rounded-full animate-spin" aria-label="Loading lesson" />
+              <div className="w-8 h-8 border-2 border-orange-600 border-t-transparent rounded-full animate-spin" aria-label="Loading video" />
             </div>
           )}
 
           {lessonId && selectedVersionId && blocks.length === 0 && !isLoadingBlocks && (
             <div className="max-w-[1200px] mx-auto bg-[hsl(var(--editor-surface))] border border-[hsl(var(--editor-border))] rounded-[5px] p-6 text-sm text-muted-foreground">
-              No blocks generated yet. Use “Generate Blocks” to create them from the current lesson version.
+              No blocks generated yet. Use “Generate Blocks” to create them from the current video version.
             </div>
           )}
 
@@ -5010,7 +5048,6 @@ const Editor: React.FC<EditorProps> = ({
               Audio Review is open. Close the modal to return to the full editor.
             </div>
           ) : blocks.map((block) => {
-              const blockMissingOnScreen = !hasOnScreenText(block);
               const blockMissingPrompt = !hasImagePromptText(block);
               return (
             <div
@@ -5083,7 +5120,7 @@ const Editor: React.FC<EditorProps> = ({
                       isGeneratingText={Boolean(generatingStates[block.id]?.text || isTextGenerationBusy)}
                       isLocked={isGeneratingFinalVideo}
                       ttsReady={ttsHealthy}
-                      missingOnScreen={blockMissingOnScreen}
+                      missingOnScreen={false}
                       onDraft={setNarratedDraft}
                       onSave={saveNarratedText}
                       onRegenerate={handleRegenerateAudio}
@@ -5098,7 +5135,9 @@ const Editor: React.FC<EditorProps> = ({
                 {/* Preview and Image Forge section (right) */}
                 <div className="w-[400px] bg-[hsl(var(--editor-surface))] p-8 flex flex-col gap-5 overflow-y-auto custom-scrollbar border-[hsl(var(--editor-border))] relative">
                 {(() => {
-                  const currentImagePanelTab = imagePanelTabs[block.id] ?? 'image';
+                  const currentImagePanelTab =
+                    imagePanelTabs[block.id] ??
+                    (imageUrls[block.id] || block.rawImageUrl || block.generatedImageUrl ? 'image' : 'prompt');
                   return (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2 p-1 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/40">
@@ -5202,13 +5241,13 @@ const Editor: React.FC<EditorProps> = ({
           <div className="h-44" />
         </div>
 
-        {/* Right lesson rail (fixed on the right with independent scroll) */}
+        {/* Right video rail (fixed on the right with independent scroll) */}
         {isScriptSidebarOpen && (
           <aside className="w-72 bg-[hsl(var(--editor-surface))] p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar flex-shrink-0 border-l border-[hsl(var(--editor-border))] z-10">
             <div className="space-y-2 border-b border-[hsl(var(--editor-border))] pb-3">
               <h3 className="font-bold text-muted-foreground text-[10px] uppercase tracking-[0.2em] flex items-center gap-2">
                 <Settings2 size={13} />
-                Lesson Controls
+                Video Controls
               </h3>
 
               <button
@@ -5542,7 +5581,7 @@ const Editor: React.FC<EditorProps> = ({
 
             <h3 className="font-bold text-muted-foreground text-[10px] uppercase tracking-[0.2em] flex items-center gap-2">
               <LayoutIcon size={14} />
-              Lesson Outline
+              Video Outline
             </h3>
             <nav className="space-y-1">
               {blocks.map((block) => {

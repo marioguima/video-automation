@@ -18,9 +18,29 @@ import type { WebSocket } from "ws";
 import {
   buildDeterministicBlocks,
   ensureDataDir,
+  enrichDomainAliasJsonValue,
+  enrichDomainAliasPayload,
   getConfig,
+  JOB_STREAM_EVENT,
   loadRootEnv,
+  normalizeJobEventLifecycle,
+  normalizeJobEventPhase,
+  normalizeProgressPercent,
+  normalizeInternalInventoryDelta,
+  normalizeInternalInventorySnapshot,
   sanitizeNarratedScriptText,
+  rewriteLegacyDomainUrlPath,
+  WS_EVENT,
+  type AgentControlCommandName,
+  type AgentControlIncomingMessage,
+  type AgentControlOutgoingMessage,
+  type AgentControlIntegrationProvider,
+  type AgentIntegrationConfig,
+  type WorkerAgentCommandName,
+  type InternalInventoryDeltaEventPayload,
+  type InternalInventoryAssetRef,
+  type InternalInventorySnapshotEventPayload,
+  type InternalJobEventPayload,
   loadVoiceIndex,
   findVoiceById,
   blockSlideDir
@@ -123,24 +143,24 @@ function stableJson(value: unknown): unknown {
 
 function extractImpactedLessonSnapshot(
   buildStatus: Record<string, unknown> | null,
-  lessonId: string | null
+  videoId: string | null
 ): Record<string, unknown> | null {
-  if (!buildStatus || !lessonId) return null;
-  const modules = Array.isArray(buildStatus.modules) ? buildStatus.modules : [];
+  if (!buildStatus || !videoId) return null;
+  const modules = Array.isArray(buildStatus.sections) ? buildStatus.sections : [];
   for (const moduleItem of modules) {
     if (!moduleItem || typeof moduleItem !== "object") continue;
-    const lessons = Array.isArray((moduleItem as Record<string, unknown>).lessons)
-      ? ((moduleItem as Record<string, unknown>).lessons as unknown[])
+    const lessons = Array.isArray((moduleItem as Record<string, unknown>).videos)
+      ? ((moduleItem as Record<string, unknown>).videos as unknown[])
       : [];
     for (const lessonItem of lessons) {
       if (!lessonItem || typeof lessonItem !== "object") continue;
       const lesson = lessonItem as Record<string, unknown>;
-      if (normalizeString(lesson.lessonId) !== lessonId) continue;
+      if (normalizeString(lesson.videoId) !== videoId) continue;
       const audio = lesson.audio as Record<string, unknown> | undefined;
       const images = lesson.images as Record<string, unknown> | undefined;
       return {
-        lessonId: normalizeString(lesson.lessonId),
-        lessonVersionId: normalizeString(lesson.lessonVersionId),
+        videoId: normalizeString(lesson.videoId),
+        videoVersionId: normalizeString(lesson.videoVersionId),
         progressPercent: normalizeNumber(lesson.progressPercent),
         audioReady: typeof audio?.ready === "number" ? audio.ready : null,
         audioDurationS: normalizeNumber(audio?.durationS),
@@ -160,10 +180,10 @@ function buildRelevantJobUpdateFingerprintPayload(payload: Record<string, unknow
   const jobId = normalizeString(payload.jobId);
   const type = normalizeString(payload.type);
   const status = normalizeString(payload.status);
-  const courseId = normalizeString(payload.courseId);
-  const moduleId = normalizeString(payload.moduleId);
-  const lessonId = normalizeString(payload.lessonId);
-  const lessonVersionId = normalizeString(payload.lessonVersionId);
+  const channelId = normalizeString(payload.channelId);
+  const sectionId = normalizeString(payload.sectionId);
+  const videoId = normalizeString(payload.videoId);
+  const videoVersionId = normalizeString(payload.videoVersionId);
   const blockId = normalizeString(payload.blockId);
   const errorValue = payload.error;
   const error =
@@ -187,7 +207,7 @@ function buildRelevantJobUpdateFingerprintPayload(payload: Record<string, unknow
     ? {
         progressPercent: normalizeNumber(buildStatusRaw.progressPercent),
         jobs: stableJson(buildStatusRaw.jobs ?? null),
-        impactedLesson: extractImpactedLessonSnapshot(buildStatusRaw, lessonId)
+        impactedLesson: extractImpactedLessonSnapshot(buildStatusRaw, videoId)
       }
     : null;
 
@@ -195,10 +215,10 @@ function buildRelevantJobUpdateFingerprintPayload(payload: Record<string, unknow
     jobId,
     type,
     status,
-    courseId,
-    moduleId,
-    lessonId,
-    lessonVersionId,
+    channelId,
+    sectionId,
+    videoId,
+    videoVersionId,
     blockId,
     lifecycle,
     phase,
@@ -208,7 +228,7 @@ function buildRelevantJobUpdateFingerprintPayload(payload: Record<string, unknow
   });
   const scopeKey = jobId
     ? `job:${jobId}`
-    : `agg:${type ?? "unknown"}|${courseId ?? "none"}|${moduleId ?? "none"}|${lessonId ?? "none"}|${lessonVersionId ?? "none"}|${blockId ?? "none"}|${status ?? "none"}`;
+    : `agg:${type ?? "unknown"}|${channelId ?? "none"}|${sectionId ?? "none"}|${videoId ?? "none"}|${videoVersionId ?? "none"}|${blockId ?? "none"}|${status ?? "none"}`;
   return {
     scopeKey,
     fingerprint: JSON.stringify(canonical)
@@ -227,14 +247,15 @@ function shouldBroadcastCanonicalJobUpdate(payload: Record<string, unknown>): bo
 }
 
 const broadcastJobEvent = (payload: Record<string, unknown>): void => {
-  if (!shouldBroadcastCanonicalJobUpdate(payload)) return;
-  broadcastWsEvent("job_update", payload);
+  const enriched = enrichDomainAliasPayload(payload);
+  if (!shouldBroadcastCanonicalJobUpdate(enriched)) return;
+  broadcastWsEvent(WS_EVENT.JOB_UPDATE, enriched);
 };
 const broadcastNotification = (payload: Record<string, unknown>): void => {
-  broadcastWsEvent("notification", payload);
+  broadcastWsEvent(WS_EVENT.NOTIFICATION, enrichDomainAliasPayload(payload));
 };
 const broadcastEntityChanged = (payload: Record<string, unknown>): void => {
-  broadcastWsEvent("entity_changed", payload);
+  broadcastWsEvent(WS_EVENT.ENTITY_CHANGED, enrichDomainAliasPayload(payload));
 };
 
 type InventoryState = {
@@ -252,18 +273,7 @@ type InventoryMetrics = {
   diskUsageBytes: number;
 };
 
-type WorkerInventoryAssetRef = {
-  assetId?: string;
-  courseId?: string;
-  moduleId?: string;
-  lessonId?: string;
-  lessonVersionId?: string;
-  blockId: string;
-  kind: string;
-  path: string;
-  sizeBytes?: number;
-  durationSeconds?: number;
-};
+type WorkerInventoryAssetRef = InternalInventoryAssetRef;
 
 type InventoryReconciliationSnapshot = {
   workspaceId: string;
@@ -292,112 +302,10 @@ const pairingTokens = new Map<
   { workspaceId: string; createdByUserId: string; expiresAtMs: number; used: boolean }
 >();
 
-type AgentControlCommandName = "ollama_health" | "xtts_health" | "comfyui_health";
+type AgentControlMessage = AgentControlIncomingMessage;
+type AgentControlRequestMessage = AgentControlOutgoingMessage;
 
-type AgentControlMessage =
-  | {
-      type: "agent_hello";
-      messageId: string;
-      payload: {
-        workspaceId: string;
-        agentId: string;
-        label?: string | null;
-        machineFingerprint?: string | null;
-      };
-    }
-  | {
-      type: "agent_heartbeat";
-      messageId: string;
-      payload: { workspaceId: string; agentId: string };
-    }
-  | {
-      type: "integration_health_response";
-      messageId: string;
-      inReplyTo: string;
-      payload: {
-        provider: "ollama" | "xtts" | "comfyui";
-        statusCode: number;
-        data: Record<string, unknown>;
-      };
-    }
-  | {
-      type: "agent_error";
-      messageId: string;
-      inReplyTo?: string;
-      payload: { code: string; message: string };
-    }
-  | {
-      type: "worker_command_response";
-      messageId: string;
-      inReplyTo: string;
-      payload: {
-        command:
-          | "comfy_workflows_list"
-          | "comfy_workflow_import"
-          | "tts_voices_list"
-          | "worker_queue_wake"
-          | "system_hard_cleanup"
-          | "system_free_space_plan"
-          | "system_free_space_execute"
-          | "block_image_raw_get"
-          | "block_audio_raw_get"
-          | "block_slide_get"
-          | "lesson_version_final_video_get"
-          | "lesson_version_final_video_post"
-          | "lesson_version_images_post"
-          | "lesson_version_slides_post"
-          | "lesson_version_assets_post"
-          | "lesson_version_assets_image_post"
-          | "lesson_version_audios_list"
-          | "lesson_version_images_list"
-          | "lesson_version_slides_list"
-          | "lesson_version_job_state";
-        statusCode: number;
-        data: Record<string, unknown>;
-      };
-    };
-
-type AgentControlRequestMessage =
-  | {
-      type: "integration_health_request";
-      messageId: string;
-      payload: {
-        provider: "ollama" | "xtts" | "comfyui";
-        options?: Record<string, unknown>;
-        correlationId?: string;
-      };
-    }
-  | {
-      type: "worker_command_request";
-      messageId: string;
-      payload: {
-        command:
-          | "comfy_workflows_list"
-          | "comfy_workflow_import"
-          | "tts_voices_list"
-          | "worker_queue_wake"
-          | "system_hard_cleanup"
-          | "system_free_space_plan"
-          | "system_free_space_execute"
-          | "block_image_raw_get"
-          | "block_audio_raw_get"
-          | "block_slide_get"
-          | "lesson_version_final_video_get"
-          | "lesson_version_final_video_post"
-          | "lesson_version_images_post"
-          | "lesson_version_slides_post"
-          | "lesson_version_assets_post"
-          | "lesson_version_assets_image_post"
-          | "lesson_version_audios_list"
-          | "lesson_version_images_list"
-          | "lesson_version_slides_list"
-          | "lesson_version_job_state";
-        params?: Record<string, unknown>;
-        correlationId?: string;
-      };
-    };
-
-type AgentIntegrationConfigSnapshot = {
+type AgentIntegrationConfigSnapshot = AgentIntegrationConfig & {
   llmBaseUrl: string;
   comfyuiBaseUrl: string;
   ttsBaseUrl: string;
@@ -420,28 +328,8 @@ const pendingAgentReplies = new Map<
     timeout: NodeJS.Timeout;
     meta?: {
       kind: "integration_health" | "worker_command";
-      provider?: "ollama" | "xtts" | "comfyui";
-      command?:
-        | "comfy_workflows_list"
-        | "comfy_workflow_import"
-        | "tts_voices_list"
-        | "worker_queue_wake"
-        | "system_hard_cleanup"
-        | "system_free_space_plan"
-        | "system_free_space_execute"
-        | "block_image_raw_get"
-        | "block_audio_raw_get"
-        | "block_slide_get"
-        | "lesson_version_final_video_get"
-        | "lesson_version_final_video_post"
-        | "lesson_version_images_post"
-        | "lesson_version_slides_post"
-        | "lesson_version_assets_post"
-        | "lesson_version_assets_image_post"
-        | "lesson_version_audios_list"
-        | "lesson_version_images_list"
-        | "lesson_version_slides_list"
-        | "lesson_version_job_state";
+      provider?: AgentControlIntegrationProvider;
+      command?: WorkerAgentCommandName;
       workspaceId: string;
       agentId: string;
       startedAt: number;
@@ -647,10 +535,10 @@ async function applyWorkerSnapshotAssetState(params: {
       kind,
       path: path.resolve(rawPath),
       assetId: item.assetId?.trim() || undefined,
-      courseId: item.courseId?.trim() || undefined,
-      moduleId: item.moduleId?.trim() || undefined,
-      lessonId: item.lessonId?.trim() || undefined,
-      lessonVersionId: item.lessonVersionId?.trim() || undefined
+      channelId: item.channelId?.trim() || undefined,
+      sectionId: item.sectionId?.trim() || undefined,
+      videoId: item.videoId?.trim() || undefined,
+      videoVersionId: item.videoVersionId?.trim() || undefined
     });
   }
 
@@ -679,16 +567,16 @@ async function applyWorkerSnapshotAssetState(params: {
         },
         select: {
           id: true,
-          lessonVersionId: true,
-          lessonVersion: {
+          videoVersionId: true,
+          videoVersion: {
             select: {
-              lessonId: true,
-              lesson: {
+              videoId: true,
+              video: {
                 select: {
-                  moduleId: true,
-                  module: {
+                  sectionId: true,
+                  section: {
                     select: {
-                      courseId: true
+                      channelId: true
                     }
                   }
                 }
@@ -718,16 +606,16 @@ async function applyWorkerSnapshotAssetState(params: {
       continue;
     }
     const expected = {
-      courseId: block.lessonVersion.lesson.module.courseId,
-      moduleId: block.lessonVersion.lesson.moduleId,
-      lessonId: block.lessonVersion.lessonId,
-      lessonVersionId: block.lessonVersionId
+      channelId: block.videoVersion.video.section.channelId,
+      sectionId: block.videoVersion.video.sectionId,
+      videoId: block.videoVersion.videoId,
+      videoVersionId: block.videoVersionId
     };
     const hasHierarchyMismatch =
-      (assetRef.courseId && assetRef.courseId !== expected.courseId) ||
-      (assetRef.moduleId && assetRef.moduleId !== expected.moduleId) ||
-      (assetRef.lessonId && assetRef.lessonId !== expected.lessonId) ||
-      (assetRef.lessonVersionId && assetRef.lessonVersionId !== expected.lessonVersionId);
+      (assetRef.channelId && assetRef.channelId !== expected.channelId) ||
+      (assetRef.sectionId && assetRef.sectionId !== expected.sectionId) ||
+      (assetRef.videoId && assetRef.videoId !== expected.videoId) ||
+      (assetRef.videoVersionId && assetRef.videoVersionId !== expected.videoVersionId);
     if (hasHierarchyMismatch) {
       unresolvedRefs += 1;
       fastify.log.warn(
@@ -738,10 +626,10 @@ async function applyWorkerSnapshotAssetState(params: {
           kind: assetRef.kind,
           path: assetRef.path,
           provided: {
-            courseId: assetRef.courseId ?? null,
-            moduleId: assetRef.moduleId ?? null,
-            lessonId: assetRef.lessonId ?? null,
-            lessonVersionId: assetRef.lessonVersionId ?? null
+            channelId: assetRef.channelId ?? null,
+            sectionId: assetRef.sectionId ?? null,
+            videoId: assetRef.videoId ?? null,
+            videoVersionId: assetRef.videoVersionId ?? null
           },
           expected
         },
@@ -1825,15 +1713,15 @@ await fastify.register(swagger, {
   openapi: {
     info: {
       title: "VizLec API",
-      description: "API para gerenciamento de cursos, módulos, lições e geração de conteúdo com IA",
+      description: "API para gerenciamento de canais, seções, vídeos e geração de conteúdo com IA",
       version: "0.0.1"
     },
     tags: [
       { name: "Auth", description: "Autenticação e autorização" },
       { name: "Team", description: "Gerenciamento de equipe e convites" },
-      { name: "Courses", description: "Gerenciamento de cursos" },
-      { name: "Modules", description: "Gerenciamento de módulos" },
-      { name: "Lessons", description: "Gerenciamento de lições" },
+      { name: "Channels", description: "Gerenciamento de canais" },
+      { name: "Sections", description: "Gerenciamento de seções" },
+      { name: "Videos", description: "Gerenciamento de vídeos" },
       { name: "Slides", description: "Gerenciamento de slides" },
       {
         name: "Jobs",
@@ -1879,8 +1767,22 @@ fastify.addHook("onRoute", (routeOptions) => {
     typeof currentSchema.summary === "string" ? (currentSchema.summary as string) : undefined;
   const currentDescription =
     typeof currentSchema.description === "string" ? (currentSchema.description as string) : undefined;
+  const currentTags = Array.isArray(currentSchema.tags) ? (currentSchema.tags as unknown[]) : undefined;
+
+  const normalizedTags = currentTags
+    ?.filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => {
+      if (tag === "Courses") return "Channels";
+      if (tag === "Modules") return "Sections";
+      if (tag === "Lessons") return "Videos";
+      return tag;
+    });
 
   if (currentDescription?.includes("**Inventario de execucao**")) {
+    routeOptions.schema = {
+      ...currentSchema,
+      ...(normalizedTags ? { tags: normalizedTags } : {})
+    };
     return;
   }
 
@@ -1893,6 +1795,7 @@ fastify.addHook("onRoute", (routeOptions) => {
 
   routeOptions.schema = {
     ...currentSchema,
+    ...(normalizedTags ? { tags: normalizedTags } : {}),
     description
   };
 });
@@ -2078,46 +1981,28 @@ fastify.post(
     if (typeof providedToken !== "string" || providedToken !== internalJobsEventToken) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
-    const body = request.body as {
-      jobId?: string;
-      lifecycle?: string;
-      phase?: string;
-      progressPercent?: number;
-    };
+    const body = request.body as Partial<InternalJobEventPayload>;
     const jobId = body?.jobId?.trim();
     if (!jobId) {
       return reply.code(400).send({ error: "jobId is required" });
     }
-    const lifecycle = (() => {
-      const value = normalizeString(body?.lifecycle);
-      if (!value) return null;
-      if (value === "started" || value === "running" || value === "finished") return value;
-      return null;
-    })();
-    const phase = (() => {
-      const value = normalizeString(body?.phase);
-      if (!value) return null;
-      if (value === "cleanup" || value === "generation") return value;
-      return null;
-    })();
-    const progressPercent =
-      typeof body?.progressPercent === "number" && Number.isFinite(body.progressPercent)
-        ? Math.max(1, Math.min(99, Math.trunc(body.progressPercent)))
-        : null;
+    const lifecycle = normalizeJobEventLifecycle(body?.lifecycle) ?? null;
+    const phase = normalizeJobEventPhase(body?.phase) ?? null;
+    const progressPercent = normalizeProgressPercent(body?.progressPercent) ?? null;
     const job = await prisma.job.findUnique({
       where: { id: jobId },
       include: {
-        lessonVersion: {
+        videoVersion: {
           select: {
-            lessonId: true,
-            lesson: {
+            videoId: true,
+            video: {
               select: {
                 title: true,
-                module: {
+                section: {
                   select: {
                     id: true,
                     name: true,
-                    course: {
+                    channel: {
                       select: { id: true, name: true }
                     }
                   }
@@ -2129,18 +2014,18 @@ fastify.post(
         block: {
           select: {
             index: true,
-            lessonVersionId: true,
-            lessonVersion: {
+            videoVersionId: true,
+            videoVersion: {
               select: {
-                lessonId: true,
-                lesson: {
+                videoId: true,
+                video: {
                   select: {
                     title: true,
-                    module: {
+                    section: {
                       select: {
                         id: true,
                         name: true,
-                        course: {
+                        channel: {
                           select: { id: true, name: true }
                         }
                       }
@@ -2165,22 +2050,22 @@ fastify.post(
       parseCorrelationId(job.requestId) ??
       parseCorrelationId(request.headers[CORRELATION_ID_HEADER]) ??
       getRequestCorrelationId(request);
-    const lessonId =
-      job.lessonVersion?.lessonId ?? job.block?.lessonVersion?.lessonId ?? null;
-    const lessonVersionId = job.lessonVersionId ?? job.block?.lessonVersionId ?? null;
-    const lessonContext = job.lessonVersion?.lesson ?? job.block?.lessonVersion?.lesson ?? null;
-    const courseId = lessonContext?.module?.course?.id ?? null;
-    const moduleId = lessonContext?.module?.id ?? null;
-    const courseName = lessonContext?.module?.course?.name?.trim();
-    const moduleName = lessonContext?.module?.name?.trim();
+    const videoId =
+      job.videoVersion?.videoId ?? job.block?.videoVersion?.videoId ?? null;
+    const videoVersionId = job.videoVersionId ?? job.block?.videoVersionId ?? null;
+    const lessonContext = job.videoVersion?.video ?? job.block?.videoVersion?.video ?? null;
+    const channelId = lessonContext?.section?.channel?.id ?? null;
+    const sectionId = lessonContext?.section?.id ?? null;
+    const courseName = lessonContext?.section?.channel?.name?.trim();
+    const moduleName = lessonContext?.section?.name?.trim();
     const lessonTitle = lessonContext?.title?.trim();
     const blockNumber = typeof job.block?.index === "number" ? job.block.index + 1 : null;
     let buildStatus: Awaited<ReturnType<typeof buildCourseDetailedStatus>> | null = null;
-    if (courseId) {
+    if (channelId) {
       try {
-        buildStatus = await buildCourseDetailedStatus(courseId);
+        buildStatus = await buildCourseDetailedStatus(channelId);
       } catch (err) {
-        fastify.log.warn({ err, courseId }, "Failed to build course status for job event");
+        fastify.log.warn({ err, channelId }, "Failed to build course status for job event");
       }
     }
 
@@ -2189,10 +2074,10 @@ fastify.post(
       jobId: job.id,
       status: job.status,
       type: job.type,
-      courseId,
-      moduleId,
-      lessonId,
-      lessonVersionId,
+      channelId,
+      sectionId,
+      videoId,
+      videoVersionId,
       blockId: job.blockId,
       lifecycle,
       phase,
@@ -2248,8 +2133,8 @@ fastify.post(
             jobId: job.id,
             jobType: job.type,
             jobStatus: job.status,
-            lessonId: lessonId ?? undefined,
-            lessonVersionId: lessonVersionId ?? undefined
+            videoId: videoId ?? undefined,
+            videoVersionId: videoVersionId ?? undefined
           }
         });
         broadcastNotification({
@@ -2259,7 +2144,7 @@ fastify.post(
           time: notification.createdAt.toISOString(),
           read: notification.read,
           type: notification.type,
-          relatedLessonId: notification.lessonId ?? undefined,
+          relatedLessonId: notification.videoId ?? undefined,
           jobType: notification.jobType ?? undefined,
           jobStatus: notification.jobStatus ?? undefined
         });
@@ -2283,28 +2168,7 @@ fastify.post(
     if (typeof providedToken !== "string" || providedToken !== internalJobsEventToken) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
-    const body = request.body as {
-      workspaceId?: string;
-      agentId?: string;
-      snapshot?: {
-        audioCount?: number;
-        durationSeconds?: number;
-        diskUsageBytes?: number;
-        updatedAt?: string;
-        assetRefs?: Array<{
-          assetId?: string;
-          courseId?: string;
-          moduleId?: string;
-          lessonId?: string;
-          lessonVersionId?: string;
-          blockId?: string;
-          kind?: string;
-          path?: string;
-          sizeBytes?: number;
-          durationSeconds?: number;
-        }>;
-      };
-    };
+    const body = request.body as Partial<InternalInventorySnapshotEventPayload>;
     const workspaceId = body?.workspaceId?.trim() ?? "";
     const agentId = body?.agentId?.trim() ?? "";
     if (!workspaceId || !agentId) {
@@ -2321,17 +2185,16 @@ fastify.post(
       return reply.code(403).send({ error: "agent_workspace_mismatch" });
     }
 
+    const normalizedSnapshot = normalizeInternalInventorySnapshot(body?.snapshot);
     const next: InventoryState = {
       workspaceId,
       agentId,
-      audioCount: Math.trunc(normalizeNonNegativeNumber(body?.snapshot?.audioCount)),
-      durationSeconds: normalizeNonNegativeNumber(body?.snapshot?.durationSeconds),
-      diskUsageBytes: Math.trunc(normalizeNonNegativeNumber(body?.snapshot?.diskUsageBytes)),
-      updatedAt: body?.snapshot?.updatedAt?.trim() || new Date().toISOString()
+      audioCount: Math.trunc(normalizeNonNegativeNumber(normalizedSnapshot.audioCount)),
+      durationSeconds: normalizeNonNegativeNumber(normalizedSnapshot.durationSeconds),
+      diskUsageBytes: Math.trunc(normalizeNonNegativeNumber(normalizedSnapshot.diskUsageBytes)),
+      updatedAt: normalizedSnapshot.updatedAt?.trim() || new Date().toISOString()
     };
-    const assetRefsRaw = Array.isArray(body?.snapshot?.assetRefs)
-      ? body.snapshot.assetRefs
-      : null;
+    const assetRefsRaw = normalizedSnapshot.assetRefs ?? null;
     let assetReconciliation: {
       receivedRefs: number;
       upsertedAssets: number;
@@ -2343,25 +2206,10 @@ fastify.post(
         workspaceId,
         agentId,
         assetRefs: assetRefsRaw
-          .filter((item): item is NonNullable<typeof item> => Boolean(item && typeof item === "object"))
-          .map((item) => ({
-            assetId: item.assetId,
-            courseId: item.courseId,
-            moduleId: item.moduleId,
-            lessonId: item.lessonId,
-            lessonVersionId: item.lessonVersionId,
-            blockId: item.blockId?.trim() ?? "",
-            kind: item.kind?.trim() ?? "",
-            path: item.path?.trim() ?? "",
-            sizeBytes: typeof item.sizeBytes === "number" ? item.sizeBytes : undefined,
-            durationSeconds:
-              typeof item.durationSeconds === "number" ? item.durationSeconds : undefined
-          }))
-          .filter((item) => Boolean(item.blockId && item.kind && item.path))
       });
     }
     inventoryStateByAgent.set(agentId, next);
-    broadcastWsEvent("inventory_reconciled", {
+    broadcastWsEvent(WS_EVENT.INVENTORY_RECONCILED, {
       workspaceId,
       agentId,
       updatedAt: next.updatedAt,
@@ -2386,16 +2234,7 @@ fastify.post(
     if (typeof providedToken !== "string" || providedToken !== internalJobsEventToken) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
-    const body = request.body as {
-      workspaceId?: string;
-      agentId?: string;
-      delta?: {
-        audioCountDelta?: number;
-        durationSecondsDelta?: number;
-        diskUsageBytesDelta?: number;
-        updatedAt?: string;
-      };
-    };
+    const body = request.body as Partial<InternalInventoryDeltaEventPayload>;
     const workspaceId = body?.workspaceId?.trim() ?? "";
     const agentId = body?.agentId?.trim() ?? "";
     if (!workspaceId || !agentId) {
@@ -2419,14 +2258,10 @@ fastify.post(
       diskUsageBytes: 0,
       updatedAt: new Date().toISOString()
     };
-    const next = applyInventoryDelta(current, {
-      audioCountDelta: body?.delta?.audioCountDelta,
-      durationSecondsDelta: body?.delta?.durationSecondsDelta,
-      diskUsageBytesDelta: body?.delta?.diskUsageBytesDelta,
-      updatedAt: body?.delta?.updatedAt
-    });
+    const normalizedDelta = normalizeInternalInventoryDelta(body?.delta);
+    const next = applyInventoryDelta(current, normalizedDelta);
     inventoryStateByAgent.set(agentId, next);
-    broadcastWsEvent("inventory_reconciled", {
+    broadcastWsEvent(WS_EVENT.INVENTORY_RECONCILED, {
       workspaceId,
       agentId,
       updatedAt: next.updatedAt,
@@ -3809,7 +3644,7 @@ fastify.get(
         time: item.createdAt.toISOString(),
         read: item.read,
         type: item.type,
-        relatedLessonId: item.lessonId ?? undefined,
+        relatedLessonId: item.videoId ?? undefined,
         jobType: item.jobType ?? undefined,
         jobStatus: item.jobStatus ?? undefined
       }))
@@ -4351,9 +4186,9 @@ fastify.patch(
 );
 
 type LessonBuildSnapshot = {
-  lessonId: string;
-  moduleId: string;
-  lessonVersionId: string | null;
+  videoId: string;
+  sectionId: string;
+  videoVersionId: string | null;
   blocksTotal: number;
   blocksReady: number;
   audioReady: number;
@@ -4415,30 +4250,30 @@ const mapJobTypeToStep = (type: string): "blocks" | "audio" | "images" | "video"
   return null;
 };
 
-async function buildLessonSnapshotsByCourse(courseId: string): Promise<LessonBuildSnapshot[]> {
-  const modules = await prisma.module.findMany({
-    where: { courseId },
+async function buildLessonSnapshotsByCourse(channelId: string): Promise<LessonBuildSnapshot[]> {
+  const modules = await prisma.section.findMany({
+    where: { channelId },
     orderBy: [{ order: "asc" }, { createdAt: "asc" }],
     select: { id: true, name: true }
   });
   if (modules.length === 0) return [];
   const moduleIds = modules.map((item) => item.id);
-  const lessons = await prisma.lesson.findMany({
-    where: { moduleId: { in: moduleIds } },
+  const lessons = await prisma.video.findMany({
+    where: { sectionId: { in: moduleIds } },
     orderBy: [{ order: "asc" }, { createdAt: "asc" }],
-    select: { id: true, moduleId: true, title: true }
+    select: { id: true, sectionId: true, title: true }
   });
   if (lessons.length === 0) return [];
   const lessonIds = lessons.map((item) => item.id);
-  const versions = await prisma.lessonVersion.findMany({
-    where: { lessonId: { in: lessonIds } },
-    orderBy: [{ lessonId: "asc" }, { createdAt: "desc" }],
-    select: { id: true, lessonId: true, createdAt: true }
+  const versions = await prisma.videoVersion.findMany({
+    where: { videoId: { in: lessonIds } },
+    orderBy: [{ videoId: "asc" }, { createdAt: "desc" }],
+    select: { id: true, videoId: true, createdAt: true }
   });
   const latestVersionByLesson = new Map<string, { id: string; createdAt: Date }>();
   for (const version of versions) {
-    if (!latestVersionByLesson.has(version.lessonId)) {
-      latestVersionByLesson.set(version.lessonId, {
+    if (!latestVersionByLesson.has(version.videoId)) {
+      latestVersionByLesson.set(version.videoId, {
         id: version.id,
         createdAt: version.createdAt
       });
@@ -4456,101 +4291,103 @@ async function buildLessonSnapshotsByCourse(courseId: string): Promise<LessonBui
 
   if (versionIds.length > 0) {
     const blockGroups = await prisma.block.groupBy({
-      by: ["lessonVersionId"],
-      where: { lessonVersionId: { in: versionIds } },
+      by: ["videoVersionId"],
+      where: { videoVersionId: { in: versionIds } },
       _count: { _all: true }
     });
     blockGroups.forEach((row) => {
-      blocksTotalByVersion.set(row.lessonVersionId, row._count._all);
+      const count = typeof row._count === "object" && row._count ? row._count._all ?? 0 : 0;
+      blocksTotalByVersion.set(row.videoVersionId, count);
     });
 
     const blocksReadyGroups = await prisma.block.groupBy({
-      by: ["lessonVersionId"],
+      by: ["videoVersionId"],
       where: {
-        lessonVersionId: { in: versionIds },
+        videoVersionId: { in: versionIds },
         onScreenJson: { not: null },
         imagePromptJson: { not: null }
       },
       _count: { _all: true }
     });
     blocksReadyGroups.forEach((row) => {
-      blocksReadyByVersion.set(row.lessonVersionId, row._count._all);
+      const count = typeof row._count === "object" && row._count ? row._count._all ?? 0 : 0;
+      blocksReadyByVersion.set(row.videoVersionId, count);
     });
 
     const audioAssets = await prisma.asset.findMany({
       where: {
         kind: "audio_raw",
-        block: { lessonVersionId: { in: versionIds } }
+        block: { videoVersionId: { in: versionIds } }
       },
       distinct: ["blockId"],
       select: {
-        block: { select: { lessonVersionId: true } }
+        block: { select: { videoVersionId: true } }
       }
     });
     audioAssets.forEach((item) => {
-      const versionId = item.block.lessonVersionId;
+      const versionId = item.block.videoVersionId;
       audioReadyByVersion.set(versionId, (audioReadyByVersion.get(versionId) ?? 0) + 1);
     });
 
     const audioDurationGroups = await prisma.block.groupBy({
-      by: ["lessonVersionId"],
+      by: ["videoVersionId"],
       where: {
-        lessonVersionId: { in: versionIds },
+        videoVersionId: { in: versionIds },
         audioDurationS: { not: null }
       },
       _sum: { audioDurationS: true }
     });
     audioDurationGroups.forEach((row) => {
-      const total = row._sum.audioDurationS;
+      const total = row._sum?.audioDurationS;
       if (typeof total === "number" && Number.isFinite(total) && total > 0) {
-        audioDurationByVersion.set(row.lessonVersionId, total);
+        audioDurationByVersion.set(row.videoVersionId, total);
       }
     });
 
     const imageAssets = await prisma.asset.findMany({
       where: {
         kind: { in: ["image_raw", "slide_png"] },
-        block: { lessonVersionId: { in: versionIds } }
+        block: { videoVersionId: { in: versionIds } }
       },
       distinct: ["blockId"],
       select: {
-        block: { select: { lessonVersionId: true } }
+        block: { select: { videoVersionId: true } }
       }
     });
     imageAssets.forEach((item) => {
-      const versionId = item.block.lessonVersionId;
+      const versionId = item.block.videoVersionId;
       imagesReadyByVersion.set(versionId, (imagesReadyByVersion.get(versionId) ?? 0) + 1);
     });
 
     const finalVideoAssets = await prisma.asset.findMany({
       where: {
         kind: "final_mp4",
-        block: { lessonVersionId: { in: versionIds } }
+        block: { videoVersionId: { in: versionIds } }
       },
       distinct: ["blockId"],
       select: {
-        block: { select: { lessonVersionId: true } }
+        block: { select: { videoVersionId: true } }
       }
     });
     finalVideoAssets.forEach((item) => {
-      finalVideoReadyByVersion.set(item.block.lessonVersionId, true);
+      finalVideoReadyByVersion.set(item.block.videoVersionId, true);
     });
 
     const activeJobs = await prisma.job.findMany({
       where: {
-        lessonVersionId: { in: versionIds },
+        videoVersionId: { in: versionIds },
         status: { in: ["pending", "running"] }
       },
-      select: { lessonVersionId: true, type: true, status: true }
+      select: { videoVersionId: true, type: true, status: true }
     });
     activeJobs.forEach((job) => {
-      if (!job.lessonVersionId) return;
+      if (!job.videoVersionId) return;
       const step = mapJobTypeToStep(job.type);
       if (!step) return;
-      if (!jobCountsByVersion.has(job.lessonVersionId)) {
-        jobCountsByVersion.set(job.lessonVersionId, createEmptyJobCounts());
+      if (!jobCountsByVersion.has(job.videoVersionId)) {
+        jobCountsByVersion.set(job.videoVersionId, createEmptyJobCounts());
       }
-      const counts = jobCountsByVersion.get(job.lessonVersionId)!;
+      const counts = jobCountsByVersion.get(job.videoVersionId)!;
       const bucket = counts[step];
       if (job.status === "running") {
         bucket.running += 1;
@@ -4565,9 +4402,9 @@ async function buildLessonSnapshotsByCourse(courseId: string): Promise<LessonBui
     const versionId = latest?.id ?? null;
     if (!versionId) {
       return {
-        lessonId: lesson.id,
-        moduleId: lesson.moduleId,
-        lessonVersionId: null,
+        videoId: lesson.id,
+        sectionId: lesson.sectionId,
+        videoVersionId: null,
         blocksTotal: 0,
         blocksReady: 0,
         audioReady: 0,
@@ -4587,9 +4424,9 @@ async function buildLessonSnapshotsByCourse(courseId: string): Promise<LessonBui
     const hasInvalidatingGeneration = jobs.blocks.pending + jobs.blocks.running + jobs.audio.pending + jobs.audio.running + jobs.images.pending + jobs.images.running > 0;
     const finalVideoReady = (finalVideoReadyByVersion.get(versionId) ?? false) && !hasInvalidatingGeneration;
     return {
-      lessonId: lesson.id,
-      moduleId: lesson.moduleId,
-      lessonVersionId: versionId,
+      videoId: lesson.id,
+      sectionId: lesson.sectionId,
+      videoVersionId: versionId,
       blocksTotal,
       blocksReady,
       audioReady,
@@ -4602,37 +4439,37 @@ async function buildLessonSnapshotsByCourse(courseId: string): Promise<LessonBui
   });
 }
 
-async function buildCourseDetailedStatus(courseId: string, workspaceId?: string) {
+async function buildCourseDetailedStatus(channelId: string, workspaceId?: string) {
   if (workspaceId) {
-    const course = await prisma.course.findFirst({
-      where: { id: courseId, workspaceId },
+    const course = await prisma.channel.findFirst({
+      where: { id: channelId, workspaceId },
       select: { id: true }
     });
     if (!course) return null;
   }
-  const modules = await prisma.module.findMany({
-    where: { courseId },
+  const modules = await prisma.section.findMany({
+    where: { channelId },
     orderBy: [{ order: "asc" }, { createdAt: "asc" }],
     select: { id: true, name: true, order: true }
   });
-  const lessons = await prisma.lesson.findMany({
-    where: { moduleId: { in: modules.map((item) => item.id) } },
+  const lessons = await prisma.video.findMany({
+    where: { sectionId: { in: modules.map((item) => item.id) } },
     orderBy: [{ order: "asc" }, { createdAt: "asc" }],
-    select: { id: true, moduleId: true, order: true, title: true }
+    select: { id: true, sectionId: true, order: true, title: true }
   });
-  const lessonSnapshots = await buildLessonSnapshotsByCourse(courseId);
-  const lessonSnapshotMap = new Map(lessonSnapshots.map((item) => [item.lessonId, item]));
+  const lessonSnapshots = await buildLessonSnapshotsByCourse(channelId);
+  const lessonSnapshotMap = new Map(lessonSnapshots.map((item) => [item.videoId, item]));
 
   const modulesOut = modules.map((module) => {
     const moduleLessons = lessons
-      .filter((lesson) => lesson.moduleId === module.id)
+      .filter((lesson) => lesson.sectionId === module.id)
       .map((lesson) => {
         const snapshot = lessonSnapshotMap.get(lesson.id);
         return {
-          lessonId: lesson.id,
+          videoId: lesson.id,
           title: lesson.title,
           order: lesson.order,
-          lessonVersionId: snapshot?.lessonVersionId ?? null,
+          videoVersionId: snapshot?.videoVersionId ?? null,
           blocks: {
             total: snapshot?.blocksTotal ?? 0,
             ready: snapshot?.blocksReady ?? 0
@@ -4650,32 +4487,32 @@ async function buildCourseDetailedStatus(courseId: string, workspaceId?: string)
     const progressPercent = moduleLessons.length > 0 ? Math.round(moduleLessons.reduce((sum, lesson) => sum + lesson.progressPercent, 0) / moduleLessons.length) : 0;
     const jobs = moduleLessons.reduce((acc, lesson) => mergeJobCounts(acc, lesson.jobs), createEmptyJobCounts());
     return {
-      moduleId: module.id,
+      sectionId: module.id,
       name: module.name,
       order: module.order,
       progressPercent,
       jobs,
-      lessons: moduleLessons
+      videos: moduleLessons
     };
   });
 
   const courseProgressPercent = modulesOut.length > 0 ? Math.round(modulesOut.reduce((sum, module) => sum + module.progressPercent, 0) / modulesOut.length) : 0;
   const jobs = modulesOut.reduce((acc, module) => mergeJobCounts(acc, module.jobs), createEmptyJobCounts());
   return {
-    courseId,
+    channelId,
     progressPercent: courseProgressPercent,
     jobs,
-    modules: modulesOut
+    sections: modulesOut
   };
 }
 
 async function buildCourseBuildSummaries(courseIds: string[], workspaceId?: string) {
   const output: Record<string, { progressPercent: number; jobs: BuildJobCounts }> = {};
   await Promise.all(
-    courseIds.map(async (courseId) => {
-      const detailed = await buildCourseDetailedStatus(courseId, workspaceId);
+    courseIds.map(async (channelId) => {
+      const detailed = await buildCourseDetailedStatus(channelId, workspaceId);
       if (!detailed) return;
-      output[courseId] = {
+      output[channelId] = {
         progressPercent: detailed.progressPercent,
         jobs: detailed.jobs
       };
@@ -4743,26 +4580,26 @@ const getDiskStats = (
 
 async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: string; since: Date }, workspaceId: string) {
   const [totalCourses, totalLessons, rangeCourses, rangeLessons, versions, assets] = await Promise.all([
-    prisma.course.count({ where: { workspaceId } }),
-    prisma.lesson.count({ where: { module: { course: { workspaceId } } } }),
-    prisma.course.count({
+    prisma.channel.count({ where: { workspaceId } }),
+    prisma.video.count({ where: { section: { channel: { workspaceId } } } }),
+    prisma.channel.count({
       where: { workspaceId, createdAt: { gte: range.since } }
     }),
-    prisma.lesson.count({
+    prisma.video.count({
       where: {
         createdAt: { gte: range.since },
-        module: { course: { workspaceId } }
+        section: { channel: { workspaceId } }
       }
     }),
-    prisma.lessonVersion.findMany({
-      where: { lesson: { module: { course: { workspaceId } } } },
-      orderBy: [{ lessonId: "asc" }, { createdAt: "desc" }],
-      select: { id: true, lessonId: true, createdAt: true }
+    prisma.videoVersion.findMany({
+      where: { video: { section: { channel: { workspaceId } } } },
+      orderBy: [{ videoId: "asc" }, { createdAt: "desc" }],
+      select: { id: true, videoId: true, createdAt: true }
     }),
     prisma.asset.findMany({
       where: {
         block: {
-          lessonVersion: { lesson: { module: { course: { workspaceId } } } }
+          videoVersion: { video: { section: { channel: { workspaceId } } } }
         }
       },
       select: { path: true, createdAt: true }
@@ -4771,8 +4608,8 @@ async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: str
 
   const latestVersionByLesson = new Map<string, { id: string; createdAt: Date }>();
   for (const version of versions) {
-    if (!latestVersionByLesson.has(version.lessonId)) {
-      latestVersionByLesson.set(version.lessonId, {
+    if (!latestVersionByLesson.has(version.videoId)) {
+      latestVersionByLesson.set(version.videoId, {
         id: version.id,
         createdAt: version.createdAt
       });
@@ -4789,7 +4626,7 @@ async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: str
     const audioAssets = await prisma.asset.findMany({
       where: {
         kind: "audio_raw",
-        block: { lessonVersionId: { in: latestVersionIds } }
+        block: { videoVersionId: { in: latestVersionIds } }
       },
       select: {
         blockId: true,
@@ -4797,7 +4634,7 @@ async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: str
         path: true,
         block: {
           select: {
-            lessonVersionId: true,
+            videoVersionId: true,
             audioDurationS: true
           }
         }
@@ -4810,7 +4647,7 @@ async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: str
       {
         createdAt: Date;
         path: string;
-        lessonVersionId: string;
+        videoVersionId: string;
         audioDurationS: number | null;
       }
     >();
@@ -4819,7 +4656,7 @@ async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: str
       latestAssetByBlock.set(item.blockId, {
         createdAt: item.createdAt,
         path: item.path,
-        lessonVersionId: item.block.lessonVersionId,
+        videoVersionId: item.block.videoVersionId,
         audioDurationS: item.block.audioDurationS
       });
     }
@@ -4831,9 +4668,9 @@ async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: str
       databaseDurationSeconds += duration;
       const resolvedPath = path.resolve(item.path);
       if (!fs.existsSync(resolvedPath)) return;
-      durationByVersionId.set(item.lessonVersionId, (durationByVersionId.get(item.lessonVersionId) ?? 0) + duration);
+      durationByVersionId.set(item.videoVersionId, (durationByVersionId.get(item.videoVersionId) ?? 0) + duration);
       if (item.createdAt >= range.since) {
-        rangeDurationByVersionId.set(item.lessonVersionId, (rangeDurationByVersionId.get(item.lessonVersionId) ?? 0) + duration);
+        rangeDurationByVersionId.set(item.videoVersionId, (rangeDurationByVersionId.get(item.videoVersionId) ?? 0) + duration);
       }
     });
   }
@@ -4897,14 +4734,14 @@ async function buildDashboardMetrics(range: { key: DashboardRangeKey; label: str
     },
     totals: {
       courses: totalCourses,
-      lessons: totalLessons,
+      videos: totalLessons,
       audioCount: reconciliation.reconciled.audioCount,
       contentSeconds: reconciliation.reconciled.durationSeconds,
       storageUsedBytes: reconciledStorageUsedBytes
     },
     growth: {
       courses: rangeCourses,
-      lessons: rangeLessons,
+      videos: rangeLessons,
       contentSeconds: rangeContentSeconds,
       storageUsedBytes: rangeStorageBytes
     },
@@ -4946,7 +4783,7 @@ fastify.get(
               required: ["courses", "lessons", "audioCount", "contentSeconds", "storageUsedBytes"],
               properties: {
                 courses: { type: "number" },
-                lessons: { type: "number" },
+                videos: { type: "number" },
                 audioCount: { type: "number" },
                 contentSeconds: { type: "number" },
                 storageUsedBytes: { type: "number" }
@@ -4957,7 +4794,7 @@ fastify.get(
               required: ["courses", "lessons", "contentSeconds", "storageUsedBytes"],
               properties: {
                 courses: { type: "number" },
-                lessons: { type: "number" },
+                videos: { type: "number" },
                 contentSeconds: { type: "number" },
                 storageUsedBytes: { type: "number" }
               }
@@ -5062,15 +4899,15 @@ fastify.get(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const courses = await prisma.course.findMany({
+    const courses = await prisma.channel.findMany({
       where: { workspaceId: auth.scope.workspaceId },
       orderBy: { createdAt: "desc" },
       include: {
-        modules: {
+        sections: {
           select: {
             _count: {
               select: {
-                lessons: true
+                videos: true
               }
             }
           }
@@ -5083,8 +4920,8 @@ fastify.get(
     );
     return courses.map((course) => ({
       ...course,
-      modulesCount: course.modules.length,
-      lessonsCount: course.modules.reduce((total, moduleItem) => total + moduleItem._count.lessons, 0),
+      modulesCount: course.sections.length,
+      lessonsCount: course.sections.reduce((total, moduleItem) => total + moduleItem._count.videos, 0),
       build: summaryMap[course.id] ?? {
         progressPercent: 0,
         jobs: createEmptyJobCounts()
@@ -5094,7 +4931,7 @@ fastify.get(
 );
 
 fastify.get(
-  "/courses/:courseId/build-status",
+  "/courses/:channelId/build-status",
   {
     schema: {
       tags: ["Courses"],
@@ -5118,14 +4955,14 @@ fastify.get(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { courseId } = request.params as { courseId: string };
-    const course = await prisma.course.findFirst({
-      where: { id: courseId, workspaceId: auth.scope.workspaceId }
+    const { channelId } = request.params as { channelId: string };
+    const course = await prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: auth.scope.workspaceId }
     });
     if (!course) {
       return reply.code(404).send({ error: "course not found" });
     }
-    const detailed = await buildCourseDetailedStatus(courseId, auth.scope.workspaceId);
+    const detailed = await buildCourseDetailedStatus(channelId, auth.scope.workspaceId);
     return reply.code(200).send(detailed);
   }
 );
@@ -5219,15 +5056,15 @@ const normalizeCourseWriteInput = (
   };
 };
 
-async function buildRealtimeCoursePayload(courseId: string, workspaceId?: string) {
-  const course = await prisma.course.findFirst({
-    where: workspaceId ? { id: courseId, workspaceId } : { id: courseId },
+async function buildRealtimeCoursePayload(channelId: string, workspaceId?: string) {
+  const course = await prisma.channel.findFirst({
+    where: workspaceId ? { id: channelId, workspaceId } : { id: channelId },
     include: {
-      modules: {
+      sections: {
         select: {
           _count: {
             select: {
-              lessons: true
+              videos: true
             }
           }
         }
@@ -5235,8 +5072,8 @@ async function buildRealtimeCoursePayload(courseId: string, workspaceId?: string
     }
   });
   if (!course) return null;
-  const summaryMap = await buildCourseBuildSummaries([courseId], workspaceId);
-  const summary = summaryMap[courseId] ?? {
+  const summaryMap = await buildCourseBuildSummaries([channelId], workspaceId);
+  const summary = summaryMap[channelId] ?? {
     progressPercent: 0,
     jobs: createEmptyJobCounts()
   };
@@ -5251,8 +5088,8 @@ async function buildRealtimeCoursePayload(courseId: string, workspaceId?: string
     salesPageUrl: course.salesPageUrl,
     imageAssetId: course.imageAssetId,
     status: course.status,
-    modulesCount: course.modules.length,
-    lessonsCount: course.modules.reduce((total, moduleItem) => total + moduleItem._count.lessons, 0),
+    modulesCount: course.sections.length,
+    lessonsCount: course.sections.reduce((total, moduleItem) => total + moduleItem._count.videos, 0),
     build: summary
   };
 }
@@ -5273,7 +5110,7 @@ fastify.post(
     if ("error" in normalized) {
       return reply.code(400).send({ error: normalized.error });
     }
-    const course = await prisma.course.create({
+    const course = await prisma.channel.create({
       data: {
         ...normalized,
         workspaceId: auth.scope.workspaceId
@@ -5284,8 +5121,8 @@ fastify.post(
       broadcastEntityChanged({
         entity: "course",
         action: "created",
-        courseId: course.id,
-        course: coursePayload,
+        channelId: course.id,
+        channel: coursePayload,
         occurredAt: new Date().toISOString()
       });
     }
@@ -5305,19 +5142,19 @@ fastify.patch(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { courseId } = request.params as { courseId: string };
+    const { channelId } = request.params as { channelId: string };
     const normalized = normalizeCourseWriteInput(request.body);
     if ("error" in normalized) {
       return reply.code(400).send({ error: normalized.error });
     }
-    const existing = await prisma.course.findFirst({
-      where: { id: courseId, workspaceId: auth.scope.workspaceId }
+    const existing = await prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: auth.scope.workspaceId }
     });
     if (!existing) {
       return reply.code(404).send({ error: "course not found" });
     }
-    const course = await prisma.course.update({
-      where: { id: courseId },
+    const course = await prisma.channel.update({
+      where: { id: channelId },
       data: normalized
     });
     const coursePayload = await buildRealtimeCoursePayload(course.id, auth.scope.workspaceId);
@@ -5325,8 +5162,8 @@ fastify.patch(
       broadcastEntityChanged({
         entity: "course",
         action: "updated",
-        courseId: course.id,
-        course: coursePayload,
+        channelId: course.id,
+        channel: coursePayload,
         occurredAt: new Date().toISOString()
       });
     }
@@ -5346,15 +5183,15 @@ fastify.delete(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { courseId } = request.params as { courseId: string };
-    const result = await deleteCourseCascade(courseId, auth.scope.workspaceId);
+    const { channelId } = request.params as { channelId: string };
+    const result = await deleteCourseCascade(channelId, auth.scope.workspaceId);
     if (!result.deletedCourse) {
       return reply.code(404).send({ error: "course not found" });
     }
     broadcastEntityChanged({
       entity: "course",
       action: "deleted",
-      courseId,
+      channelId,
       occurredAt: new Date().toISOString()
     });
     return reply.code(200).send({ ok: true });
@@ -5362,7 +5199,7 @@ fastify.delete(
 );
 
 fastify.get(
-  "/courses/:courseId/modules",
+  "/courses/:channelId/modules",
   {
     schema: {
       tags: ["Modules"],
@@ -5373,17 +5210,17 @@ fastify.get(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { courseId } = request.params as { courseId: string };
-    const course = await prisma.course.findFirst({
-      where: { id: courseId, workspaceId: auth.scope.workspaceId },
+    const { channelId } = request.params as { channelId: string };
+    const course = await prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: auth.scope.workspaceId },
       select: { id: true }
     });
     if (!course) {
       return reply.code(404).send({ error: "course not found" });
     }
-    return prisma.module.findMany({
+    return prisma.section.findMany({
       where: {
-        courseId,
+        channelId,
         workspaceId: auth.scope.workspaceId
       },
       orderBy: { order: "asc" }
@@ -5392,7 +5229,7 @@ fastify.get(
 );
 
 fastify.post(
-  "/courses/:courseId/modules",
+  "/courses/:channelId/modules",
   {
     schema: {
       tags: ["Modules"],
@@ -5403,9 +5240,9 @@ fastify.post(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { courseId } = request.params as { courseId: string };
-    const course = await prisma.course.findFirst({
-      where: { id: courseId, workspaceId: auth.scope.workspaceId },
+    const { channelId } = request.params as { channelId: string };
+    const course = await prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: auth.scope.workspaceId },
       select: { id: true }
     });
     if (!course) {
@@ -5418,13 +5255,13 @@ fastify.post(
     }
     let order = body?.order;
     if (order === undefined || Number.isNaN(order)) {
-      const count = await prisma.module.count({ where: { courseId } });
+      const count = await prisma.section.count({ where: { channelId } });
       order = count + 1;
     }
-    const moduleRecord = await prisma.module.create({
+    const moduleRecord = await prisma.section.create({
       data: {
         workspaceId: auth.scope.workspaceId,
-        courseId,
+        channelId,
         name,
         order
       }
@@ -5432,18 +5269,18 @@ fastify.post(
     broadcastEntityChanged({
       entity: "module",
       action: "created",
-      courseId,
-      moduleId: moduleRecord.id,
-      module: moduleRecord,
+      channelId,
+      sectionId: moduleRecord.id,
+      section: moduleRecord,
       occurredAt: new Date().toISOString()
     });
-    const coursePayload = await buildRealtimeCoursePayload(courseId, auth.scope.workspaceId);
+    const coursePayload = await buildRealtimeCoursePayload(channelId, auth.scope.workspaceId);
     if (coursePayload) {
       broadcastEntityChanged({
         entity: "course",
         action: "updated",
-        courseId,
-        course: coursePayload,
+        channelId,
+        channel: coursePayload,
         occurredAt: new Date().toISOString()
       });
     }
@@ -5463,31 +5300,31 @@ fastify.patch(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { moduleId } = request.params as { moduleId: string };
+    const { sectionId } = request.params as { sectionId: string };
     const body = request.body as { name?: string };
     const name = body?.name?.trim();
     if (!name) {
       return reply.code(400).send({ error: "name is required" });
     }
-    const existing = await prisma.module.findFirst({
+    const existing = await prisma.section.findFirst({
       where: {
-        id: moduleId,
+        id: sectionId,
         workspaceId: auth.scope.workspaceId
       }
     });
     if (!existing) {
       return reply.code(404).send({ error: "module not found" });
     }
-    const moduleRecord = await prisma.module.update({
-      where: { id: moduleId },
+    const moduleRecord = await prisma.section.update({
+      where: { id: sectionId },
       data: { name }
     });
     broadcastEntityChanged({
       entity: "module",
       action: "updated",
-      courseId: existing.courseId,
-      moduleId: moduleRecord.id,
-      module: moduleRecord,
+      channelId: existing.channelId,
+      sectionId: moduleRecord.id,
+      section: moduleRecord,
       occurredAt: new Date().toISOString()
     });
     return reply.code(200).send(moduleRecord);
@@ -5506,33 +5343,33 @@ fastify.delete(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { moduleId } = request.params as { moduleId: string };
-    const existing = await prisma.module.findFirst({
+    const { sectionId } = request.params as { sectionId: string };
+    const existing = await prisma.section.findFirst({
       where: {
-        id: moduleId,
+        id: sectionId,
         workspaceId: auth.scope.workspaceId
       },
-      select: { courseId: true }
+      select: { channelId: true }
     });
-    const result = await deleteModuleCascade(moduleId, auth.scope.workspaceId);
+    const result = await deleteModuleCascade(sectionId, auth.scope.workspaceId);
     if (!result.deletedModule) {
       return reply.code(404).send({ error: "module not found" });
     }
     broadcastEntityChanged({
       entity: "module",
       action: "deleted",
-      moduleId,
-      courseId: existing?.courseId ?? null,
+      sectionId,
+      channelId: existing?.channelId ?? null,
       occurredAt: new Date().toISOString()
     });
-    if (existing?.courseId) {
-      const coursePayload = await buildRealtimeCoursePayload(existing.courseId);
+    if (existing?.channelId) {
+      const coursePayload = await buildRealtimeCoursePayload(existing.channelId);
       if (coursePayload) {
         broadcastEntityChanged({
           entity: "course",
           action: "updated",
-          courseId: existing.courseId,
-          course: coursePayload,
+          channelId: existing.channelId,
+          channel: coursePayload,
           occurredAt: new Date().toISOString()
         });
       }
@@ -5542,7 +5379,7 @@ fastify.delete(
 );
 
 fastify.patch(
-  "/courses/:courseId/structure/reorder",
+  "/courses/:channelId/structure/reorder",
   {
     schema: {
       tags: ["Courses"],
@@ -5573,9 +5410,9 @@ fastify.patch(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { courseId } = request.params as { courseId: string };
-    const course = await prisma.course.findFirst({
-      where: { id: courseId, workspaceId: auth.scope.workspaceId },
+    const { channelId } = request.params as { channelId: string };
+    const course = await prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: auth.scope.workspaceId },
       select: { id: true }
     });
     if (!course) {
@@ -5584,7 +5421,7 @@ fastify.patch(
     const body = request.body as
       | {
           modules?: Array<{
-            moduleId?: string;
+            sectionId?: string;
             lessonIds?: string[];
           }>;
         }
@@ -5592,15 +5429,15 @@ fastify.patch(
 
     const payloadModules = (body?.modules ?? [])
       .map((item) => ({
-        moduleId: item?.moduleId?.trim() ?? "",
-        lessonIds: (item?.lessonIds ?? []).map((lessonId) => lessonId.trim()).filter(Boolean)
+        sectionId: item?.sectionId?.trim() ?? "",
+        lessonIds: (item?.lessonIds ?? []).map((videoId) => videoId.trim()).filter(Boolean)
       }))
-      .filter((item) => item.moduleId.length > 0);
+      .filter((item) => item.sectionId.length > 0);
 
-    const existingModules = await prisma.module.findMany({
-      where: { courseId },
+    const existingModules = await prisma.section.findMany({
+      where: { channelId },
       include: {
-        lessons: {
+        videos: {
           select: { id: true }
         }
       }
@@ -5610,7 +5447,7 @@ fastify.patch(
       return reply.code(400).send({ error: "invalid module order payload" });
     }
 
-    const payloadModuleIds = payloadModules.map((item) => item.moduleId);
+    const payloadModuleIds = payloadModules.map((item) => item.sectionId);
     const payloadModuleIdSet = new Set(payloadModuleIds);
     if (payloadModuleIdSet.size !== payloadModuleIds.length) {
       return reply.code(400).send({ error: "duplicate module ids in payload" });
@@ -5618,11 +5455,11 @@ fastify.patch(
 
     const existingModuleIds = existingModules.map((item) => item.id);
     const existingModuleIdSet = new Set(existingModuleIds);
-    if (payloadModuleIds.some((moduleId) => !existingModuleIdSet.has(moduleId)) || existingModuleIds.some((moduleId) => !payloadModuleIdSet.has(moduleId))) {
+    if (payloadModuleIds.some((sectionId) => !existingModuleIdSet.has(sectionId)) || existingModuleIds.some((sectionId) => !payloadModuleIdSet.has(sectionId))) {
       return reply.code(400).send({ error: "payload modules do not match course modules" });
     }
 
-    const existingLessonIds = existingModules.flatMap((moduleItem) => moduleItem.lessons.map((lessonItem) => lessonItem.id));
+    const existingLessonIds = existingModules.flatMap((moduleItem) => moduleItem.videos.map((lessonItem) => lessonItem.id));
     const existingLessonIdSet = new Set(existingLessonIds);
     const payloadLessonIds = payloadModules.flatMap((moduleItem) => moduleItem.lessonIds);
     const payloadLessonIdSet = new Set(payloadLessonIds);
@@ -5630,22 +5467,22 @@ fastify.patch(
     if (payloadLessonIdSet.size !== payloadLessonIds.length) {
       return reply.code(400).send({ error: "duplicate lesson ids in payload" });
     }
-    if (payloadLessonIds.some((lessonId) => !existingLessonIdSet.has(lessonId)) || existingLessonIds.some((lessonId) => !payloadLessonIdSet.has(lessonId))) {
+    if (payloadLessonIds.some((videoId) => !existingLessonIdSet.has(videoId)) || existingLessonIds.some((videoId) => !payloadLessonIdSet.has(videoId))) {
       return reply.code(400).send({ error: "payload lessons do not match course lessons" });
     }
 
     await prisma.$transaction(async (tx) => {
       await Promise.all(
         payloadModules.map((moduleItem, index) =>
-          tx.module.update({
-            where: { id: moduleItem.moduleId },
+          tx.section.update({
+            where: { id: moduleItem.sectionId },
             data: { order: index + 1 }
           })
         )
       );
 
       if (payloadLessonIds.length > 0) {
-        await tx.lesson.updateMany({
+        await tx.video.updateMany({
           where: { id: { in: payloadLessonIds } },
           data: { order: { increment: 1000000 } }
         });
@@ -5653,11 +5490,11 @@ fastify.patch(
 
       for (const moduleItem of payloadModules) {
         for (let index = 0; index < moduleItem.lessonIds.length; index += 1) {
-          const lessonId = moduleItem.lessonIds[index];
-          await tx.lesson.update({
-            where: { id: lessonId },
+          const videoId = moduleItem.lessonIds[index];
+          await tx.video.update({
+            where: { id: videoId },
             data: {
-              moduleId: moduleItem.moduleId,
+              sectionId: moduleItem.sectionId,
               order: index + 1
             }
           });
@@ -5668,8 +5505,8 @@ fastify.patch(
     broadcastEntityChanged({
       entity: "course_structure",
       action: "reordered",
-      courseId,
-      modules: payloadModules,
+      channelId,
+      sections: payloadModules,
       occurredAt: new Date().toISOString()
     });
 
@@ -5678,7 +5515,7 @@ fastify.patch(
 );
 
 fastify.get(
-  "/modules/:moduleId/lessons",
+  "/modules/:sectionId/lessons",
   {
     schema: {
       tags: ["Lessons"],
@@ -5689,10 +5526,10 @@ fastify.get(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { moduleId } = request.params as { moduleId: string };
-    return prisma.lesson.findMany({
+    const { sectionId } = request.params as { sectionId: string };
+    return prisma.video.findMany({
       where: {
-        moduleId,
+        sectionId,
         workspaceId: auth.scope.workspaceId
       },
       orderBy: { order: "asc" }
@@ -5701,7 +5538,7 @@ fastify.get(
 );
 
 fastify.post(
-  "/modules/:moduleId/lessons",
+  "/modules/:sectionId/lessons",
   {
     schema: {
       tags: ["Lessons"],
@@ -5712,10 +5549,10 @@ fastify.post(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { moduleId } = request.params as { moduleId: string };
-    const moduleRecord = await prisma.module.findFirst({
+    const { sectionId } = request.params as { sectionId: string };
+    const moduleRecord = await prisma.section.findFirst({
       where: {
-        id: moduleId,
+        id: sectionId,
         workspaceId: auth.scope.workspaceId
       },
       select: { id: true }
@@ -5728,41 +5565,41 @@ fastify.post(
     if (!title) {
       return reply.code(400).send({ error: "title is required" });
     }
-    const lessonCount = await prisma.lesson.count({
+    const lessonCount = await prisma.video.count({
       where: {
-        moduleId,
+        sectionId,
         workspaceId: auth.scope.workspaceId
       }
     });
-    const lesson = await prisma.lesson.create({
+    const lesson = await prisma.video.create({
       data: {
         workspaceId: auth.scope.workspaceId,
-        moduleId,
+        sectionId,
         title,
         order: lessonCount + 1
       }
     });
-    const moduleWithCourse = await prisma.module.findUnique({
-      where: { id: moduleId },
-      select: { courseId: true }
+    const moduleWithCourse = await prisma.section.findUnique({
+      where: { id: sectionId },
+      select: { channelId: true }
     });
     broadcastEntityChanged({
       entity: "lesson",
       action: "created",
-      courseId: moduleWithCourse?.courseId ?? null,
-      moduleId,
-      lessonId: lesson.id,
+      channelId: moduleWithCourse?.channelId ?? null,
+      sectionId,
+      videoId: lesson.id,
       lesson,
       occurredAt: new Date().toISOString()
     });
-    if (moduleWithCourse?.courseId) {
-      const coursePayload = await buildRealtimeCoursePayload(moduleWithCourse.courseId);
+    if (moduleWithCourse?.channelId) {
+      const coursePayload = await buildRealtimeCoursePayload(moduleWithCourse.channelId);
       if (coursePayload) {
         broadcastEntityChanged({
           entity: "course",
           action: "updated",
-          courseId: moduleWithCourse.courseId,
-          course: coursePayload,
+          channelId: moduleWithCourse.channelId,
+          channel: coursePayload,
           occurredAt: new Date().toISOString()
         });
       }
@@ -5783,10 +5620,10 @@ fastify.get(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { lessonId } = request.params as { lessonId: string };
-    const lesson = await prisma.lesson.findFirst({
+    const { videoId } = request.params as { videoId: string };
+    const lesson = await prisma.video.findFirst({
       where: {
-        id: lessonId,
+        id: videoId,
         workspaceId: auth.scope.workspaceId
       }
     });
@@ -5809,35 +5646,35 @@ fastify.patch(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { lessonId } = request.params as { lessonId: string };
+    const { videoId } = request.params as { videoId: string };
     const body = request.body as { title?: string };
     const title = body?.title?.trim();
     if (!title) {
       return reply.code(400).send({ error: "title is required" });
     }
-    const existing = await prisma.lesson.findFirst({
+    const existing = await prisma.video.findFirst({
       where: {
-        id: lessonId,
+        id: videoId,
         workspaceId: auth.scope.workspaceId
       }
     });
     if (!existing) {
       return reply.code(404).send({ error: "lesson not found" });
     }
-    const lesson = await prisma.lesson.update({
-      where: { id: lessonId },
+    const lesson = await prisma.video.update({
+      where: { id: videoId },
       data: { title }
     });
-    const moduleWithCourse = await prisma.module.findUnique({
-      where: { id: lesson.moduleId },
-      select: { courseId: true }
+    const moduleWithCourse = await prisma.section.findUnique({
+      where: { id: lesson.sectionId },
+      select: { channelId: true }
     });
     broadcastEntityChanged({
       entity: "lesson",
       action: "updated",
-      courseId: moduleWithCourse?.courseId ?? null,
-      moduleId: lesson.moduleId,
-      lessonId: lesson.id,
+      channelId: moduleWithCourse?.channelId ?? null,
+      sectionId: lesson.sectionId,
+      videoId: lesson.id,
       lesson,
       occurredAt: new Date().toISOString()
     });
@@ -5857,41 +5694,41 @@ fastify.delete(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { lessonId } = request.params as { lessonId: string };
-    const existing = await prisma.lesson.findFirst({
+    const { videoId } = request.params as { videoId: string };
+    const existing = await prisma.video.findFirst({
       where: {
-        id: lessonId,
+        id: videoId,
         workspaceId: auth.scope.workspaceId
       },
       select: {
-        moduleId: true,
-        module: {
+        sectionId: true,
+        section: {
           select: {
-            courseId: true
+            channelId: true
           }
         }
       }
     });
-    const result = await deleteLessonCascade(lessonId, auth.scope.workspaceId);
+    const result = await deleteLessonCascade(videoId, auth.scope.workspaceId);
     if (!result.deletedLesson) {
       return reply.code(404).send({ error: "lesson not found" });
     }
     broadcastEntityChanged({
       entity: "lesson",
       action: "deleted",
-      courseId: existing?.module?.courseId ?? null,
-      moduleId: existing?.moduleId ?? null,
-      lessonId,
+      channelId: existing?.section?.channelId ?? null,
+      sectionId: existing?.sectionId ?? null,
+      videoId,
       occurredAt: new Date().toISOString()
     });
-    if (existing?.module?.courseId) {
-      const coursePayload = await buildRealtimeCoursePayload(existing.module.courseId);
+    if (existing?.section?.channelId) {
+      const coursePayload = await buildRealtimeCoursePayload(existing.section.channelId);
       if (coursePayload) {
         broadcastEntityChanged({
           entity: "course",
           action: "updated",
-          courseId: existing.module.courseId,
-          course: coursePayload,
+          channelId: existing.section.channelId,
+          channel: coursePayload,
           occurredAt: new Date().toISOString()
         });
       }
@@ -5901,7 +5738,7 @@ fastify.delete(
 );
 
 fastify.get(
-  "/lessons/:lessonId/versions",
+  "/lessons/:videoId/versions",
   {
     schema: {
       tags: ["Lessons"],
@@ -5912,10 +5749,10 @@ fastify.get(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { lessonId } = request.params as { lessonId: string };
-    return prisma.lessonVersion.findMany({
+    const { videoId } = request.params as { videoId: string };
+    return prisma.videoVersion.findMany({
       where: {
-        lessonId,
+        videoId,
         workspaceId: auth.scope.workspaceId
       },
       orderBy: { createdAt: "desc" }
@@ -5924,7 +5761,7 @@ fastify.get(
 );
 
 fastify.post(
-  "/lessons/:lessonId/versions",
+  "/lessons/:videoId/versions",
   {
     schema: {
       tags: ["Lessons"],
@@ -5934,7 +5771,7 @@ fastify.post(
         type: "object",
         required: ["lessonId"],
         properties: {
-          lessonId: { type: "string" }
+          videoId: { type: "string" }
         }
       },
       body: {
@@ -5967,7 +5804,7 @@ fastify.post(
           type: "object",
           properties: {
             id: { type: "string" },
-            lessonId: { type: "string" },
+            videoId: { type: "string" },
             scriptText: { type: "string" },
             speechRateWps: { type: "number" },
             preferredVoiceId: { type: ["string", "null"] },
@@ -5993,7 +5830,7 @@ fastify.post(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { lessonId } = request.params as { lessonId: string };
+    const { videoId } = request.params as { videoId: string };
     const body = request.body as {
       scriptText?: string;
       speechRateWps?: number;
@@ -6004,9 +5841,9 @@ fastify.post(
     if (!scriptText) {
       return reply.code(400).send({ error: "scriptText is required" });
     }
-    const lessonScope = await prisma.lesson.findFirst({
+    const lessonScope = await prisma.video.findFirst({
       where: {
-        id: lessonId,
+        id: videoId,
         workspaceId: auth.scope.workspaceId
       },
       select: { id: true }
@@ -6025,22 +5862,22 @@ fastify.post(
         return reply.code(404).send({ error: "preferred template not found" });
       }
     }
-    const version = await prisma.lessonVersion.create({
+    const version = await prisma.videoVersion.create({
       data: {
         workspaceId: auth.scope.workspaceId,
-        lessonId,
+        videoId,
         scriptText,
         speechRateWps,
         preferredVoiceId,
         preferredTemplateId
       }
     });
-    const lesson = await prisma.lesson.findUnique({
-      where: { id: lessonId },
+    const lesson = await prisma.video.findUnique({
+      where: { id: videoId },
       include: {
-        module: {
+        section: {
           select: {
-            courseId: true
+            channelId: true
           }
         }
       }
@@ -6048,11 +5885,11 @@ fastify.post(
     broadcastEntityChanged({
       entity: "lesson_version",
       action: "created",
-      courseId: lesson?.module?.courseId ?? null,
-      moduleId: lesson?.moduleId ?? null,
-      lessonId,
-      lessonVersionId: version.id,
-      lessonVersion: version,
+      channelId: lesson?.section?.channelId ?? null,
+      sectionId: lesson?.sectionId ?? null,
+      videoId,
+      videoVersionId: version.id,
+      videoVersion: version,
       occurredAt: new Date().toISOString()
     });
     return reply.code(201).send(version);
@@ -6074,7 +5911,7 @@ fastify.get(
     const { versionId } = request.params as { versionId: string };
     return prisma.block.findMany({
       where: {
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         workspaceId: auth.scope.workspaceId
       },
       orderBy: { index: "asc" }
@@ -6130,7 +5967,7 @@ fastify.patch(
           type: "object",
           properties: {
             id: { type: "string" },
-            lessonId: { type: "string" },
+            videoId: { type: "string" },
             preferredVoiceId: { type: ["string", "null"] },
             preferredTemplateId: { type: ["string", "null"] },
             voiceVolume: { type: ["number", "null"] },
@@ -6173,7 +6010,7 @@ fastify.patch(
         }
       | undefined;
 
-    const existing = await prisma.lessonVersion.findUnique({
+    const existing = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!existing) {
@@ -6237,7 +6074,7 @@ fastify.patch(
       }
     }
 
-    const updated = await prisma.lessonVersion.update({
+    const updated = await prisma.videoVersion.update({
       where: { id: versionId },
       data: {
         ...(preferredVoiceId !== undefined ? { preferredVoiceId } : {}),
@@ -6251,7 +6088,7 @@ fastify.patch(
 
     return reply.code(200).send({
       id: updated.id,
-      lessonId: updated.lessonId,
+      videoId: updated.videoId,
       preferredVoiceId: updated.preferredVoiceId,
       preferredTemplateId: updated.preferredTemplateId,
       voiceVolume: updated.voiceVolume,
@@ -6421,13 +6258,13 @@ async function resolveBlockContext(blockId: string) {
   return prisma.block.findUnique({
     where: { id: blockId },
     include: {
-      lessonVersion: {
+      videoVersion: {
         include: {
-          lesson: {
+          video: {
             include: {
-              module: {
+              section: {
                 include: {
-                  course: true
+                  channel: true
                 }
               }
             }
@@ -6749,11 +6586,11 @@ const cancelPendingAndRunningJobs = async (where: Parameters<typeof prisma.job.u
   });
 };
 
-async function invalidateFinalVideoForLessonVersion(lessonVersionId: string, reason: string): Promise<void> {
+async function invalidateFinalVideoForLessonVersion(videoVersionId: string, reason: string): Promise<void> {
   const assets = await prisma.asset.findMany({
     where: {
       kind: "final_mp4",
-      block: { lessonVersionId }
+      block: { videoVersionId }
     },
     select: { id: true, path: true }
   });
@@ -6767,28 +6604,28 @@ async function invalidateFinalVideoForLessonVersion(lessonVersionId: string, rea
     where: { id: { in: assets.map((item) => item.id) } }
   });
 
-  fastify.log.info({ lessonVersionId, reason, deletedFinalVideos: assets.length }, "Final video invalidated");
+  fastify.log.info({ videoVersionId, reason, deletedFinalVideos: assets.length }, "Final video invalidated");
 }
 
-async function deleteLessonCascade(lessonId: string, workspaceId?: string): Promise<{ deletedLesson: boolean }> {
-  const lesson = await prisma.lesson.findFirst({
-    where: workspaceId ? { id: lessonId, workspaceId } : { id: lessonId },
+async function deleteLessonCascade(videoId: string, workspaceId?: string): Promise<{ deletedLesson: boolean }> {
+  const lesson = await prisma.video.findFirst({
+    where: workspaceId ? { id: videoId, workspaceId } : { id: videoId },
     select: { id: true }
   });
   if (!lesson) return { deletedLesson: false };
 
-  const versions = await prisma.lessonVersion.findMany({
-    where: workspaceId ? { lessonId, workspaceId } : { lessonId },
+  const versions = await prisma.videoVersion.findMany({
+    where: workspaceId ? { videoId, workspaceId } : { videoId },
     select: { id: true }
   });
   const versionIds = versions.map((item) => item.id);
   if (versionIds.length > 0) {
     await cancelPendingAndRunningJobs({
-      OR: [{ lessonVersionId: { in: versionIds } }, { block: { lessonVersionId: { in: versionIds } } }]
+      OR: [{ videoVersionId: { in: versionIds } }, { block: { videoVersionId: { in: versionIds } } }]
     });
 
     const blocks = await prisma.block.findMany({
-      where: { lessonVersionId: { in: versionIds } },
+      where: { videoVersionId: { in: versionIds } },
       select: { id: true }
     });
     const blockIds = blocks.map((item) => item.id);
@@ -6810,53 +6647,53 @@ async function deleteLessonCascade(lessonId: string, workspaceId?: string): Prom
     }
 
     await prisma.job.deleteMany({
-      where: { lessonVersionId: { in: versionIds } }
+      where: { videoVersionId: { in: versionIds } }
     });
-    await prisma.lessonVersion.deleteMany({
+    await prisma.videoVersion.deleteMany({
       where: { id: { in: versionIds } }
     });
   }
 
   await prisma.notification.deleteMany({
-    where: workspaceId ? { lessonId, workspaceId } : { lessonId }
+    where: workspaceId ? { videoId: videoId, workspaceId } : { videoId: videoId }
   });
-  await prisma.lesson.delete({ where: { id: lessonId } });
+  await prisma.video.delete({ where: { id: videoId } });
   return { deletedLesson: true };
 }
 
-async function deleteModuleCascade(moduleId: string, workspaceId?: string): Promise<{ deletedModule: boolean; deletedLessons: number }> {
-  const moduleRecord = await prisma.module.findFirst({
-    where: workspaceId ? { id: moduleId, workspaceId } : { id: moduleId },
+async function deleteModuleCascade(sectionId: string, workspaceId?: string): Promise<{ deletedModule: boolean; deletedLessons: number }> {
+  const moduleRecord = await prisma.section.findFirst({
+    where: workspaceId ? { id: sectionId, workspaceId } : { id: sectionId },
     select: { id: true }
   });
   if (!moduleRecord) return { deletedModule: false, deletedLessons: 0 };
 
-  const lessons = await prisma.lesson.findMany({
-    where: workspaceId ? { moduleId, workspaceId } : { moduleId },
+  const lessons = await prisma.video.findMany({
+    where: workspaceId ? { sectionId, workspaceId } : { sectionId },
     select: { id: true }
   });
   for (const lesson of lessons) {
     await deleteLessonCascade(lesson.id, workspaceId);
   }
-  await prisma.module.delete({ where: { id: moduleId } });
+  await prisma.section.delete({ where: { id: sectionId } });
   return { deletedModule: true, deletedLessons: lessons.length };
 }
 
-async function deleteCourseCascade(courseId: string, workspaceId?: string): Promise<{ deletedCourse: boolean; deletedModules: number }> {
-  const course = await prisma.course.findFirst({
-    where: workspaceId ? { id: courseId, workspaceId } : { id: courseId },
+async function deleteCourseCascade(channelId: string, workspaceId?: string): Promise<{ deletedCourse: boolean; deletedModules: number }> {
+  const course = await prisma.channel.findFirst({
+    where: workspaceId ? { id: channelId, workspaceId } : { id: channelId },
     select: { id: true }
   });
   if (!course) return { deletedCourse: false, deletedModules: 0 };
 
-  const modules = await prisma.module.findMany({
-    where: workspaceId ? { courseId, workspaceId } : { courseId },
+  const modules = await prisma.section.findMany({
+    where: workspaceId ? { channelId, workspaceId } : { channelId },
     select: { id: true }
   });
   for (const moduleItem of modules) {
     await deleteModuleCascade(moduleItem.id, workspaceId);
   }
-  await prisma.course.delete({ where: { id: courseId } });
+  await prisma.channel.delete({ where: { id: channelId } });
   return { deletedCourse: true, deletedModules: modules.length };
 }
 
@@ -6864,42 +6701,42 @@ async function emitPendingCourseBuildEvent(job: {
   id: string;
   status: string;
   type: string;
-  lessonVersionId: string | null;
+  videoVersionId: string | null;
   blockId: string | null;
   error: string | null;
   updatedAt: Date;
   requestId?: string | null;
 }) {
-  if (job.status !== "pending" || !job.lessonVersionId) return;
-  const lessonVersion = await prisma.lessonVersion.findUnique({
-    where: { id: job.lessonVersionId },
+  if (job.status !== "pending" || !job.videoVersionId) return;
+  const lessonVersion = await prisma.videoVersion.findUnique({
+    where: { id: job.videoVersionId },
     select: {
-      lessonId: true,
-      lesson: {
+      videoId: true,
+      video: {
         select: {
-          moduleId: true,
-          module: {
+          sectionId: true,
+          section: {
             select: {
-              courseId: true
+              channelId: true
             }
           }
         }
       }
     }
   });
-  const courseId = lessonVersion?.lesson?.module?.courseId ?? null;
-  if (!courseId) return;
-  const moduleId = lessonVersion?.lesson?.moduleId ?? null;
-  const lessonId = lessonVersion?.lessonId ?? null;
+  const channelId = lessonVersion?.video?.section?.channelId ?? null;
+  if (!channelId) return;
+  const sectionId = lessonVersion?.video?.sectionId ?? null;
+  const videoId = lessonVersion?.videoId ?? null;
   const correlationId = parseCorrelationId(job.requestId) ?? getActiveCorrelationId();
-  await emitCourseBuildStatusEvent(courseId, {
+  await emitCourseBuildStatusEvent(channelId, {
     correlationId,
     jobId: job.id,
     status: job.status,
     type: job.type,
-    moduleId,
-    lessonId,
-    lessonVersionId: job.lessonVersionId,
+    sectionId,
+    videoId,
+    videoVersionId: job.videoVersionId,
     blockId: job.blockId,
     error: job.error,
     updatedAt: job.updatedAt
@@ -6907,15 +6744,15 @@ async function emitPendingCourseBuildEvent(job: {
 }
 
 async function emitCourseBuildStatusEvent(
-  courseId: string,
+  channelId: string,
   payload: {
     correlationId?: string | null;
     jobId?: string | null;
     status?: string | null;
     type?: string | null;
-    moduleId?: string | null;
-    lessonId?: string | null;
-    lessonVersionId?: string | null;
+    sectionId?: string | null;
+    videoId?: string | null;
+    videoVersionId?: string | null;
     blockId?: string | null;
     lifecycle?: string | null;
     phase?: string | null;
@@ -6926,19 +6763,19 @@ async function emitCourseBuildStatusEvent(
 ) {
   let buildStatus: Awaited<ReturnType<typeof buildCourseDetailedStatus>> | null = null;
   try {
-    buildStatus = await buildCourseDetailedStatus(courseId);
+    buildStatus = await buildCourseDetailedStatus(channelId);
   } catch (err) {
-    fastify.log.warn({ err, courseId }, "Failed to build course status for course job event");
+    fastify.log.warn({ err, channelId }, "Failed to build course status for course job event");
   }
   broadcastJobEvent({
     correlationId: parseCorrelationId(payload.correlationId) ?? null,
     jobId: payload.jobId ?? null,
     status: payload.status ?? null,
     type: payload.type ?? null,
-    courseId,
-    moduleId: payload.moduleId ?? null,
-    lessonId: payload.lessonId ?? null,
-    lessonVersionId: payload.lessonVersionId ?? null,
+    channelId,
+    sectionId: payload.sectionId ?? null,
+    videoId: payload.videoId ?? null,
+    videoVersionId: payload.videoVersionId ?? null,
     blockId: payload.blockId ?? null,
     lifecycle: normalizeString(payload.lifecycle) ?? null,
     phase: normalizeString(payload.phase) ?? null,
@@ -6954,7 +6791,7 @@ async function emitCourseBuildStatusEvent(
 
 async function enqueueSlideJob(options: { versionId: string; templateId: string; clientId: string | null; requestId: string | null }) {
   const { versionId, templateId, clientId, requestId } = options;
-  const versionScope = await prisma.lessonVersion.findUnique({
+  const versionScope = await prisma.videoVersion.findUnique({
     where: { id: versionId },
     select: { workspaceId: true }
   });
@@ -6977,7 +6814,7 @@ async function enqueueSlideJob(options: { versionId: string; templateId: string;
   const existing = await prisma.job.findFirst({
     where: {
       workspaceId: versionScope.workspaceId,
-      lessonVersionId: versionId,
+      videoVersionId: versionId,
       type: "render_slide",
       templateId,
       status: { in: ["pending", "running"] }
@@ -7018,7 +6855,7 @@ async function enqueueSlideJob(options: { versionId: string; templateId: string;
     data: {
       workspaceId: versionScope.workspaceId,
       scope: "lesson",
-      lessonVersionId: versionId,
+      videoVersionId: versionId,
       type: "render_slide",
       status: "pending",
       clientId,
@@ -7033,7 +6870,7 @@ async function enqueueSlideJob(options: { versionId: string; templateId: string;
 }
 
 async function enqueueTtsJob(options: {
-  lessonVersionId: string;
+  videoVersionId: string;
   blockId?: string | null;
   clientId: string | null;
   requestId: string | null;
@@ -7041,9 +6878,9 @@ async function enqueueTtsJob(options: {
     tts?: { releaseMemory?: boolean; voiceId?: string; language?: string };
   } | null;
 }) {
-  const { lessonVersionId, blockId, clientId, requestId, meta } = options;
-  const versionScope = await prisma.lessonVersion.findUnique({
-    where: { id: lessonVersionId },
+  const { videoVersionId, blockId, clientId, requestId, meta } = options;
+  const versionScope = await prisma.videoVersion.findUnique({
+    where: { id: videoVersionId },
     select: { workspaceId: true }
   });
   if (!versionScope) {
@@ -7065,7 +6902,7 @@ async function enqueueTtsJob(options: {
   const existing = await prisma.job.findFirst({
     where: {
       workspaceId: versionScope.workspaceId,
-      lessonVersionId,
+      videoVersionId,
       blockId: blockId ?? undefined,
       type: "tts",
       status: { in: ["pending", "running"] }
@@ -7106,7 +6943,7 @@ async function enqueueTtsJob(options: {
     data: {
       workspaceId: versionScope.workspaceId,
       scope: blockId ? "block" : "lesson",
-      lessonVersionId,
+      videoVersionId,
       blockId: blockId ?? null,
       type: "tts",
       status: "pending",
@@ -7122,16 +6959,16 @@ async function enqueueTtsJob(options: {
 }
 
 async function enqueueImageJob(options: {
-  lessonVersionId: string;
+  videoVersionId: string;
   blockId?: string | null;
   templateId?: string | null;
   clientId: string | null;
   requestId: string | null;
   meta?: { image?: { releaseMemory?: boolean; freeMemory?: boolean } } | null;
 }) {
-  const { lessonVersionId, blockId, templateId, clientId, requestId, meta } = options;
-  const versionScope = await prisma.lessonVersion.findUnique({
-    where: { id: lessonVersionId },
+  const { videoVersionId, blockId, templateId, clientId, requestId, meta } = options;
+  const versionScope = await prisma.videoVersion.findUnique({
+    where: { id: videoVersionId },
     select: { workspaceId: true }
   });
   if (!versionScope) {
@@ -7153,7 +6990,7 @@ async function enqueueImageJob(options: {
   const existing = await prisma.job.findFirst({
     where: {
       workspaceId: versionScope.workspaceId,
-      lessonVersionId,
+      videoVersionId,
       blockId: blockId ?? undefined,
       type: "image",
       templateId: templateId ?? null,
@@ -7195,7 +7032,7 @@ async function enqueueImageJob(options: {
     data: {
       workspaceId: versionScope.workspaceId,
       scope: blockId ? "block" : "lesson",
-      lessonVersionId,
+      videoVersionId,
       blockId: blockId ?? null,
       type: "image",
       status: "pending",
@@ -7211,10 +7048,10 @@ async function enqueueImageJob(options: {
   return { status: 201, job };
 }
 
-async function enqueueFinalVideoJob(options: { lessonVersionId: string; templateId?: string | null; clientId: string | null; requestId: string | null }) {
-  const { lessonVersionId, templateId, clientId, requestId } = options;
-  const versionScope = await prisma.lessonVersion.findUnique({
-    where: { id: lessonVersionId },
+async function enqueueFinalVideoJob(options: { videoVersionId: string; templateId?: string | null; clientId: string | null; requestId: string | null }) {
+  const { videoVersionId, templateId, clientId, requestId } = options;
+  const versionScope = await prisma.videoVersion.findUnique({
+    where: { id: videoVersionId },
     select: { workspaceId: true }
   });
   if (!versionScope) {
@@ -7236,7 +7073,7 @@ async function enqueueFinalVideoJob(options: { lessonVersionId: string; template
   const existing = await prisma.job.findFirst({
     where: {
       workspaceId: versionScope.workspaceId,
-      lessonVersionId,
+      videoVersionId,
       type: "concat_video",
       status: { in: ["pending", "running"] }
     },
@@ -7276,7 +7113,7 @@ async function enqueueFinalVideoJob(options: { lessonVersionId: string; template
     data: {
       workspaceId: versionScope.workspaceId,
       scope: "lesson",
-      lessonVersionId,
+      videoVersionId,
       type: "concat_video",
       status: "pending",
       clientId,
@@ -7757,13 +7594,13 @@ fastify.patch(
         entity: "block",
         action: "updated",
         blockId,
-        lessonVersionId: updated.lessonVersionId,
-        lessonId: context?.lessonVersion?.lesson?.id ?? null,
-        moduleId: context?.lessonVersion?.lesson?.module?.id ?? null,
-        courseId: context?.lessonVersion?.lesson?.module?.course?.id ?? null,
+        videoVersionId: updated.videoVersionId,
+        videoId: context?.videoVersion?.video?.id ?? null,
+        sectionId: context?.videoVersion?.video?.section?.id ?? null,
+        channelId: context?.videoVersion?.video?.section?.channel?.id ?? null,
         block: {
           id: updated.id,
-          lessonVersionId: updated.lessonVersionId,
+          videoVersionId: updated.videoVersionId,
           ttsText: updated.ttsText,
           onScreenJson: updated.onScreenJson,
           imagePromptJson: updated.imagePromptJson,
@@ -7790,7 +7627,7 @@ fastify.post(
   },
   async (request, reply) => {
     const { versionId } = request.params as { versionId: string };
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) {
@@ -7818,11 +7655,11 @@ fastify.post(
       const drafts = buildDeterministicBlocks(version.scriptText, version.speechRateWps);
       if (replaceExisting) {
         await prisma.block.deleteMany({
-          where: { lessonVersionId: versionId }
+          where: { videoVersionId: versionId }
         });
       } else {
         const existingCount = await prisma.block.count({
-          where: { lessonVersionId: versionId }
+          where: { videoVersionId: versionId }
         });
         if (existingCount > 0) return existingCount;
       }
@@ -7830,7 +7667,7 @@ fastify.post(
       await prisma.block.createMany({
         data: drafts.map((draft) => ({
           workspaceId: version.workspaceId,
-          lessonVersionId: versionId,
+          videoVersionId: versionId,
           index: draft.index,
           sourceText: draft.sourceText,
           ttsText: sanitizeNarratedScriptText(draft.sourceText),
@@ -7860,7 +7697,7 @@ fastify.post(
     }
     const existing = await prisma.job.findFirst({
       where: {
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         type: "segment",
         status: { in: ["pending", "running"] }
       },
@@ -7896,7 +7733,7 @@ fastify.post(
           if (autoAudio) {
             const existingTts = await prisma.job.findFirst({
               where: {
-                lessonVersionId: versionId,
+                videoVersionId: versionId,
                 type: "tts",
                 blockId: null,
                 status: { in: ["pending", "running"] }
@@ -7910,7 +7747,7 @@ fastify.post(
                 data: {
                   workspaceId: version.workspaceId,
                   scope: "lesson",
-                  lessonVersionId: versionId,
+                  videoVersionId: versionId,
                   type: "tts",
                   status: "pending",
                   clientId,
@@ -7927,7 +7764,7 @@ fastify.post(
           if (autoImage) {
             const existingImage = await prisma.job.findFirst({
               where: {
-                lessonVersionId: versionId,
+                videoVersionId: versionId,
                 type: "image",
                 blockId: null,
                 status: { in: ["pending", "running"] }
@@ -7946,7 +7783,7 @@ fastify.post(
                 data: {
                   workspaceId: version.workspaceId,
                   scope: "lesson",
-                  lessonVersionId: versionId,
+                  videoVersionId: versionId,
                   type: "image",
                   status: "pending",
                   clientId,
@@ -7968,12 +7805,12 @@ fastify.post(
 
     if (purge) {
       await prisma.job.deleteMany({
-        where: { block: { lessonVersionId: versionId } }
+        where: { block: { videoVersionId: versionId } }
       });
       await prisma.asset.deleteMany({
-        where: { block: { lessonVersionId: versionId } }
+        where: { block: { videoVersionId: versionId } }
       });
-      await prisma.block.deleteMany({ where: { lessonVersionId: versionId } });
+      await prisma.block.deleteMany({ where: { videoVersionId: versionId } });
     }
     await seedDeterministicDraftBlocks(purge);
 
@@ -7981,7 +7818,7 @@ fastify.post(
       data: {
         workspaceId: version.workspaceId,
         scope: "lesson",
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         type: "segment",
         status: "pending",
         clientId,
@@ -8008,7 +7845,7 @@ fastify.post(
       if (autoAudio) {
         const existingTts = await prisma.job.findFirst({
           where: {
-            lessonVersionId: versionId,
+            videoVersionId: versionId,
             type: "tts",
             blockId: null,
             status: { in: ["pending", "running"] }
@@ -8022,7 +7859,7 @@ fastify.post(
             data: {
               workspaceId: version.workspaceId,
               scope: "lesson",
-              lessonVersionId: versionId,
+              videoVersionId: versionId,
               type: "tts",
               status: "pending",
               clientId,
@@ -8039,7 +7876,7 @@ fastify.post(
       if (autoImage) {
         const existingImage = await prisma.job.findFirst({
           where: {
-            lessonVersionId: versionId,
+            videoVersionId: versionId,
             type: "image",
             blockId: null,
             status: { in: ["pending", "running"] }
@@ -8058,7 +7895,7 @@ fastify.post(
             data: {
               workspaceId: version.workspaceId,
               scope: "lesson",
-              lessonVersionId: versionId,
+              videoVersionId: versionId,
               type: "image",
               status: "pending",
               clientId,
@@ -8090,7 +7927,7 @@ fastify.get(
   },
   async (request, reply) => {
     const { versionId } = request.params as { versionId: string };
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) {
@@ -8098,11 +7935,11 @@ fastify.get(
     }
 
     const blockCount = await prisma.block.count({
-      where: { lessonVersionId: versionId }
+      where: { videoVersionId: versionId }
     });
     const assetGroups = await prisma.asset.groupBy({
       by: ["kind"],
-      where: { block: { lessonVersionId: versionId } },
+      where: { block: { videoVersionId: versionId } },
       _count: { _all: true }
     });
     const assets: Record<string, number> = {};
@@ -8111,7 +7948,7 @@ fastify.get(
     });
     const jobCount = await prisma.job.count({
       where: {
-        OR: [{ lessonVersionId: versionId }, { block: { lessonVersionId: versionId } }]
+        OR: [{ videoVersionId: versionId }, { block: { videoVersionId: versionId } }]
       }
     });
 
@@ -8220,7 +8057,7 @@ fastify.post(
   },
   async (request, reply) => {
     const { versionId } = request.params as { versionId: string };
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) {
@@ -8245,7 +8082,7 @@ fastify.post(
     const language = body?.language?.trim();
 
     const result = await enqueueTtsJob({
-      lessonVersionId: versionId,
+      videoVersionId: versionId,
       clientId,
       requestId,
       meta:
@@ -8295,10 +8132,10 @@ fastify.post(
     if (!block) {
       return reply.code(404).send({ error: "block not found" });
     }
-    await invalidateFinalVideoForLessonVersion(block.lessonVersionId, "tts_block_requested");
+    await invalidateFinalVideoForLessonVersion(block.videoVersionId, "tts_block_requested");
 
     const result = await enqueueTtsJob({
-      lessonVersionId: block.lessonVersionId,
+      videoVersionId: block.videoVersionId,
       blockId,
       clientId,
       requestId,
@@ -8349,7 +8186,7 @@ fastify.post(
     if (!block) {
       return reply.code(404).send({ error: "block not found" });
     }
-    await invalidateFinalVideoForLessonVersion(block.lessonVersionId, "image_block_requested");
+    await invalidateFinalVideoForLessonVersion(block.videoVersionId, "image_block_requested");
     if (templateId) {
       const template = await prisma.slideTemplate.findUnique({
         where: { id: templateId }
@@ -8360,7 +8197,7 @@ fastify.post(
     }
 
     const result = await enqueueImageJob({
-      lessonVersionId: block.lessonVersionId,
+      videoVersionId: block.videoVersionId,
       blockId,
       templateId,
       clientId,
@@ -8402,7 +8239,7 @@ fastify.post(
     if (!block) {
       return reply.code(404).send({ error: "block not found" });
     }
-    await invalidateFinalVideoForLessonVersion(block.lessonVersionId, "segment_block_requested");
+    await invalidateFinalVideoForLessonVersion(block.videoVersionId, "segment_block_requested");
 
     if (requestId) {
       const existingByRequest = await prisma.job.findFirst({
@@ -8418,7 +8255,7 @@ fastify.post(
       data: {
         workspaceId: block.workspaceId,
         scope: "block",
-        lessonVersionId: block.lessonVersionId,
+        videoVersionId: block.videoVersionId,
         blockId,
         type: "segment_block",
         status: "pending",
@@ -8681,27 +8518,27 @@ fastify.post(
     const job = await prisma.job.findUnique({
       where: { id: jobId },
       include: {
-        lessonVersion: {
+        videoVersion: {
           select: {
-            lessonId: true,
-            lesson: {
+            videoId: true,
+            video: {
               select: {
-                moduleId: true,
-                module: { select: { courseId: true } }
+                sectionId: true,
+                section: { select: { channelId: true } }
               }
             }
           }
         },
         block: {
           select: {
-            lessonVersionId: true,
-            lessonVersion: {
+            videoVersionId: true,
+            videoVersion: {
               select: {
-                lessonId: true,
-                lesson: {
+                videoId: true,
+                video: {
                   select: {
-                    moduleId: true,
-                    module: { select: { courseId: true } }
+                    sectionId: true,
+                    section: { select: { channelId: true } }
                   }
                 }
               }
@@ -8730,7 +8567,7 @@ fastify.post(
         jobClientId: job.clientId ?? null,
         status: job.status,
         type: job.type,
-        lessonVersionId: job.lessonVersionId,
+        videoVersionId: job.videoVersionId,
         blockId: job.blockId,
         userAgent: request.headers["user-agent"] ?? null,
         referer: request.headers.referer ?? null
@@ -8747,17 +8584,17 @@ fastify.post(
         leaseExpiresAt: now
       }
     });
-    const context = job.lessonVersion?.lesson ?? job.block?.lessonVersion?.lesson ?? null;
-    const courseId = context?.module?.courseId ?? null;
-    if (courseId) {
-      await emitCourseBuildStatusEvent(courseId, {
+    const context = job.videoVersion?.video ?? job.block?.videoVersion?.video ?? null;
+    const channelId = context?.section?.channelId ?? null;
+    if (channelId) {
+      await emitCourseBuildStatusEvent(channelId, {
         correlationId: getRequestCorrelationId(request),
         jobId: canceled.id,
         status: canceled.status,
         type: canceled.type,
-        moduleId: context?.moduleId ?? null,
-        lessonId: job.lessonVersion?.lessonId ?? job.block?.lessonVersion?.lessonId ?? null,
-        lessonVersionId: canceled.lessonVersionId,
+        sectionId: context?.sectionId ?? null,
+        videoId: job.videoVersion?.videoId ?? job.block?.videoVersion?.videoId ?? null,
+        videoVersionId: canceled.videoVersionId,
         blockId: canceled.blockId,
         error: canceled.error,
         updatedAt: canceled.updatedAt
@@ -8803,7 +8640,7 @@ const cancelGenerationForLessonIds = async (
       type: { in: types },
       status: { in: ["pending", "running"] },
       ...(clientId ? { clientId } : {}),
-      OR: [{ lessonVersion: { lessonId: { in: lessonIds } } }, { block: { lessonVersion: { lessonId: { in: lessonIds } } } }]
+      OR: [{ videoVersion: { videoId: { in: lessonIds } } }, { block: { videoVersion: { videoId: { in: lessonIds } } } }]
     },
     data: {
       status: "canceled",
@@ -8816,7 +8653,7 @@ const cancelGenerationForLessonIds = async (
 };
 
 fastify.post(
-  "/lessons/:lessonId/generation/:phase/cancel",
+  "/lessons/:videoId/generation/:phase/cancel",
   {
     schema: {
       tags: ["Jobs"],
@@ -8854,8 +8691,8 @@ fastify.post(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { lessonId, phase } = request.params as {
-      lessonId: string;
+    const { videoId, phase } = request.params as {
+      videoId: string;
       phase: "blocks" | "audio" | "images";
     };
     if (!["blocks", "audio", "images"].includes(phase)) {
@@ -8866,20 +8703,20 @@ fastify.post(
     if (!dispatchClient.ok) {
       return reply.code(dispatchClient.statusCode).send({ error: dispatchClient.error });
     }
-    const lesson = await prisma.lesson.findFirst({
-      where: { id: lessonId, workspaceId: auth.scope.workspaceId },
-      select: { id: true, module: { select: { courseId: true } } }
+    const lesson = await prisma.video.findFirst({
+      where: { id: videoId, workspaceId: auth.scope.workspaceId },
+      select: { id: true, section: { select: { channelId: true } } }
     });
     if (!lesson) {
       return reply.code(404).send({ error: "lesson not found" });
     }
     const count = await cancelGenerationForLessonIds(
-      [lessonId],
+      [videoId],
       phase,
       dispatchClient.clientId ?? null
     );
     if (count > 0) {
-      await emitCourseBuildStatusEvent(lesson.module.courseId, {
+      await emitCourseBuildStatusEvent(lesson.section.channelId, {
         correlationId: getRequestCorrelationId(request),
         status: "canceled",
         type: phase
@@ -8895,7 +8732,7 @@ fastify.post(
 );
 
 fastify.post(
-  "/modules/:moduleId/generation/:phase/cancel",
+  "/modules/:sectionId/generation/:phase/cancel",
   {
     schema: {
       tags: ["Jobs"],
@@ -8933,8 +8770,8 @@ fastify.post(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { moduleId, phase } = request.params as {
-      moduleId: string;
+    const { sectionId, phase } = request.params as {
+      sectionId: string;
       phase: "blocks" | "audio" | "images";
     };
     if (!["blocks", "audio", "images"].includes(phase)) {
@@ -8945,15 +8782,15 @@ fastify.post(
     if (!dispatchClient.ok) {
       return reply.code(dispatchClient.statusCode).send({ error: dispatchClient.error });
     }
-    const moduleItem = await prisma.module.findFirst({
-      where: { id: moduleId, workspaceId: auth.scope.workspaceId },
-      select: { id: true, courseId: true }
+    const moduleItem = await prisma.section.findFirst({
+      where: { id: sectionId, workspaceId: auth.scope.workspaceId },
+      select: { id: true, channelId: true }
     });
     if (!moduleItem) {
       return reply.code(404).send({ error: "module not found" });
     }
-    const lessons = await prisma.lesson.findMany({
-      where: { moduleId, workspaceId: auth.scope.workspaceId },
+    const lessons = await prisma.video.findMany({
+      where: { sectionId, workspaceId: auth.scope.workspaceId },
       select: { id: true }
     });
     const count = await cancelGenerationForLessonIds(
@@ -8962,7 +8799,7 @@ fastify.post(
       dispatchClient.clientId ?? null
     );
     if (count > 0) {
-      await emitCourseBuildStatusEvent(moduleItem.courseId, {
+      await emitCourseBuildStatusEvent(moduleItem.channelId, {
         correlationId: getRequestCorrelationId(request),
         status: "canceled",
         type: phase
@@ -8978,7 +8815,7 @@ fastify.post(
 );
 
 fastify.post(
-  "/courses/:courseId/generation/:phase/cancel",
+  "/courses/:channelId/generation/:phase/cancel",
   {
     schema: {
       tags: ["Jobs"],
@@ -9016,8 +8853,8 @@ fastify.post(
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
-    const { courseId, phase } = request.params as {
-      courseId: string;
+    const { channelId, phase } = request.params as {
+      channelId: string;
       phase: "blocks" | "audio" | "images";
     };
     if (!["blocks", "audio", "images"].includes(phase)) {
@@ -9028,15 +8865,15 @@ fastify.post(
     if (!dispatchClient.ok) {
       return reply.code(dispatchClient.statusCode).send({ error: dispatchClient.error });
     }
-    const course = await prisma.course.findFirst({
-      where: { id: courseId, workspaceId: auth.scope.workspaceId },
+    const course = await prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: auth.scope.workspaceId },
       select: { id: true }
     });
     if (!course) {
       return reply.code(404).send({ error: "course not found" });
     }
-    const lessons = await prisma.lesson.findMany({
-      where: { workspaceId: auth.scope.workspaceId, module: { courseId } },
+    const lessons = await prisma.video.findMany({
+      where: { workspaceId: auth.scope.workspaceId, section: { channelId } },
       select: { id: true }
     });
     const count = await cancelGenerationForLessonIds(
@@ -9045,7 +8882,7 @@ fastify.post(
       dispatchClient.clientId ?? null
     );
     if (count > 0) {
-      await emitCourseBuildStatusEvent(courseId, {
+      await emitCourseBuildStatusEvent(channelId, {
         correlationId: getRequestCorrelationId(request),
         status: "canceled",
         type: phase
@@ -9105,24 +8942,24 @@ fastify.post(
     let deletedCoursesCount = 0;
 
     if (createdCourseId) {
-      const modulesFromCourse = await prisma.module.findMany({
-        where: { courseId: createdCourseId },
+      const modulesFromCourse = await prisma.section.findMany({
+        where: { channelId: createdCourseId },
         select: { id: true }
       });
       modulesFromCourse.forEach((moduleItem) => moduleIds.add(moduleItem.id));
     }
 
     if (moduleIds.size > 0) {
-      const lessonsFromModules = await prisma.lesson.findMany({
-        where: { moduleId: { in: Array.from(moduleIds) } },
+      const lessonsFromModules = await prisma.video.findMany({
+        where: { sectionId: { in: Array.from(moduleIds) } },
         select: { id: true }
       });
       lessonsFromModules.forEach((lessonItem) => lessonIds.add(lessonItem.id));
     }
 
     if (lessonIds.size > 0) {
-      const versionsFromLessons = await prisma.lessonVersion.findMany({
-        where: { lessonId: { in: Array.from(lessonIds) } },
+      const versionsFromLessons = await prisma.videoVersion.findMany({
+        where: { videoId: { in: Array.from(lessonIds) } },
         select: { id: true }
       });
       versionsFromLessons.forEach((version) => versionIds.add(version.id));
@@ -9135,7 +8972,7 @@ fastify.post(
         const activeJobs = await prisma.job.findMany({
           where: {
             status: { in: ["pending", "running"] },
-            OR: [{ lessonVersionId: { in: safeVersionIds } }, { block: { lessonVersionId: { in: safeVersionIds } } }]
+            OR: [{ videoVersionId: { in: safeVersionIds } }, { block: { videoVersionId: { in: safeVersionIds } } }]
           },
           select: { id: true }
         });
@@ -9156,7 +8993,7 @@ fastify.post(
       }
 
       const blocks = await prisma.block.findMany({
-        where: { lessonVersionId: { in: safeVersionIds } },
+        where: { videoVersionId: { in: safeVersionIds } },
         select: { id: true }
       });
       const blockIds = blocks.map((item) => item.id);
@@ -9181,15 +9018,15 @@ fastify.post(
 
       const deletedVersionJobs = await prisma.job.deleteMany({
         where: {
-          lessonVersionId: { in: safeVersionIds }
+          videoVersionId: { in: safeVersionIds }
         }
       });
       deletedVersionJobsCount += deletedVersionJobs.count;
       const deletedBlocks = await prisma.block.deleteMany({
-        where: { lessonVersionId: { in: safeVersionIds } }
+        where: { videoVersionId: { in: safeVersionIds } }
       });
       deletedBlocksCount += deletedBlocks.count;
-      const deletedVersions = await prisma.lessonVersion.deleteMany({
+      const deletedVersions = await prisma.videoVersion.deleteMany({
         where: { id: { in: safeVersionIds } }
       });
       deletedVersionsCount += deletedVersions.count;
@@ -9197,7 +9034,7 @@ fastify.post(
 
     const safeLessonIds = Array.from(lessonIds);
     if (safeLessonIds.length > 0) {
-      const deletedLessons = await prisma.lesson.deleteMany({
+      const deletedLessons = await prisma.video.deleteMany({
         where: { id: { in: safeLessonIds } }
       });
       deletedLessonsCount += deletedLessons.count;
@@ -9205,22 +9042,22 @@ fastify.post(
 
     const safeModuleIds = Array.from(moduleIds);
     if (safeModuleIds.length > 0) {
-      const deletedModules = await prisma.module.deleteMany({
+      const deletedModules = await prisma.section.deleteMany({
         where: { id: { in: safeModuleIds } }
       });
       deletedModulesCount += deletedModules.count;
     }
 
     if (createdCourseId) {
-      await prisma.module.deleteMany({ where: { courseId: createdCourseId } });
-      const deletedCourse = await prisma.course.deleteMany({
+      await prisma.section.deleteMany({ where: { channelId: createdCourseId } });
+      const deletedCourse = await prisma.channel.deleteMany({
         where: { id: createdCourseId }
       });
       deletedCoursesCount += deletedCourse.count;
     }
 
     const audit = {
-      courseId: createdCourseId,
+      channelId: createdCourseId,
       canceledJobs: canceledJobsCount,
       deletedJobs: {
         blockScoped: deletedBlockJobsCount,
@@ -9232,10 +9069,10 @@ fastify.post(
         errors: deletedFileErrorsCount
       },
       removed: {
-        versions: deletedVersionsCount,
+        videoVersions: deletedVersionsCount,
         blocks: deletedBlocksCount,
-        lessons: deletedLessonsCount,
-        modules: deletedModulesCount,
+        videos: deletedLessonsCount,
+        sections: deletedModulesCount,
         courses: deletedCoursesCount
       }
     };
@@ -9244,13 +9081,13 @@ fastify.post(
     broadcastEntityChanged({
       entity: "import_rollback",
       action: "completed",
-      courseId: createdCourseId ?? null,
+      channelId: createdCourseId ?? null,
       occurredAt: new Date().toISOString(),
       removed: {
-        courseId: createdCourseId,
-        modules: deletedModulesCount || safeModuleIds.length,
-        lessons: deletedLessonsCount || safeLessonIds.length,
-        versions: deletedVersionsCount || safeVersionIds.length
+        channelId: createdCourseId,
+        sections: deletedModulesCount || safeModuleIds.length,
+        videos: deletedLessonsCount || safeLessonIds.length,
+        videoVersions: deletedVersionsCount || safeVersionIds.length
       }
     });
 
@@ -9258,10 +9095,10 @@ fastify.post(
       ok: true,
       audit,
       removed: {
-        courseId: createdCourseId,
-        modules: deletedModulesCount || safeModuleIds.length,
-        lessons: deletedLessonsCount || safeLessonIds.length,
-        versions: deletedVersionsCount || safeVersionIds.length
+        channelId: createdCourseId,
+        sections: deletedModulesCount || safeModuleIds.length,
+        videos: deletedLessonsCount || safeLessonIds.length,
+        videoVersions: deletedVersionsCount || safeVersionIds.length
       }
     });
   }
@@ -9306,10 +9143,11 @@ fastify.get(
     reply.raw.flushHeaders?.();
 
     const sendEvent = (event: string, data: unknown) => {
-      const payload =
+      const payloadBase =
         data && typeof data === "object" && !Array.isArray(data)
           ? { correlationId: streamCorrelationId, ...(data as Record<string, unknown>) }
           : { correlationId: streamCorrelationId, data };
+      const payload = enrichDomainAliasJsonValue(payloadBase);
       reply.raw.write(`event: ${event}\n`);
       reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
@@ -9337,9 +9175,9 @@ fastify.get(
     let expectedClips: number | null = null;
     let lastClipCount = 0;
     let finalVideoSent = false;
-    if (job.type === "segment" && job.lessonVersionId) {
-      const version = await prisma.lessonVersion.findUnique({
-        where: { id: job.lessonVersionId }
+    if (job.type === "segment" && job.videoVersionId) {
+      const version = await prisma.videoVersion.findUnique({
+        where: { id: job.videoVersionId }
       });
       if (version) {
         const drafts = buildDeterministicBlocks(version.scriptText, version.speechRateWps);
@@ -9350,13 +9188,13 @@ fastify.get(
         });
       }
     }
-    if (job.type === "render_slide" && job.lessonVersionId && job.templateId) {
+    if (job.type === "render_slide" && job.videoVersionId && job.templateId) {
       const total = await prisma.block.count({
-        where: { lessonVersionId: job.lessonVersionId }
+        where: { videoVersionId: job.videoVersionId }
       });
       expectedSlides = total;
       sendEvent("start", {
-        versionId: job.lessonVersionId,
+        versionId: job.videoVersionId,
         blockCount: total,
         mode: "render_slide",
         templateId: job.templateId
@@ -9370,13 +9208,13 @@ fastify.get(
           mode: "tts",
           blockId: job.blockId
         });
-      } else if (job.lessonVersionId) {
+      } else if (job.videoVersionId) {
         const total = await prisma.block.count({
-          where: { lessonVersionId: job.lessonVersionId }
+          where: { videoVersionId: job.videoVersionId }
         });
         expectedAudio = total;
         sendEvent("start", {
-          versionId: job.lessonVersionId,
+          versionId: job.videoVersionId,
           blockCount: total,
           mode: "tts"
         });
@@ -9391,26 +9229,26 @@ fastify.get(
           blockId: job.blockId,
           templateId: job.templateId ?? null
         });
-      } else if (job.lessonVersionId) {
+      } else if (job.videoVersionId) {
         const total = await prisma.block.count({
-          where: { lessonVersionId: job.lessonVersionId }
+          where: { videoVersionId: job.videoVersionId }
         });
         expectedImages = total;
         sendEvent("start", {
-          versionId: job.lessonVersionId,
+          versionId: job.videoVersionId,
           blockCount: total,
           mode: "image",
           templateId: job.templateId ?? null
         });
       }
     }
-    if (job.type === "concat_video" && job.lessonVersionId) {
+    if (job.type === "concat_video" && job.videoVersionId) {
       const total = await prisma.block.count({
-        where: { lessonVersionId: job.lessonVersionId }
+        where: { videoVersionId: job.videoVersionId }
       });
       expectedClips = total;
       sendEvent("start", {
-        versionId: job.lessonVersionId,
+        versionId: job.videoVersionId,
         blockCount: total,
         mode: "final_video",
         templateId: job.templateId ?? null
@@ -9422,7 +9260,7 @@ fastify.get(
       try {
         const current = await prisma.job.findUnique({ where: { id: jobId } });
         if (!current) {
-          sendEvent("error", { message: "job not found" });
+          sendEvent(JOB_STREAM_EVENT.ERROR, { message: "job not found" });
           reply.raw.end();
           return;
         }
@@ -9436,7 +9274,7 @@ fastify.get(
             }
           });
           sendEvent("status", { job: canceled });
-          sendEvent("done", { job: canceled });
+          sendEvent(JOB_STREAM_EVENT.DONE, { job: canceled });
           reply.raw.end();
           return;
         }
@@ -9444,9 +9282,9 @@ fastify.get(
           lastStatus = current.status;
           sendEvent("status", { job: current });
         }
-        if (current.type === "segment" && current.lessonVersionId) {
+        if (current.type === "segment" && current.videoVersionId) {
           const blocks = await prisma.block.findMany({
-            where: { lessonVersionId: current.lessonVersionId },
+            where: { videoVersionId: current.videoVersionId },
             orderBy: { index: "asc" }
           });
           blocks.forEach((block) => {
@@ -9456,20 +9294,20 @@ fastify.get(
               if (block.status === "segment_error") {
                 sendEvent("block_error", { block });
               } else {
-                sendEvent("block", { block, blockMs: block.segmentMs ?? null });
+                sendEvent(JOB_STREAM_EVENT.BLOCK, { block, blockMs: block.segmentMs ?? null });
               }
             } else if (previous !== (block.status ?? "")) {
               blockStates.set(block.id, block.status ?? "");
               if (block.status === "segment_error") {
                 sendEvent("block_error", { block });
               } else {
-                sendEvent("block", { block, blockMs: block.segmentMs ?? null });
+                sendEvent(JOB_STREAM_EVENT.BLOCK, { block, blockMs: block.segmentMs ?? null });
               }
             }
           });
           if (blocks.length !== lastBlockCount) {
             lastBlockCount = blocks.length;
-            sendEvent("progress", {
+            sendEvent(JOB_STREAM_EVENT.PROGRESS, {
               index: lastBlockCount,
               total: expectedBlocks ?? lastBlockCount
             });
@@ -9487,28 +9325,28 @@ fastify.get(
               if (block.status === "segment_error") {
                 sendEvent("block_error", { block });
               } else {
-                sendEvent("block", { block, blockMs: block.segmentMs ?? null });
+                sendEvent(JOB_STREAM_EVENT.BLOCK, { block, blockMs: block.segmentMs ?? null });
               }
             }
-            sendEvent("progress", { index: 1, total: 1 });
+            sendEvent(JOB_STREAM_EVENT.PROGRESS, { index: 1, total: 1 });
           }
         }
-        if (current.type === "render_slide" && current.lessonVersionId && current.templateId) {
+        if (current.type === "render_slide" && current.videoVersionId && current.templateId) {
           if (expectedSlides === null) {
             expectedSlides = await prisma.block.count({
-              where: { lessonVersionId: current.lessonVersionId }
+              where: { videoVersionId: current.videoVersionId }
             });
           }
           const rendered = await prisma.asset.count({
             where: {
               kind: "slide_png",
               templateId: current.templateId,
-              block: { lessonVersionId: current.lessonVersionId }
+              block: { videoVersionId: current.videoVersionId }
             }
           });
           if (rendered !== lastSlideCount) {
             lastSlideCount = rendered;
-            sendEvent("progress", {
+            sendEvent(JOB_STREAM_EVENT.PROGRESS, {
               index: rendered,
               total: expectedSlides ?? rendered
             });
@@ -9518,9 +9356,9 @@ fastify.get(
           if (expectedAudio === null) {
             if (current.blockId) {
               expectedAudio = 1;
-            } else if (current.lessonVersionId) {
+            } else if (current.videoVersionId) {
               expectedAudio = await prisma.block.count({
-                where: { lessonVersionId: current.lessonVersionId }
+                where: { videoVersionId: current.videoVersionId }
               });
             }
           }
@@ -9548,25 +9386,25 @@ fastify.get(
             for (const asset of audioAssets) {
               if (!audioBlockStates.has(asset.blockId)) {
                 audioBlockStates.add(asset.blockId);
-                sendEvent("audio_block", {
+                sendEvent(JOB_STREAM_EVENT.AUDIO_BLOCK, {
                   blockId: asset.blockId,
                   blockIndex: asset.block?.index ?? null,
                   path: asset.path
                 });
               }
             }
-          } else if (current.lessonVersionId) {
+          } else if (current.videoVersionId) {
             generated = await prisma.asset.count({
               where: {
                 kind: "audio_raw",
-                block: { lessonVersionId: current.lessonVersionId },
+                block: { videoVersionId: current.videoVersionId },
                 createdAt: { gte: current.createdAt }
               }
             });
             const audioAssets = await prisma.asset.findMany({
               where: {
                 kind: "audio_raw",
-                block: { lessonVersionId: current.lessonVersionId },
+                block: { videoVersionId: current.videoVersionId },
                 createdAt: { gte: current.createdAt }
               },
               select: {
@@ -9578,7 +9416,7 @@ fastify.get(
             for (const asset of audioAssets) {
               if (!audioBlockStates.has(asset.blockId)) {
                 audioBlockStates.add(asset.blockId);
-                sendEvent("audio_block", {
+                sendEvent(JOB_STREAM_EVENT.AUDIO_BLOCK, {
                   blockId: asset.blockId,
                   blockIndex: asset.block?.index ?? null,
                   path: asset.path
@@ -9588,7 +9426,7 @@ fastify.get(
           }
           if (generated !== lastAudioCount) {
             lastAudioCount = generated;
-            sendEvent("progress", {
+            sendEvent(JOB_STREAM_EVENT.PROGRESS, {
               index: generated,
               total: expectedAudio ?? generated
             });
@@ -9598,9 +9436,9 @@ fastify.get(
           if (expectedImages === null) {
             if (current.blockId) {
               expectedImages = 1;
-            } else if (current.lessonVersionId) {
+            } else if (current.videoVersionId) {
               expectedImages = await prisma.block.count({
-                where: { lessonVersionId: current.lessonVersionId }
+                where: { videoVersionId: current.videoVersionId }
               });
             }
           }
@@ -9613,11 +9451,11 @@ fastify.get(
                 createdAt: { gte: current.createdAt }
               }
             });
-          } else if (current.lessonVersionId) {
+          } else if (current.videoVersionId) {
             generated = await prisma.asset.count({
               where: {
                 kind: "image_raw",
-                block: { lessonVersionId: current.lessonVersionId },
+                block: { videoVersionId: current.videoVersionId },
                 createdAt: { gte: current.createdAt }
               }
             });
@@ -9634,7 +9472,7 @@ fastify.get(
               });
               if (asset?.path && fs.existsSync(asset.path)) {
                 imageBlockStates.add(current.blockId);
-                sendEvent("image", {
+                sendEvent(JOB_STREAM_EVENT.IMAGE, {
                   blockId: current.blockId,
                   url: `/blocks/${current.blockId}/image/raw`
                 });
@@ -9659,11 +9497,11 @@ fastify.get(
                 });
               }
             }
-          } else if (current.lessonVersionId) {
+          } else if (current.videoVersionId) {
             const assets = await prisma.asset.findMany({
               where: {
                 kind: "image_raw",
-                block: { lessonVersionId: current.lessonVersionId },
+                block: { videoVersionId: current.videoVersionId },
                 createdAt: { gte: current.createdAt }
               },
               orderBy: { createdAt: "desc" },
@@ -9674,7 +9512,7 @@ fastify.get(
               if (!asset.blockId || imageBlockStates.has(asset.blockId)) continue;
               if (!asset.path || !fs.existsSync(asset.path)) continue;
               imageBlockStates.add(asset.blockId);
-              sendEvent("image", {
+              sendEvent(JOB_STREAM_EVENT.IMAGE, {
                 blockId: asset.blockId,
                 url: `/blocks/${asset.blockId}/image/raw`
               });
@@ -9684,7 +9522,7 @@ fastify.get(
                 where: {
                   kind: "slide_png",
                   templateId: current.templateId,
-                  block: { lessonVersionId: current.lessonVersionId },
+                  block: { videoVersionId: current.videoVersionId },
                   createdAt: { gte: current.createdAt }
                 },
                 orderBy: { createdAt: "desc" },
@@ -9705,56 +9543,83 @@ fastify.get(
           }
           if (generated !== lastImageCount) {
             lastImageCount = generated;
-            sendEvent("progress", {
+            sendEvent(JOB_STREAM_EVENT.PROGRESS, {
               index: generated,
               total: expectedImages ?? generated
             });
           }
         }
-        if (current.type === "concat_video" && current.lessonVersionId) {
+        if (current.type === "concat_video" && current.videoVersionId) {
           if (expectedClips === null) {
             expectedClips = await prisma.block.count({
-              where: { lessonVersionId: current.lessonVersionId }
+              where: { videoVersionId: current.videoVersionId }
             });
           }
           const rendered = await prisma.asset.count({
             where: {
               kind: "clip_mp4",
-              block: { lessonVersionId: current.lessonVersionId },
+              block: { videoVersionId: current.videoVersionId },
               createdAt: { gte: current.createdAt }
             }
           });
           if (rendered !== lastClipCount) {
             lastClipCount = rendered;
-            sendEvent("progress", {
+            sendEvent(JOB_STREAM_EVENT.PROGRESS, {
               index: rendered,
               total: expectedClips ?? rendered
             });
+          } else if ((expectedClips ?? 0) > 0) {
+            let progressPercentFromMeta: number | null = null;
+            if (typeof current.metaJson === "string" && current.metaJson.trim()) {
+              try {
+                const meta = JSON.parse(current.metaJson) as { progressPercent?: unknown };
+                if (
+                  typeof meta.progressPercent === "number" &&
+                  Number.isFinite(meta.progressPercent)
+                ) {
+                  progressPercentFromMeta = meta.progressPercent;
+                }
+              } catch {
+                // ignore malformed metaJson
+              }
+            }
+            if (progressPercentFromMeta !== null) {
+              const total = expectedClips ?? 0;
+              const percent = Math.max(1, Math.min(99, Math.trunc(progressPercentFromMeta)));
+              const estimated = Math.max(1, Math.min(total, Math.ceil((percent / 100) * total)));
+              if (estimated !== lastClipCount) {
+                lastClipCount = estimated;
+                sendEvent(JOB_STREAM_EVENT.PROGRESS, {
+                  index: estimated,
+                  total
+                });
+              }
+            }
           }
           if (!finalVideoSent) {
             const finalAsset = await prisma.asset.findFirst({
               where: {
                 kind: "final_mp4",
-                block: { lessonVersionId: current.lessonVersionId },
+                block: { videoVersionId: current.videoVersionId },
                 createdAt: { gte: current.createdAt }
               },
               orderBy: { createdAt: "desc" }
             });
             if (finalAsset?.path && fs.existsSync(finalAsset.path)) {
               finalVideoSent = true;
-              sendEvent("final_video", {
-                url: `/lesson-versions/${current.lessonVersionId}/final-video`
+              sendEvent(JOB_STREAM_EVENT.FINAL_VIDEO, {
+                url: `/video-versions/${current.videoVersionId}/final-video`
               });
             }
           }
         }
         if (current.status === "succeeded" || current.status === "failed" || current.status === "canceled") {
-          sendEvent("done", { job: current, blockCount: lastBlockCount });
+          sendEvent(JOB_STREAM_EVENT.DONE, { job: current, blockCount: lastBlockCount });
           reply.raw.end();
           return;
         }
       } catch (err) {
-        sendEvent("error", { message: (err as Error).message });
+        sendEvent(JOB_STREAM_EVENT.ERROR, { message: (err as Error).message });
         reply.raw.end();
         return;
       }
@@ -9779,6 +9644,199 @@ fastify.get(
   }
 );
 
+function appendOriginalQuery(request: FastifyRequest, basePath: string): string {
+  const rawUrl = request.raw.url ?? "";
+  const queryIndex = rawUrl.indexOf("?");
+  if (queryIndex === -1) return basePath;
+  const query = rawUrl.slice(queryIndex + 1);
+  if (!query) return basePath;
+  return `${basePath}?${query}`;
+}
+
+async function proxyLegacyAlias(request: FastifyRequest, reply: FastifyReply, legacyPath: string) {
+  const method = request.method.toUpperCase();
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(request.headers)) {
+    if (!value) continue;
+    if (key.toLowerCase() === "host") continue;
+    if (Array.isArray(value)) {
+      headers[key] = value.join(", ");
+    } else {
+      headers[key] = String(value);
+    }
+  }
+
+  const injectResponse = (await fastify.inject({
+    method: method as any,
+    url: appendOriginalQuery(request, legacyPath),
+    headers,
+    payload: method === "GET" || method === "HEAD" ? undefined : (request.body as Record<string, unknown> | undefined)
+  })) as any;
+
+  for (const [key, value] of Object.entries(injectResponse.headers)) {
+    if (value === undefined) continue;
+    const lower = key.toLowerCase();
+    if (lower === "content-length" || lower === "transfer-encoding") continue;
+    if (lower === "set-cookie") continue;
+    reply.header(key, value as string);
+  }
+
+  const setCookieHeader = injectResponse.headers["set-cookie"];
+  if (setCookieHeader) {
+    reply.header("set-cookie", setCookieHeader as string | string[]);
+  }
+
+  reply.code(injectResponse.statusCode);
+  if (method === "HEAD" || injectResponse.rawPayload.length === 0) {
+    return reply.send();
+  }
+  const contentType = String(injectResponse.headers["content-type"] ?? "");
+  if (contentType.toLowerCase().includes("application/json")) {
+    try {
+      const parsed = JSON.parse(injectResponse.rawPayload.toString("utf8"));
+      return reply.send(enrichDomainAliasJsonValue(parsed));
+    } catch {
+      // Fall back to raw payload if upstream returned invalid JSON despite content-type.
+    }
+  }
+  return reply.send(injectResponse.rawPayload);
+}
+
+// Domain aliases (channel/video) - external API vocabulary while internal schema remains legacy.
+fastify.get("/channels", async (request, reply) => proxyLegacyAlias(request, reply, "/courses"));
+fastify.post("/channels", async (request, reply) => proxyLegacyAlias(request, reply, "/courses"));
+fastify.patch("/channels/:channelId", async (request, reply) => {
+  const { channelId } = request.params as { channelId: string };
+  return proxyLegacyAlias(request, reply, `/courses/${channelId}`);
+});
+fastify.delete("/channels/:channelId", async (request, reply) => {
+  const { channelId } = request.params as { channelId: string };
+  return proxyLegacyAlias(request, reply, `/courses/${channelId}`);
+});
+fastify.get("/channels/:channelId/build-status", async (request, reply) => {
+  const { channelId } = request.params as { channelId: string };
+  return proxyLegacyAlias(request, reply, `/courses/${channelId}/build-status`);
+});
+fastify.get("/channels/:channelId/sections", async (request, reply) => {
+  const { channelId } = request.params as { channelId: string };
+  return proxyLegacyAlias(request, reply, `/courses/${channelId}/modules`);
+});
+fastify.post("/channels/:channelId/sections", async (request, reply) => {
+  const { channelId } = request.params as { channelId: string };
+  return proxyLegacyAlias(request, reply, `/courses/${channelId}/modules`);
+});
+fastify.patch("/channels/:channelId/structure/reorder", async (request, reply) => {
+  const { channelId } = request.params as { channelId: string };
+  return proxyLegacyAlias(request, reply, `/courses/${channelId}/structure/reorder`);
+});
+fastify.post("/channels/:channelId/generation/:phase/cancel", async (request, reply) => {
+  const { channelId, phase } = request.params as { channelId: string; phase: string };
+  return proxyLegacyAlias(request, reply, `/courses/${channelId}/generation/${phase}/cancel`);
+});
+
+fastify.patch("/sections/:sectionId", async (request, reply) => {
+  const { sectionId } = request.params as { sectionId: string };
+  return proxyLegacyAlias(request, reply, `/modules/${sectionId}`);
+});
+fastify.delete("/sections/:sectionId", async (request, reply) => {
+  const { sectionId } = request.params as { sectionId: string };
+  return proxyLegacyAlias(request, reply, `/modules/${sectionId}`);
+});
+fastify.get("/sections/:sectionId/videos", async (request, reply) => {
+  const { sectionId } = request.params as { sectionId: string };
+  return proxyLegacyAlias(request, reply, `/modules/${sectionId}/lessons`);
+});
+fastify.post("/sections/:sectionId/videos", async (request, reply) => {
+  const { sectionId } = request.params as { sectionId: string };
+  return proxyLegacyAlias(request, reply, `/modules/${sectionId}/lessons`);
+});
+fastify.post("/sections/:sectionId/generation/:phase/cancel", async (request, reply) => {
+  const { sectionId, phase } = request.params as { sectionId: string; phase: string };
+  return proxyLegacyAlias(request, reply, `/modules/${sectionId}/generation/${phase}/cancel`);
+});
+
+fastify.get("/videos/:videoId", async (request, reply) => {
+  const { videoId } = request.params as { videoId: string };
+  return proxyLegacyAlias(request, reply, `/lessons/${videoId}`);
+});
+fastify.patch("/videos/:videoId", async (request, reply) => {
+  const { videoId } = request.params as { videoId: string };
+  return proxyLegacyAlias(request, reply, `/lessons/${videoId}`);
+});
+fastify.delete("/videos/:videoId", async (request, reply) => {
+  const { videoId } = request.params as { videoId: string };
+  return proxyLegacyAlias(request, reply, `/lessons/${videoId}`);
+});
+fastify.get("/videos/:videoId/versions", async (request, reply) => {
+  const { videoId } = request.params as { videoId: string };
+  return proxyLegacyAlias(request, reply, `/lessons/${videoId}/versions`);
+});
+fastify.post("/videos/:videoId/versions", async (request, reply) => {
+  const { videoId } = request.params as { videoId: string };
+  return proxyLegacyAlias(request, reply, `/lessons/${videoId}/versions`);
+});
+fastify.post("/videos/:videoId/generation/:phase/cancel", async (request, reply) => {
+  const { videoId, phase } = request.params as { videoId: string; phase: string };
+  return proxyLegacyAlias(request, reply, `/lessons/${videoId}/generation/${phase}/cancel`);
+});
+
+fastify.get("/video-versions/:versionId/blocks", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/blocks`);
+});
+fastify.patch("/video-versions/:versionId/preferences", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/preferences`);
+});
+fastify.get("/video-versions/:versionId/final-video", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/final-video`);
+});
+fastify.get("/video-versions/:versionId/audios", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/audios`);
+});
+fastify.get("/video-versions/:versionId/images", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/images`);
+});
+fastify.get("/video-versions/:versionId/job-state", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/job-state`);
+});
+fastify.get("/video-versions/:versionId/assets", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/assets`);
+});
+fastify.post("/video-versions/:versionId/segment", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/segment`);
+});
+fastify.post("/video-versions/:versionId/segment-preview", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/segment-preview`);
+});
+fastify.post("/video-versions/:versionId/assets", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/assets`);
+});
+fastify.post("/video-versions/:versionId/assets/image", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/assets/image`);
+});
+fastify.post("/video-versions/:versionId/tts", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/tts`);
+});
+fastify.post("/video-versions/:versionId/images", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/images`);
+});
+fastify.post("/video-versions/:versionId/final-video", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/final-video`);
+});
+
 fastify.addHook("onClose", async () => {
   await prisma.$disconnect();
 });
@@ -9801,3 +9859,8 @@ if (isDirectExecution && process.env.VIZLEC_SKIP_API_LISTEN !== "true") {
 }
 
 export { fastify };
+
+
+
+
+

@@ -30,6 +30,25 @@ import {
   lessonFinalDir,
   blockSlideDir,
   ensureDir,
+  enrichDomainAliasPayload,
+  normalizeProgressPercent,
+  normalizeInternalInventoryDelta,
+  normalizeInternalInventorySnapshot,
+  type AgentControlOutgoingMessage,
+  type AgentHelloAckMessage,
+  type AgentControlIntegrationProvider,
+  type AgentIntegrationConfig,
+  withCanonicalScopedIdAliases,
+  type WorkerAgentCommandName,
+  type InternalInventoryDelta,
+  type InternalInventoryAssetRef,
+  type InternalInventorySnapshot,
+  type InternalInventorySnapshotEventPayload,
+  type InternalJobEventPayload,
+  type JobEventLifecycle,
+  type JobEventPhase,
+  type LegacyScopedIds,
+  type CanonicalScopedIds,
   type BlockDraft,
   type BlockMeta,
   type OnScreen
@@ -74,7 +93,7 @@ if (!internalJobsEventToken) {
 type JobRecord = {
   id: string;
   scope: string;
-  lessonVersionId: string | null;
+  videoVersionId: string | null;
   blockId: string | null;
   type: string;
   status: string;
@@ -124,15 +143,16 @@ function sleep(ms: number): Promise<void> {
 
 function logJobEvent(event: string, job: JobRecord, extra: Record<string, unknown> = {}): void {
   const correlationId = job.requestId?.trim() || null;
-  const payload: Record<string, unknown> = {
+  const payloadBase: Record<string, unknown> = {
     event,
     job_id: job.id,
     block_id: job.blockId,
-    lesson_version_id: job.lessonVersionId,
+    lesson_version_id: job.videoVersionId,
     type: job.type,
     attempts: job.attempts,
     ...extra
   };
+  const payload = enrichDomainAliasPayload(payloadBase);
   if (correlationId) {
     payload.correlationId = correlationId;
   }
@@ -172,11 +192,11 @@ function getWorkerLogPath(): string {
 }
 
 function logWorkerAction(message: string, meta: Record<string, unknown> = {}): void {
-  const payload = {
+  const payload = enrichDomainAliasPayload({
     ts: localIsoNow(),
     message,
     ...meta
-  };
+  });
   const line = JSON.stringify(payload);
   console.log(line);
   fs.promises.appendFile(getWorkerLogPath(), `${line}\n`).catch(() => null);
@@ -675,18 +695,12 @@ async function collectWorkerInventorySnapshot(): Promise<InventorySnapshot> {
   });
 }
 
-type WorkerSnapshotAssetRef = {
-  assetId: string;
-  courseId: string;
-  moduleId: string;
-  lessonId: string;
-  lessonVersionId: string;
-  blockId: string;
-  kind: string;
-  path: string;
-  sizeBytes: number;
-  durationSeconds?: number;
-};
+type WorkerSnapshotAssetRef = InternalInventoryAssetRef &
+  LegacyScopedIds &
+  Partial<CanonicalScopedIds> & {
+    assetId: string;
+    sizeBytes: number;
+  };
 
 async function collectWorkerSnapshotAssetRefs(): Promise<WorkerSnapshotAssetRef[]> {
   if (!agentWorkspaceId) return [];
@@ -699,17 +713,17 @@ async function collectWorkerSnapshotAssetRefs(): Promise<WorkerSnapshotAssetRef[
       path: true,
       block: {
         select: {
-          lessonVersionId: true,
+          videoVersionId: true,
           audioDurationS: true,
-          lessonVersion: {
+          videoVersion: {
             select: {
-              lessonId: true,
-              lesson: {
+              videoId: true,
+              video: {
                 select: {
-                  moduleId: true,
-                  module: {
+                  sectionId: true,
+                  section: {
                     select: {
-                      courseId: true
+                      channelId: true
                     }
                   }
                 }
@@ -733,12 +747,12 @@ async function collectWorkerSnapshotAssetRefs(): Promise<WorkerSnapshotAssetRef[
     } catch {
       continue;
     }
-    refs.push({
+    refs.push(withCanonicalScopedIdAliases({
       assetId: asset.id,
-      courseId: asset.block.lessonVersion.lesson.module.courseId,
-      moduleId: asset.block.lessonVersion.lesson.moduleId,
-      lessonId: asset.block.lessonVersion.lessonId,
-      lessonVersionId: asset.block.lessonVersionId,
+      channelId: asset.block.videoVersion.video.section.channelId,
+      sectionId: asset.block.videoVersion.video.sectionId,
+      videoId: asset.block.videoVersion.videoId,
+      videoVersionId: asset.block.videoVersionId,
       blockId: asset.blockId,
       kind: asset.kind,
       path: resolvedPath,
@@ -747,7 +761,7 @@ async function collectWorkerSnapshotAssetRefs(): Promise<WorkerSnapshotAssetRef[
         asset.kind === "audio_raw" && typeof asset.block.audioDurationS === "number"
           ? asset.block.audioDurationS
           : undefined
-    });
+    }));
   }
   return refs;
 }
@@ -882,32 +896,34 @@ async function executeWorkerFreeSpace(maxItems?: number): Promise<{
 async function publishInventorySnapshot(snapshot: InventorySnapshot): Promise<void> {
   if (!hasWorkerIdentityForInventory()) return;
   const assetRefs = await collectWorkerSnapshotAssetRefs();
+  const normalizedSnapshot = normalizeInternalInventorySnapshot({
+    audioCount: snapshot.audioCount,
+    durationSeconds: snapshot.durationSeconds,
+    diskUsageBytes: snapshot.diskUsageBytes,
+    assetRefs,
+    updatedAt: new Date().toISOString()
+  });
+  const payload: InternalInventorySnapshotEventPayload = {
+    workspaceId: agentWorkspaceId!,
+    agentId: agentId!,
+    snapshot: normalizedSnapshot
+  };
   await requestJson(`${apiBaseUrl}/internal/inventory/snapshot`, {
     method: "POST",
     timeoutMs: 15000,
     headers: {
       "x-internal-token": internalJobsEventToken
     },
-    body: {
-      workspaceId: agentWorkspaceId,
-      agentId,
-      snapshot: {
-        audioCount: snapshot.audioCount,
-        durationSeconds: snapshot.durationSeconds,
-        diskUsageBytes: snapshot.diskUsageBytes,
-        assetRefs,
-        updatedAt: new Date().toISOString()
-      }
-    }
+    body: payload
   });
 }
 
-async function publishInventoryDelta(delta: {
-  audioCountDelta: number;
-  durationSecondsDelta: number;
-  diskUsageBytesDelta: number;
-}): Promise<void> {
+async function publishInventoryDelta(delta: InternalInventoryDelta): Promise<void> {
   if (!hasWorkerIdentityForInventory()) return;
+  const normalizedDelta = normalizeInternalInventoryDelta({
+    ...delta,
+    updatedAt: new Date().toISOString()
+  });
   await requestJson(`${apiBaseUrl}/internal/inventory/delta`, {
     method: "POST",
     timeoutMs: 15000,
@@ -917,12 +933,7 @@ async function publishInventoryDelta(delta: {
     body: {
       workspaceId: agentWorkspaceId,
       agentId,
-      delta: {
-        audioCountDelta: delta.audioCountDelta,
-        durationSecondsDelta: delta.durationSecondsDelta,
-        diskUsageBytesDelta: delta.diskUsageBytesDelta,
-        updatedAt: new Date().toISOString()
-      }
+      delta: normalizedDelta
     }
   });
 }
@@ -1000,65 +1011,11 @@ function ensureInventoryPeriodicScanStarted(): void {
   inventoryScanTimer.unref?.();
 }
 
-type AgentControlRequest =
-  | {
-      type: "integration_health_request";
-      messageId: string;
-      payload: {
-        provider: "ollama" | "xtts" | "comfyui";
-        options?: Record<string, unknown>;
-        correlationId?: string;
-      };
-    }
-  | {
-      type: "worker_command_request";
-      messageId: string;
-      payload: {
-        command:
-          | "comfy_workflows_list"
-          | "comfy_workflow_import"
-          | "tts_voices_list"
-          | "worker_queue_wake"
-          | "system_hard_cleanup"
-          | "system_free_space_plan"
-          | "system_free_space_execute"
-          | "inventory_snapshot_collect"
-          | "block_image_raw_get"
-          | "block_audio_raw_get"
-          | "block_slide_get"
-          | "lesson_version_final_video_get"
-          | "lesson_version_final_video_post"
-          | "lesson_version_slides_post"
-          | "lesson_version_assets_post"
-          | "lesson_version_assets_image_post"
-          | "lesson_version_images_post"
-          | "lesson_version_audios_list"
-          | "lesson_version_images_list"
-          | "lesson_version_slides_list"
-          | "lesson_version_job_state";
-        params?: Record<string, unknown>;
-        correlationId?: string;
-      };
-    };
-
-type AgentHelloAckMessage = {
-  type: "agent_hello_ack";
-  messageId: string;
-  inReplyTo?: string;
-  payload?: {
-    ok?: boolean;
-    agentId?: string;
-    integrationConfig?: {
-      llmBaseUrl?: string;
-      comfyuiBaseUrl?: string;
-      ttsBaseUrl?: string;
-    };
-  };
-};
+type AgentControlRequest = AgentControlOutgoingMessage;
 
 function createAgentControlResponseMessage(params: {
   inReplyTo: string;
-  provider: "ollama" | "xtts" | "comfyui";
+  provider: AgentControlIntegrationProvider;
   statusCode: number;
   data: Record<string, unknown>;
 }): string {
@@ -1076,28 +1033,7 @@ function createAgentControlResponseMessage(params: {
 
 function createWorkerCommandResponseMessage(params: {
   inReplyTo: string;
-  command:
-    | "comfy_workflows_list"
-    | "comfy_workflow_import"
-    | "tts_voices_list"
-    | "worker_queue_wake"
-    | "system_hard_cleanup"
-    | "system_free_space_plan"
-    | "system_free_space_execute"
-    | "inventory_snapshot_collect"
-    | "block_image_raw_get"
-    | "block_audio_raw_get"
-    | "block_slide_get"
-    | "lesson_version_final_video_get"
-    | "lesson_version_final_video_post"
-    | "lesson_version_slides_post"
-    | "lesson_version_assets_post"
-    | "lesson_version_assets_image_post"
-    | "lesson_version_images_post"
-    | "lesson_version_audios_list"
-    | "lesson_version_images_list"
-    | "lesson_version_slides_list"
-    | "lesson_version_job_state";
+  command: WorkerAgentCommandName;
   statusCode: number;
   data: Record<string, unknown>;
 }): string {
@@ -1400,28 +1336,7 @@ async function handleAgentControlRequest(
 async function handleWorkerCommandRequest(
   request: Extract<AgentControlRequest, { type: "worker_command_request" }>
 ): Promise<{
-  command:
-    | "comfy_workflows_list"
-    | "comfy_workflow_import"
-    | "tts_voices_list"
-    | "worker_queue_wake"
-    | "system_hard_cleanup"
-    | "system_free_space_plan"
-    | "system_free_space_execute"
-    | "inventory_snapshot_collect"
-    | "block_image_raw_get"
-    | "block_audio_raw_get"
-    | "block_slide_get"
-    | "lesson_version_final_video_get"
-    | "lesson_version_final_video_post"
-    | "lesson_version_slides_post"
-    | "lesson_version_assets_post"
-    | "lesson_version_assets_image_post"
-    | "lesson_version_images_post"
-    | "lesson_version_audios_list"
-    | "lesson_version_images_list"
-    | "lesson_version_slides_list"
-    | "lesson_version_job_state";
+  command: WorkerAgentCommandName;
   statusCode: number;
   data: Record<string, unknown>;
 }> {
@@ -1597,7 +1512,7 @@ async function handleWorkerCommandRequest(
       };
     }
     const block = await resolveBlockContext(blockId);
-    if (!block || !block.lessonVersion?.lesson?.module?.course) {
+    if (!block || !block.videoVersion?.video?.section?.channel) {
       return {
         command: "block_image_raw_get",
         statusCode: 404,
@@ -1645,7 +1560,7 @@ async function handleWorkerCommandRequest(
       };
     }
     const block = await resolveBlockContext(blockId);
-    if (!block || !block.lessonVersion?.lesson?.module?.course) {
+    if (!block || !block.videoVersion?.video?.section?.channel) {
       return {
         command: "block_audio_raw_get",
         statusCode: 404,
@@ -1753,7 +1668,7 @@ async function handleWorkerCommandRequest(
         data: { error: "versionId is required" }
       };
     }
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) {
@@ -1766,7 +1681,7 @@ async function handleWorkerCommandRequest(
     const asset = await prisma.asset.findFirst({
       where: {
         kind: "final_mp4",
-        block: { lessonVersionId: versionId }
+        block: { videoVersionId: versionId }
       },
       orderBy: { createdAt: "desc" }
     });
@@ -1801,7 +1716,7 @@ async function handleWorkerCommandRequest(
     data: Record<string, unknown>;
   }> => {
     const { versionId, clientId, requestId } = params;
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId },
       include: {
         blocks: { select: { id: true } }
@@ -1840,7 +1755,7 @@ async function handleWorkerCommandRequest(
     const existing = await prisma.job.findFirst({
       where: {
         workspaceId: version.workspaceId,
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         type: "concat_video",
         status: { in: ["pending", "running"] }
       },
@@ -1882,7 +1797,7 @@ async function handleWorkerCommandRequest(
       data: {
         workspaceId: version.workspaceId,
         scope: "lesson",
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         type: "concat_video",
         status: "pending",
         clientId,
@@ -1913,7 +1828,7 @@ async function handleWorkerCommandRequest(
       requestWorkerWake(`enqueue_render_slide:${reason}`);
     };
     const { versionId, templateId, clientId, requestId } = params;
-    const versionScope = await prisma.lessonVersion.findUnique({
+    const versionScope = await prisma.videoVersion.findUnique({
       where: { id: versionId },
       select: { workspaceId: true }
     });
@@ -1954,7 +1869,7 @@ async function handleWorkerCommandRequest(
     const existing = await prisma.job.findFirst({
       where: {
         workspaceId: versionScope.workspaceId,
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         type: "render_slide",
         templateId,
         status: { in: ["pending", "running"] }
@@ -2009,7 +1924,7 @@ async function handleWorkerCommandRequest(
       data: {
         workspaceId: versionScope.workspaceId,
         scope: "lesson",
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         type: "render_slide",
         status: "pending",
         templateId,
@@ -2078,7 +1993,7 @@ async function handleWorkerCommandRequest(
     data: Record<string, unknown>;
   }> => {
     const { versionId, templateId, clientId, requestId, releaseMemory, freeMemory } = params;
-    const versionScope = await prisma.lessonVersion.findUnique({
+    const versionScope = await prisma.videoVersion.findUnique({
       where: { id: versionId },
       select: { workspaceId: true }
     });
@@ -2108,7 +2023,7 @@ async function handleWorkerCommandRequest(
     const existing = await prisma.job.findFirst({
       where: {
         workspaceId: versionScope.workspaceId,
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         blockId: null,
         type: "image",
         templateId: templateId ?? null,
@@ -2151,7 +2066,7 @@ async function handleWorkerCommandRequest(
       data: {
         workspaceId: versionScope.workspaceId,
         scope: "lesson",
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         type: "image",
         status: "pending",
         clientId,
@@ -2196,7 +2111,7 @@ async function handleWorkerCommandRequest(
         data: { error: "lesson version not found" }
       };
     }
-    const version = await prisma.lessonVersion.findUnique({ where: { id: versionId } });
+    const version = await prisma.videoVersion.findUnique({ where: { id: versionId } });
     if (!version) {
       return {
         command: "lesson_version_assets_post",
@@ -2240,7 +2155,7 @@ async function handleWorkerCommandRequest(
         data: { error: "lesson version not found" }
       };
     }
-    const version = await prisma.lessonVersion.findUnique({ where: { id: versionId } });
+    const version = await prisma.videoVersion.findUnique({ where: { id: versionId } });
     if (!version) {
       return {
         command: "lesson_version_assets_image_post",
@@ -2328,7 +2243,7 @@ async function handleWorkerCommandRequest(
         data: { error: "versionId is required" }
       };
     }
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) {
@@ -2339,12 +2254,12 @@ async function handleWorkerCommandRequest(
       };
     }
     const blocks = await prisma.block.findMany({
-      where: { lessonVersionId: versionId },
+      where: { videoVersionId: versionId },
       select: { id: true, index: true },
       orderBy: { index: "asc" }
     });
     const audioAssets = await prisma.asset.findMany({
-      where: { kind: "audio_raw", block: { lessonVersionId: versionId } },
+      where: { kind: "audio_raw", block: { videoVersionId: versionId } },
       orderBy: { createdAt: "desc" },
       distinct: ["blockId"],
       select: { blockId: true, path: true }
@@ -2383,7 +2298,7 @@ async function handleWorkerCommandRequest(
         data: { error: "versionId is required" }
       };
     }
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) {
@@ -2394,12 +2309,12 @@ async function handleWorkerCommandRequest(
       };
     }
     const blocks = await prisma.block.findMany({
-      where: { lessonVersionId: versionId },
+      where: { videoVersionId: versionId },
       select: { id: true, index: true },
       orderBy: { index: "asc" }
     });
     const imageAssets = await prisma.asset.findMany({
-      where: { kind: "image_raw", block: { lessonVersionId: versionId } },
+      where: { kind: "image_raw", block: { videoVersionId: versionId } },
       orderBy: { createdAt: "desc" },
       distinct: ["blockId"],
       select: { blockId: true, path: true }
@@ -2446,7 +2361,7 @@ async function handleWorkerCommandRequest(
         data: { error: "versionId is required" }
       };
     }
-    const version = await prisma.lessonVersion.findUnique({
+    const version = await prisma.videoVersion.findUnique({
       where: { id: versionId }
     });
     if (!version) {
@@ -2458,11 +2373,11 @@ async function handleWorkerCommandRequest(
     }
 
     const totalBlocks = await prisma.block.count({
-      where: { lessonVersionId: versionId }
+      where: { videoVersionId: versionId }
     });
     const activeJobs = await prisma.job.findMany({
       where: {
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         status: { in: ["pending", "running"] }
       },
       orderBy: { createdAt: "desc" }
@@ -2470,7 +2385,7 @@ async function handleWorkerCommandRequest(
     const finalVideoAssets = await prisma.asset.findMany({
       where: {
         kind: "final_mp4",
-        block: { lessonVersionId: versionId }
+        block: { videoVersionId: versionId }
       },
       orderBy: { createdAt: "desc" },
       select: { path: true }
@@ -2539,7 +2454,7 @@ async function handleWorkerCommandRequest(
             const generatedCount = await prisma.asset.count({
               where: {
                 kind: "audio_raw",
-                block: { lessonVersionId: versionId },
+                block: { videoVersionId: versionId },
                 createdAt: { gte: segmentJob.createdAt }
               }
             });
@@ -2563,7 +2478,7 @@ async function handleWorkerCommandRequest(
         const generatedCount = await prisma.asset.count({
           where: {
             kind: "audio_raw",
-            block: { lessonVersionId: versionId },
+            block: { videoVersionId: versionId },
             createdAt: { gte: ttsBatchJob.createdAt }
           }
         });
@@ -2588,7 +2503,7 @@ async function handleWorkerCommandRequest(
             const generatedCount = await prisma.asset.count({
               where: {
                 kind: "image_raw",
-                block: { lessonVersionId: versionId },
+                block: { videoVersionId: versionId },
                 createdAt: { gte: segmentJob.createdAt }
               }
             });
@@ -2612,7 +2527,7 @@ async function handleWorkerCommandRequest(
         const generatedCount = await prisma.asset.count({
           where: {
             kind: "image_raw",
-            block: { lessonVersionId: versionId },
+            block: { videoVersionId: versionId },
             createdAt: { gte: imageBatchJob.createdAt }
           }
         });
@@ -2635,7 +2550,7 @@ async function handleWorkerCommandRequest(
         }
         const generatedCount = await prisma.block.count({
           where: {
-            lessonVersionId: versionId,
+            videoVersionId: versionId,
             createdAt: { gte: segmentJob.createdAt }
           }
         });
@@ -2652,7 +2567,7 @@ async function handleWorkerCommandRequest(
         if (!slidesJob) return idleState();
         const whereBase = {
           kind: "slide_png",
-          block: { lessonVersionId: versionId },
+          block: { videoVersionId: versionId },
           createdAt: { gte: slidesJob.createdAt }
         } as const;
         const generatedCount = await prisma.asset.count({
@@ -2672,7 +2587,7 @@ async function handleWorkerCommandRequest(
         const generatedCount = await prisma.asset.count({
           where: {
             kind: "clip_mp4",
-            block: { lessonVersionId: versionId },
+            block: { videoVersionId: versionId },
             createdAt: { gte: finalVideoJob.createdAt }
           }
         });
@@ -2718,7 +2633,7 @@ async function handleWorkerCommandRequest(
       command: "lesson_version_job_state",
       statusCode: 200,
       data: {
-        lessonVersionId: versionId,
+        videoVersionId: versionId,
         finalVideoReady,
         segment,
         tts,
@@ -2974,14 +2889,7 @@ async function ensureJobCorrelationId(job: JobRecord): Promise<string> {
   return resolved;
 }
 
-type JobEventLifecycle = "started" | "running" | "finished";
-type JobEventPhase = "cleanup" | "generation";
-
-type NotifyApiJobEventOptions = {
-  lifecycle?: JobEventLifecycle;
-  phase?: JobEventPhase;
-  progressPercent?: number;
-};
+type NotifyApiJobEventOptions = Omit<InternalJobEventPayload, "jobId">;
 
 async function notifyApiJobEvent(
   jobId: string,
@@ -2993,23 +2901,21 @@ async function notifyApiJobEvent(
   if (!resolvedCorrelationId) {
     throw new Error(`notifyApiJobEvent called without correlationId for job ${jobId}`);
   }
-  const progressPercent =
-    typeof options.progressPercent === "number" && Number.isFinite(options.progressPercent)
-      ? Math.max(1, Math.min(99, Math.trunc(options.progressPercent)))
-      : undefined;
+  const progressPercent = normalizeProgressPercent(options.progressPercent);
   try {
     const headers: Record<string, string> = {
       "X-Internal-Token": internalJobsEventToken,
       "X-Correlation-Id": resolvedCorrelationId
     };
+    const body: InternalJobEventPayload = {
+      jobId,
+      lifecycle: options.lifecycle,
+      phase: options.phase,
+      progressPercent
+    };
     await requestJson(`${apiBaseUrl}/internal/jobs/event`, {
       method: "POST",
-      body: {
-        jobId,
-        lifecycle: options.lifecycle,
-        phase: options.phase,
-        progressPercent
-      },
+      body,
       timeoutMs: 5000,
       headers
     });
@@ -3395,7 +3301,7 @@ function writeAppSettings(next: AppSettings): void {
 }
 
 function applyAgentIntegrationConfigSnapshot(
-  integrationConfig: NonNullable<NonNullable<AgentHelloAckMessage["payload"]>["integrationConfig"]>
+  integrationConfig: AgentIntegrationConfig
 ): void {
   if (!workerAcceptControlPlaneIntegrationBaseUrl) {
     logWorkerAction("agent_control_integration_config_ignored", {
@@ -4093,24 +3999,24 @@ async function clearImageAssetsForBlocks(blockIds: string[]): Promise<void> {
 }
 
 async function clearFinalVideoAssetsForVersion(
-  lessonVersionId: string,
+  videoVersionId: string,
   options: { reason: string; job?: JobRecord }
 ): Promise<void> {
   const assets = await prisma.asset.findMany({
     where: {
       kind: "final_mp4",
-      block: { lessonVersionId }
+      block: { videoVersionId }
     }
   });
   if (assets.length === 0) {
     if (options.job) {
       logJobEvent("final_video_invalidate_skipped", options.job, {
-        lesson_version_id: lessonVersionId,
+        lesson_version_id: videoVersionId,
         reason: options.reason
       });
     } else {
       logWorkerAction("final_video_invalidate_skipped", {
-        lesson_version_id: lessonVersionId,
+        lesson_version_id: videoVersionId,
         reason: options.reason
       });
     }
@@ -4120,7 +4026,7 @@ async function clearFinalVideoAssetsForVersion(
   await prisma.asset.deleteMany({
     where: {
       kind: "final_mp4",
-      block: { lessonVersionId }
+      block: { videoVersionId }
     }
   });
 
@@ -4137,7 +4043,7 @@ async function clearFinalVideoAssetsForVersion(
 
   if (options.job) {
     logJobEvent("final_video_invalidated", options.job, {
-      lesson_version_id: lessonVersionId,
+      lesson_version_id: videoVersionId,
       reason: options.reason,
       asset_count: assets.length,
       deleted_count: deletedCount,
@@ -4145,7 +4051,7 @@ async function clearFinalVideoAssetsForVersion(
     });
   } else {
     logWorkerAction("final_video_invalidated", {
-      lesson_version_id: lessonVersionId,
+      lesson_version_id: videoVersionId,
       reason: options.reason,
       asset_count: assets.length,
       deleted_count: deletedCount,
@@ -4324,13 +4230,13 @@ async function resolveBlockContext(blockId: string) {
   return prisma.block.findUnique({
     where: { id: blockId },
     include: {
-      lessonVersion: {
+      videoVersion: {
         include: {
-          lesson: {
+          video: {
             include: {
-              module: {
+              section: {
                 include: {
-                  course: true
+                  channel: true
                 }
               }
             }
@@ -4503,7 +4409,7 @@ function mimeTypeForImage(ext: string): string {
 }
 
 async function clearSlideAssetsForVersionTemplate(
-  lessonVersionId: string,
+  videoVersionId: string,
   templateId: string,
   options: { reason: string; job?: JobRecord }
 ): Promise<void> {
@@ -4511,13 +4417,13 @@ async function clearSlideAssetsForVersionTemplate(
     where: {
       kind: "slide_png",
       templateId,
-      block: { lessonVersionId }
+      block: { videoVersionId }
     }
   });
   if (assets.length === 0) {
     if (options.job) {
       logJobEvent("slide_invalidate_skipped", options.job, {
-        lesson_version_id: lessonVersionId,
+        lesson_version_id: videoVersionId,
         template_id: templateId,
         reason: options.reason
       });
@@ -4529,7 +4435,7 @@ async function clearSlideAssetsForVersionTemplate(
     where: {
       kind: "slide_png",
       templateId,
-      block: { lessonVersionId }
+      block: { videoVersionId }
     }
   });
 
@@ -4546,7 +4452,7 @@ async function clearSlideAssetsForVersionTemplate(
 
   if (options.job) {
     logJobEvent("slide_invalidated", options.job, {
-      lesson_version_id: lessonVersionId,
+      lesson_version_id: videoVersionId,
       template_id: templateId,
       reason: options.reason,
       asset_count: assets.length,
@@ -4591,18 +4497,18 @@ async function renderSlideForSingleBlock(options: {
     onScreenJson: string | null;
     workspaceId: string;
   };
-  courseId: string;
-  moduleId: string;
-  lessonId: string;
+  channelId: string;
+  sectionId: string;
+  videoId: string;
   versionId: string;
 }): Promise<void> {
-  const { job, template, block, courseId, moduleId, lessonId, versionId } = options;
+  const { job, template, block, channelId, sectionId, videoId, versionId } = options;
   const onScreen = parseOnScreenJson(block.onScreenJson);
   if (!onScreen) {
     throw new Error(`block ${block.index} missing onScreenJson`);
   }
   const bullets = (onScreen.bullets ?? []).filter(Boolean).slice(0, 5);
-  const slideDir = blockSlideDir(courseId, moduleId, lessonId, versionId, block.index);
+  const slideDir = blockSlideDir(channelId, sectionId, videoId, versionId, block.index);
   ensureDir(slideDir);
   const outputPath = path.join(slideDir, template.fileName);
 
@@ -4729,32 +4635,32 @@ async function renderSlidesForTemplate(options: {
   template: SlideTemplateRecord;
 }): Promise<void> {
   const { job, template } = options;
-  if (!job.lessonVersionId) {
+  if (!job.videoVersionId) {
     throw new Error("render_slide job missing lessonVersionId");
   }
   await assertLeaseValid(job.id);
-  const version = await prisma.lessonVersion.findUnique({
-    where: { id: job.lessonVersionId },
+  const version = await prisma.videoVersion.findUnique({
+    where: { id: job.videoVersionId },
     include: {
-      lesson: {
+      video: {
         include: {
-          module: {
+          section: {
             include: {
-              course: true
+              channel: true
             }
           }
         }
       }
     }
   });
-  if (!version?.lesson?.module?.course) {
+  if (!version?.video?.section?.channel) {
     throw new Error("lesson context not found");
   }
-  const course = version.lesson.module.course;
-  const moduleRecord = version.lesson.module;
-  const lesson = version.lesson;
+  const course = version.video.section.channel;
+  const moduleRecord = version.video.section;
+  const lesson = version.video;
   const blocks = await prisma.block.findMany({
-    where: { lessonVersionId: version.id },
+    where: { videoVersionId: version.id },
     orderBy: { index: "asc" }
   });
   if (blocks.length === 0) {
@@ -5011,18 +4917,18 @@ async function applyBgmMixToFinalVideo(options: {
 
 async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<void> {
   const { job } = options;
-  if (!job.lessonVersionId) {
+  if (!job.videoVersionId) {
     throw new Error("concat_video job missing lessonVersionId");
   }
   await assertLeaseValid(job.id);
-  const version = await prisma.lessonVersion.findUnique({
-    where: { id: job.lessonVersionId },
+  const version = await prisma.videoVersion.findUnique({
+    where: { id: job.videoVersionId },
     include: {
-      lesson: {
+      video: {
         include: {
-          module: {
+          section: {
             include: {
-              course: true
+              channel: true
             }
           }
         }
@@ -5030,7 +4936,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       blocks: { orderBy: { index: "asc" } }
     }
   });
-  if (!version?.lesson?.module?.course) {
+  if (!version?.video?.section?.channel) {
     throw new Error("lesson version not found");
   }
   if (version.blocks.length === 0) {
@@ -5052,9 +4958,9 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   await notifyRunningPhase(job, "generation");
 
   const finalDir = lessonFinalDir(
-    version.lesson.module.course.id,
-    version.lesson.module.id,
-    version.lesson.id,
+    version.video.section.channel.id,
+    version.video.section.id,
+    version.video.id,
     version.id
   );
   ensureDir(finalDir);
@@ -5130,9 +5036,9 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       const audioPath = audioFiles[idx]!;
       const imagePath = mediaFiles[idx]!;
       const clipDir = blockClipDir(
-        version.lesson.module.course.id,
-        version.lesson.module.id,
-        version.lesson.id,
+        version.video.section.channel.id,
+        version.video.section.id,
+        version.video.id,
         version.id,
         block.index
       );
@@ -5221,7 +5127,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   await prisma.asset.deleteMany({
     where: {
       kind: "final_mp4",
-      block: { lessonVersionId: version.id }
+      block: { videoVersionId: version.id }
     }
   });
   await prisma.asset.create({
@@ -5253,7 +5159,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   await prisma.asset.deleteMany({
     where: {
       kind: { in: subtitleAssetDefs.map((d) => d.kind) },
-      block: { lessonVersionId: version.id }
+      block: { videoVersionId: version.id }
     }
   });
   for (const def of subtitleAssetDefs) {
@@ -5303,7 +5209,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   await prisma.asset.deleteMany({
     where: {
       kind: "manifest_json",
-      block: { lessonVersionId: version.id }
+      block: { videoVersionId: version.id }
     }
   });
   await prisma.asset.create({
@@ -5787,7 +5693,7 @@ async function generateBlocksForVersion(options: {
   model: string;
 }): Promise<{ total: number; failed: number[] }> {
   const { job, versionId, scriptText, speechRateWps, model } = options;
-  const versionScope = await prisma.lessonVersion.findUnique({
+  const versionScope = await prisma.videoVersion.findUnique({
     where: { id: versionId },
     select: { workspaceId: true }
   });
@@ -5796,16 +5702,16 @@ async function generateBlocksForVersion(options: {
   }
   const appSettings = readAppSettings();
   const drafts = buildDeterministicBlocks(scriptText, speechRateWps);
-  await prisma.job.deleteMany({ where: { block: { lessonVersionId: versionId } } });
-  const assets = await prisma.asset.findMany({ where: { block: { lessonVersionId: versionId } } });
+  await prisma.job.deleteMany({ where: { block: { videoVersionId: versionId } } });
+  const assets = await prisma.asset.findMany({ where: { block: { videoVersionId: versionId } } });
   for (const asset of assets) {
     if (asset.path && fs.existsSync(asset.path)) {
       await fs.promises.unlink(asset.path).catch(() => null);
     }
   }
-  await prisma.asset.deleteMany({ where: { block: { lessonVersionId: versionId } } });
+  await prisma.asset.deleteMany({ where: { block: { videoVersionId: versionId } } });
   const existingBlocks = await prisma.block.findMany({
-    where: { lessonVersionId: versionId },
+    where: { videoVersionId: versionId },
     orderBy: [{ index: "asc" }, { createdAt: "asc" }]
   });
   const draftIndexes = new Set(drafts.map((draft) => draft.index));
@@ -5851,7 +5757,7 @@ async function generateBlocksForVersion(options: {
           keepAlive
         });
         const created = await prisma.block.findFirst({
-          where: { lessonVersionId: versionId, index: draft.index },
+          where: { videoVersionId: versionId, index: draft.index },
           select: { id: true, index: true }
         });
         const payload = {
@@ -5873,7 +5779,7 @@ async function generateBlocksForVersion(options: {
           : await prisma.block.create({
               data: {
                 workspaceId: versionScope.workspaceId,
-                lessonVersionId: versionId,
+                videoVersionId: versionId,
                 index: draft.index,
                 ...payload
               }
@@ -5884,7 +5790,7 @@ async function generateBlocksForVersion(options: {
         });
       } catch (err) {
         const created = await prisma.block.findFirst({
-          where: { lessonVersionId: versionId, index: draft.index },
+          where: { videoVersionId: versionId, index: draft.index },
           select: { id: true, index: true }
         });
         const payload = {
@@ -5906,7 +5812,7 @@ async function generateBlocksForVersion(options: {
           : await prisma.block.create({
               data: {
                 workspaceId: versionScope.workspaceId,
-                lessonVersionId: versionId,
+                videoVersionId: versionId,
                 index: draft.index,
                 ...payload
               }
@@ -5941,7 +5847,7 @@ async function generateBlocksForVersion(options: {
             keepAlive
           });
           await prisma.block.updateMany({
-            where: { lessonVersionId: versionId, index: draft.index },
+            where: { videoVersionId: versionId, index: draft.index },
             data: {
               onScreenJson: null,
               imagePromptJson: JSON.stringify(result.meta.imagePrompt),
@@ -5956,7 +5862,7 @@ async function generateBlocksForVersion(options: {
           });
         } catch (err) {
           await prisma.block.updateMany({
-            where: { lessonVersionId: versionId, index: draft.index },
+            where: { videoVersionId: versionId, index: draft.index },
             data: {
               segmentError: serializeError(err),
               status: "segment_error"
@@ -5980,21 +5886,21 @@ async function generateQwenAudioForBlocks(options: {
     id: string;
     index: number;
     ttsText: string;
-    lessonVersionId: string;
+    videoVersionId: string;
     workspaceId: string;
   }>;
-  courseId: string;
-  moduleId: string;
-  lessonId: string;
+  channelId: string;
+  sectionId: string;
+  videoId: string;
   versionId: string;
 }): Promise<void> {
-  const { job, blocks, courseId, moduleId, lessonId, versionId } = options;
+  const { job, blocks, channelId, sectionId, videoId, versionId } = options;
   const items: { id: string; text: string; outputPath: string; index: number; workspaceId: string }[] = [];
 
   for (const block of blocks) {
     const ttsText = block.ttsText?.trim();
     if (!ttsText) continue;
-    const audioDir = blockAudioDir(courseId, moduleId, lessonId, versionId, block.index);
+    const audioDir = blockAudioDir(channelId, sectionId, videoId, versionId, block.index);
     ensureDir(audioDir);
     const outputPath = path.join(audioDir, "audio.wav");
     items.push({ id: block.id, text: ttsText, outputPath, index: block.index, workspaceId: block.workspaceId });
@@ -6080,21 +5986,21 @@ async function generateChatterboxAudioForBlocks(options: {
     id: string;
     index: number;
     ttsText: string;
-    lessonVersionId: string;
+    videoVersionId: string;
     workspaceId: string;
   }>;
-  courseId: string;
-  moduleId: string;
-  lessonId: string;
+  channelId: string;
+  sectionId: string;
+  videoId: string;
   versionId: string;
 }): Promise<void> {
-  const { job, blocks, courseId, moduleId, lessonId, versionId } = options;
+  const { job, blocks, channelId, sectionId, videoId, versionId } = options;
   const items: { id: string; text: string; outputPath: string; index: number; workspaceId: string }[] = [];
 
   for (const block of blocks) {
     const ttsText = block.ttsText?.trim();
     if (!ttsText) continue;
-    const audioDir = blockAudioDir(courseId, moduleId, lessonId, versionId, block.index);
+    const audioDir = blockAudioDir(channelId, sectionId, videoId, versionId, block.index);
     ensureDir(audioDir);
     const outputPath = path.join(audioDir, "audio.wav");
     items.push({ id: block.id, text: ttsText, outputPath, index: block.index, workspaceId: block.workspaceId });
@@ -6233,21 +6139,21 @@ async function generateXttsAudioForBlocks(options: {
     id: string;
     index: number;
     ttsText: string;
-    lessonVersionId: string;
+    videoVersionId: string;
     workspaceId: string;
   }>;
-  courseId: string;
-  moduleId: string;
-  lessonId: string;
+  channelId: string;
+  sectionId: string;
+  videoId: string;
   versionId: string;
 }): Promise<void> {
-  const { job, blocks, courseId, moduleId, lessonId, versionId } = options;
+  const { job, blocks, channelId, sectionId, videoId, versionId } = options;
   const items: { id: string; text: string; outputPath: string; index: number; workspaceId: string }[] = [];
 
   for (const block of blocks) {
     const ttsText = block.ttsText?.trim();
     if (!ttsText) continue;
-    const audioDir = blockAudioDir(courseId, moduleId, lessonId, versionId, block.index);
+    const audioDir = blockAudioDir(channelId, sectionId, videoId, versionId, block.index);
     ensureDir(audioDir);
     const outputPath = path.join(audioDir, "audio.wav");
     items.push({ id: block.id, text: ttsText, outputPath, index: block.index, workspaceId: block.workspaceId });
@@ -6370,13 +6276,13 @@ async function generateComfyImagesForBlocks(options: {
     imagePromptJson: string | null;
     workspaceId: string;
   }>;
-  courseId: string;
-  moduleId: string;
-  lessonId: string;
+  channelId: string;
+  sectionId: string;
+  videoId: string;
   versionId: string;
   template: SlideTemplateRecord | null;
 }): Promise<void> {
-  const { job, blocks, courseId, moduleId, lessonId, versionId, template } = options;
+  const { job, blocks, channelId, sectionId, videoId, versionId, template } = options;
   if (blocks.length === 0) {
     throw new Error("no image items to generate");
   }
@@ -6465,7 +6371,7 @@ async function generateComfyImagesForBlocks(options: {
       blockTimer();
 
       const ext = path.extname(result.filename) || ".png";
-      const imageDir = blockImageRawDir(courseId, moduleId, lessonId, versionId, block.index);
+      const imageDir = blockImageRawDir(channelId, sectionId, videoId, versionId, block.index);
       ensureDir(imageDir);
       const outputPath = path.join(imageDir, `image${ext}`);
       logWorkerAction("image_block_write_started", {
@@ -6519,12 +6425,12 @@ async function generateComfyImagesForBlocks(options: {
 async function runJob(job: JobRecord): Promise<void> {
   switch (job.type) {
     case "segment": {
-      if (!job.lessonVersionId) {
+      if (!job.videoVersionId) {
         throw new Error("segment job missing lessonVersionId");
       }
       await assertLeaseValid(job.id);
-      const version = await prisma.lessonVersion.findUnique({
-        where: { id: job.lessonVersionId }
+      const version = await prisma.videoVersion.findUnique({
+        where: { id: job.videoVersionId }
       });
       if (!version) {
         throw new Error("lesson version not found");
@@ -6542,7 +6448,7 @@ async function runJob(job: JobRecord): Promise<void> {
         );
       }
       const existingBlocks = await prisma.block.findMany({
-        where: { lessonVersionId: version.id },
+        where: { videoVersionId: version.id },
         select: { id: true }
       });
       if (existingBlocks.length > 0) {
@@ -6591,12 +6497,12 @@ async function runJob(job: JobRecord): Promise<void> {
       return;
     }
     case "segment_block": {
-      if (!job.lessonVersionId || !job.blockId) {
-        throw new Error("segment_block job missing lessonVersionId or blockId");
+      if (!job.videoVersionId || !job.blockId) {
+        throw new Error("segment_block job missing videoVersionId or blockId");
       }
       await assertLeaseValid(job.id);
-      const version = await prisma.lessonVersion.findUnique({
-        where: { id: job.lessonVersionId }
+      const version = await prisma.videoVersion.findUnique({
+        where: { id: job.videoVersionId }
       });
       if (!version) {
         throw new Error("lesson version not found");
@@ -6608,7 +6514,7 @@ async function runJob(job: JobRecord): Promise<void> {
         throw new Error("block not found");
       }
       await clearImageAssetsForBlocks([block.id]);
-      await clearFinalVideoAssetsForVersion(block.lessonVersionId, {
+      await clearFinalVideoAssetsForVersion(block.videoVersionId, {
         reason: "segment_block_regeneration",
         job
       });
@@ -6648,14 +6554,14 @@ async function runJob(job: JobRecord): Promise<void> {
       return;
     }
     case "image": {
-      if (!job.lessonVersionId && !job.blockId) {
-        throw new Error("image job missing lessonVersionId or blockId");
+      if (!job.videoVersionId && !job.blockId) {
+        throw new Error("image job missing videoVersionId or blockId");
       }
       await assertLeaseValid(job.id);
       const slideTemplate = await resolveTemplateForImageJob(job);
       if (job.blockId) {
         const block = await resolveBlockContext(job.blockId);
-        if (!block?.lessonVersion?.lesson?.module?.course) {
+        if (!block?.videoVersion?.video?.section?.channel) {
           throw new Error("block context not found");
         }
         const promptMeta = parseImagePromptJson(block.imagePromptJson);
@@ -6669,7 +6575,7 @@ async function runJob(job: JobRecord): Promise<void> {
           });
           return;
         }
-        await clearFinalVideoAssetsForVersion(block.lessonVersion.id, {
+        await clearFinalVideoAssetsForVersion(block.videoVersion.id, {
           reason: "image_block_regeneration",
           job
         });
@@ -6689,27 +6595,27 @@ async function runJob(job: JobRecord): Promise<void> {
                   workspaceId: block.workspaceId
                 }
               ],
-              courseId: block.lessonVersion.lesson.module.course.id,
-              moduleId: block.lessonVersion.lesson.module.id,
-              lessonId: block.lessonVersion.lesson.id,
-              versionId: block.lessonVersion.id,
+              channelId: block.videoVersion.video.section.channel.id,
+              sectionId: block.videoVersion.video.section.id,
+              videoId: block.videoVersion.video.id,
+              versionId: block.videoVersion.id,
               template: slideTemplate
             })
         });
         markGenerationActivity("image", job);
         return;
       }
-      if (!job.lessonVersionId) {
+      if (!job.videoVersionId) {
         throw new Error("image job missing lessonVersionId");
       }
-      const version = await prisma.lessonVersion.findUnique({
-        where: { id: job.lessonVersionId },
+      const version = await prisma.videoVersion.findUnique({
+        where: { id: job.videoVersionId },
         include: {
-          lesson: {
+          video: {
             include: {
-              module: {
+              section: {
                 include: {
-                  course: true
+                  channel: true
                 }
               }
             }
@@ -6717,7 +6623,7 @@ async function runJob(job: JobRecord): Promise<void> {
           blocks: { orderBy: { index: "asc" } }
         }
       });
-      if (!version?.lesson?.module?.course) {
+      if (!version?.video?.section?.channel) {
         throw new Error("lesson version not found");
       }
       const blocksWithPrompt = version.blocks.filter((block) =>
@@ -6750,9 +6656,9 @@ async function runJob(job: JobRecord): Promise<void> {
               imagePromptJson: block.imagePromptJson,
               workspaceId: block.workspaceId
             })),
-            courseId: version.lesson.module.course.id,
-            moduleId: version.lesson.module.id,
-            lessonId: version.lesson.id,
+            channelId: version.video.section.channel.id,
+            sectionId: version.video.section.id,
+            videoId: version.video.id,
             versionId: version.id,
             template: slideTemplate
           })
@@ -6761,8 +6667,8 @@ async function runJob(job: JobRecord): Promise<void> {
       return;
     }
     case "tts": {
-      if (!job.lessonVersionId && !job.blockId) {
-        throw new Error("tts job missing lessonVersionId or blockId");
+      if (!job.videoVersionId && !job.blockId) {
+        throw new Error("tts job missing videoVersionId or blockId");
       }
       await assertLeaseValid(job.id);
       const provider = config.ttsProvider.toLowerCase();
@@ -6779,7 +6685,7 @@ async function runJob(job: JobRecord): Promise<void> {
       }
       if (job.blockId) {
         const block = await resolveBlockContext(job.blockId);
-        if (!block?.lessonVersion?.lesson?.module?.course) {
+        if (!block?.videoVersion?.video?.section?.channel) {
           throw new Error("block context not found");
         }
         if (!block.ttsText?.trim()) {
@@ -6791,7 +6697,7 @@ async function runJob(job: JobRecord): Promise<void> {
           });
           return;
         }
-        await clearFinalVideoAssetsForVersion(block.lessonVersion.id, {
+        await clearFinalVideoAssetsForVersion(block.videoVersion.id, {
           reason: "tts_block_regeneration",
           job
         });
@@ -6808,30 +6714,30 @@ async function runJob(job: JobRecord): Promise<void> {
                   id: block.id,
                   index: block.index,
                   ttsText: block.ttsText,
-                  lessonVersionId: block.lessonVersionId,
+                  videoVersionId: block.videoVersionId,
                   workspaceId: block.workspaceId
                 }
               ],
-              courseId: block.lessonVersion.lesson.module.course.id,
-              moduleId: block.lessonVersion.lesson.module.id,
-              lessonId: block.lessonVersion.lesson.id,
-              versionId: block.lessonVersion.id
+              channelId: block.videoVersion.video.section.channel.id,
+              sectionId: block.videoVersion.video.section.id,
+              videoId: block.videoVersion.video.id,
+              versionId: block.videoVersion.id
             })
         });
         markGenerationActivity("tts", job);
         return;
       }
-      if (!job.lessonVersionId) {
+      if (!job.videoVersionId) {
         throw new Error("tts job missing lessonVersionId");
       }
-      const version = await prisma.lessonVersion.findUnique({
-        where: { id: job.lessonVersionId },
+      const version = await prisma.videoVersion.findUnique({
+        where: { id: job.videoVersionId },
         include: {
-          lesson: {
+          video: {
             include: {
-              module: {
+              section: {
                 include: {
-                  course: true
+                  channel: true
                 }
               }
             }
@@ -6839,7 +6745,7 @@ async function runJob(job: JobRecord): Promise<void> {
           blocks: { orderBy: { index: "asc" } }
         }
       });
-      if (!version?.lesson?.module?.course) {
+      if (!version?.video?.section?.channel) {
         throw new Error("lesson version not found");
       }
       const blocksWithText = version.blocks.filter((block) => Boolean(block.ttsText?.trim()));
@@ -6868,12 +6774,12 @@ async function runJob(job: JobRecord): Promise<void> {
               id: block.id,
               index: block.index,
               ttsText: block.ttsText,
-              lessonVersionId: block.lessonVersionId,
+              videoVersionId: block.videoVersionId,
               workspaceId: block.workspaceId
             })),
-            courseId: version.lesson.module.course.id,
-            moduleId: version.lesson.module.id,
-            lessonId: version.lesson.id,
+            channelId: version.video.section.channel.id,
+            sectionId: version.video.section.id,
+            videoId: version.video.id,
             versionId: version.id
           })
       });
@@ -7121,3 +7027,11 @@ process.on("SIGINT", async () => {
   await prisma.$disconnect();
   process.exit(0);
 });
+
+
+
+
+
+
+
+

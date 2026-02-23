@@ -27,6 +27,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { apiGet } from '../lib/api';
+import { WS_EVENT, readVizlecWsDetail } from '../lib/events';
 import { resolveCourseCategoryLabel } from '../lib/courseCategories';
 import ScriptImportCard from './dashboard/ScriptImportCard';
 
@@ -268,19 +269,19 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
     const fetchRecent = async () => {
       setIsLoading(true);
       try {
-        const legacyCourses = await apiGet<any[]>('/courses');
+        const legacyCourses = await apiGet<any[]>('/channels');
         const mappedCourses = legacyCourses.map(mapCourse);
         const ranked = await Promise.all(
           legacyCourses.map(async (course, idx) => {
             const courseCreatedAt = getCreatedAt(course);
             let latest = getUpdatedAt(course);
             try {
-              const modules = await apiGet<any[]>(`/courses/${course.id}/modules`);
+              const modules = await apiGet<any[]>(`/channels/${course.id}/sections`);
               modules.forEach((module) => {
                 latest = Math.max(latest, getUpdatedAt(module));
               });
               const lessonsByModule = await Promise.all(
-                modules.map((module) => apiGet<any[]>(`/modules/${module.id}/lessons`))
+                modules.map((module) => apiGet<any[]>(`/sections/${module.id}/videos`))
               );
               lessonsByModule.forEach((lessons) => {
                 lessons.forEach((lesson) => {
@@ -288,7 +289,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                 });
               });
             } catch (err) {
-              console.warn('Failed to load modules/lessons for recent courses.', err);
+              console.warn('Failed to load sections/videos for recent channels.', err);
             }
             const nextCourse = { ...mappedCourses[idx], lastUpdated: latest > 0 ? new Date(latest).toISOString() : '' };
             return { course: nextCourse, latest, courseCreatedAt };
@@ -376,8 +377,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
 
   useEffect(() => {
     const onWs = (event: Event) => {
-      const detail = (event as CustomEvent<{ event?: string; payload?: { workspaceId?: string } }>).detail;
-      if (!detail || detail.event !== 'inventory_reconciled') return;
+      const detail = readVizlecWsDetail<{ workspaceId?: string }>(event);
+      if (!detail || detail.event !== WS_EVENT.INVENTORY_RECONCILED) return;
       if (inventoryRefreshTimerRef.current) {
         window.clearTimeout(inventoryRefreshTimerRef.current);
       }
@@ -718,9 +719,9 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
   const courseTopicChartData =
     courseTopicBreakdown.length > 0
       ? courseTopicBreakdown
-      : [{ topic: 'empty', label: 'No courses', count: 1, percent: 0, fill: 'hsl(var(--muted))' }];
+      : [{ topic: 'empty', label: 'No channels', count: 1, percent: 0, fill: 'hsl(var(--muted))' }];
   const courseTopicConfig = useMemo<ChartConfig>(() => {
-    const base: ChartConfig = { count: { label: 'Courses' } };
+    const base: ChartConfig = { count: { label: 'Channels' } };
     courseTopicChartData.forEach((item) => {
       base[item.topic] = {
         label: item.label,
@@ -781,14 +782,14 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard
-                  title="Total Courses"
+                  title="Total Channels"
                   value={String(totalCoursesValue)}
                   trend={isLoadingMetrics ? '...' : `+${growthCoursesValue}`}
                   icon={BookOpen}
                   color="indigo"
                 />
                 <StatCard
-                  title="Total Lessons"
+                  title="Total Videos"
                   value={String(totalLessonsValue)}
                   trend={isLoadingMetrics ? '...' : `+${growthLessonsValue}`}
                   icon={PlayCircle}
@@ -813,11 +814,11 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
               </div>
             </div>
 
-            {/* Recent Courses Section */}
+            {/* Recent Channels Section */}
             <div>
               <div className="flex min-h-9 items-center justify-between mb-1">
                 <h2 className="text-lg font-bold tracking-tight">
-                  Recent Courses{' '}
+                  Recent Channels{' '}
                   <span className="text-xs font-normal text-muted-foreground">({recentCoursesRangeLabel})</span>
                 </h2>
                 <div className="flex items-center gap-2">
@@ -853,7 +854,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                       size="icon"
                       className="h-9 w-9"
                       onClick={() => setIsRecentCoursesMenuOpen((prev) => !prev)}
-                      aria-label="Filter recent courses range"
+                      aria-label="Filter recent channels range"
                     >
                       <Filter size={16} />
                     </Button>
@@ -953,8 +954,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                                   onEditCourse(course);
                                 }}
                                 className="h-8 w-8 rounded-[5px] bg-white/90 text-slate-600 shadow-sm transition-colors hover:text-primary dark:bg-slate-900/90 dark:text-slate-300"
-                                aria-label="Edit course"
-                                title="Edit course"
+                                aria-label="Edit channel"
+                                title="Edit channel"
                               >
                                 <Pencil size={14} className="mx-auto" />
                               </button>
@@ -973,7 +974,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                             </div>
                             <div className="absolute inset-x-0 bottom-0 p-3 min-h-[108px] flex flex-col justify-end">
                               <p className="text-[10px] font-bold uppercase tracking-widest text-orange-300/95 mb-1">
-                                {course.category || 'Course'}
+                                {course.category || 'Channel'}
                               </p>
                               <h3 className="text-sm font-bold text-white leading-[1.15] line-clamp-3 min-h-[3.45rem]">
                                 {course.title}
@@ -981,7 +982,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                             </div>
                           </div>
                           <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                            <span className="font-semibold">{course.lessons} lessons</span>
+                            <span className="font-semibold">{course.lessons} videos</span>
                             <span className="rounded-full bg-muted px-2 py-0.5 font-semibold">{course.build?.progressPercent ?? 0}% built</span>
                           </div>
                         </div>
@@ -1021,9 +1022,9 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                       <table className="w-full text-left text-sm">
                         <thead className="bg-muted/50">
                           <tr className="border-b">
-                            <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px]">Course Name</th>
+                            <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px]">Channel Name</th>
                             <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px]">Category</th>
-                            <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px] text-center">Lessons</th>
+                            <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px] text-center">Videos</th>
                             <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px] text-center">Completion</th>
                             <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px] text-center">Recency</th>
                             <th className="px-6 py-4 font-bold text-muted-foreground uppercase text-[10px] text-center">Runtime</th>
@@ -1163,8 +1164,8 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                                   onEditCourse(course);
                                 }}
                                 className="h-8 w-8 rounded-[5px] bg-white/90 text-slate-600 shadow-sm transition-colors hover:text-primary dark:bg-slate-900/90 dark:text-slate-300"
-                                aria-label="Edit course"
-                                title="Edit course"
+                                aria-label="Edit channel"
+                                title="Edit channel"
                               >
                                 <Pencil size={14} className="mx-auto" />
                               </button>
@@ -1188,14 +1189,14 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                               <div className="pr-20 flex h-full min-w-0 flex-col">
                                 <div className="mb-2">
                                   <p className="text-[10px] font-bold uppercase tracking-widest text-orange-600">
-                                    {course.category || 'Course'}
+                                    {course.category || 'Channel'}
                                   </p>
                                 </div>
                                 <h3 className="min-h-[2.5rem] overflow-hidden text-base font-bold leading-tight line-clamp-2 break-words">
                                   {course.title}
                                 </h3>
                                 <p className="mt-auto text-xs text-muted-foreground font-medium">
-                                  {course.lessons} Lessons • {course.build?.progressPercent ?? 0}% built
+                                  {course.lessons} Videos • {course.build?.progressPercent ?? 0}% built
                                 </p>
                               </div>
                             </div>
@@ -1243,18 +1244,18 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
 
             {/* Bottom Actions Area */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* New Course Card */}
+              {/* New Channel Card */}
               <Card className="bg-primary text-primary-foreground border-none relative overflow-hidden group flex flex-col justify-end min-h-[190px] transition-all hover:-translate-y-1 rounded-[5px]">
                 <div className="relative z-10 p-6">
-                  <h4 className="text-lg font-bold mb-2">Create New Course</h4>
+                  <h4 className="text-lg font-bold mb-2">Create New Channel</h4>
                   <p className="text-primary-foreground/90 text-sm font-medium leading-relaxed max-w-sm mb-5">
-                    Start a new course from scratch and organize modules, lessons, and assets in one place.
+                    Start a new channel from scratch and organize videos, assets, and generation workflows in one place.
                   </p>
                   <Button
                     onClick={onAddCourse}
                     className="bg-white text-orange-600 hover:bg-white/90 font-bold border-none shadow-md"
                   >
-                    Create Course
+                    Create Channel
                   </Button>
                 </div>
               </Card>
@@ -1273,11 +1274,11 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
           {/* RIGHT COLUMN */}
           <div className="xl:col-span-1 space-y-6">
             
-            {/* Course Topic Donut Chart */}
+            {/* Channel Topic Donut Chart */}
             <div>
               <div className="flex min-h-9 items-center justify-between mb-1 px-1">
                  <h3 className="text-lg font-bold">
-                   Course Topic{' '}
+                   Channel Topic{' '}
                    <span className="text-xs font-normal text-muted-foreground">({courseTopicRangeLabel})</span>
                  </h3>
                  <div ref={courseTopicMenuRef} className="relative">
@@ -1286,7 +1287,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                      size="icon"
                      className="h-9 w-9"
                      onClick={() => setIsCourseTopicMenuOpen((prev) => !prev)}
-                     aria-label="Filter course topics range"
+                     aria-label="Filter channel topics range"
                    >
                       <Filter size={16} />
                    </Button>
@@ -1383,7 +1384,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                      ))
                    ) : (
                      <div className="col-span-2 text-xs font-medium text-muted-foreground">
-                       No courses yet.
+                       No channels yet.
                      </div>
                    )}
                  </div>

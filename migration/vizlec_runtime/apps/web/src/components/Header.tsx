@@ -47,22 +47,22 @@ const Header: React.FC<HeaderProps> = ({
     switch (currentView) {
       case 'modules':
         return { 
-          text: 'Create New Module', 
+          text: 'Create New Section', 
           action: onAddModule 
         };
       case 'editor':
         return { 
-          text: 'Create New Lesson', 
+          text: 'Create New Video', 
           action: onAddLesson 
         };
       case 'module-editor':
         return { 
-          text: 'New Lesson', 
+          text: 'New Video', 
           action: onAddLesson 
         };
       default:
         return { 
-          text: 'Create New Course', 
+          text: 'Create New Channel', 
           action: onAddCourse 
         };
     }
@@ -77,7 +77,7 @@ const Header: React.FC<HeaderProps> = ({
         <Search className="absolute left-4 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors pointer-events-none" strokeWidth={1.5} />
         <Input
           className="w-full h-8 pl-12 pr-4 bg-[hsl(var(--header-input))] border border-[hsl(var(--header-input-border))] focus:border-primary/40 rounded-[5px] focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none text-sm placeholder:text-muted-foreground"
-          placeholder="Search lessons, scripts, or assets..."
+          placeholder="Search videos, scripts, or assets..."
           type="text"
         />
       </div>

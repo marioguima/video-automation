@@ -170,7 +170,7 @@ const ScriptImportCard: React.FC<ScriptImportCardProps> = ({
   useEffect(() => {
     if (!hasParsedData) return;
     setIsLoadingCourses(true);
-    apiGet<Array<{ id: string; name: string }>>('/courses')
+    apiGet<Array<{ id: string; name: string }>>('/channels')
       .then((items) => {
         const next = items.map((item) => ({ id: item.id, name: item.name }));
         setCourses(next);
@@ -191,7 +191,7 @@ const ScriptImportCard: React.FC<ScriptImportCardProps> = ({
       return;
     }
     setIsLoadingModules(true);
-    apiGet<Array<{ id: string; name: string; order: number }>>(`/courses/${config.selectedCourseId}/modules`)
+    apiGet<Array<{ id: string; name: string; order: number }>>(`/channels/${config.selectedCourseId}/sections`)
       .then((items) => {
         const next = [...items]
           .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))

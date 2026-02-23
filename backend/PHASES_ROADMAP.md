@@ -20,15 +20,15 @@ Escopo fechado do MVP (local-first):
 
 - [x] Flash transitions white/black premium (base visual aprovada em teste manual).
 - [ ] Efeito de transicao "luzes coloridas" (light leaks / color flash overlay).
-- [ ] Extrair timestamps do audio para legenda (word/segment timing).
-- [ ] Aplicar legenda estatica no video final (burned-in subtitles).
+- [x] Extrair timestamps do audio para legenda (word/segment timing) - base implementada com `faster-whisper` no `migration/vizlec_runtime`.
+- [x] Aplicar legenda estatica no video final (burned-in subtitles) - template default implementado (`subtitle-yellow-bold-bottom-v1`).
 - [x] Selecionar musica de fundo + ajustar volume + persistir configuracao (base implementada no `migration/vizlec_runtime`).
-- [x] Gerar video final respeitando mix de volume TTS + BGM (base implementada no `migration/vizlec_runtime`, faltando validacao de UX/preview).
-- [ ] Remover dependencia de `on-screen` do fluxo atual (legenda como texto principal em tela).
+- [x] Gerar video final respeitando mix de volume TTS + BGM (base implementada no `migration/vizlec_runtime`, com mixer `voice/music/master`).
+- [x] Remover dependencia de `on-screen` do fluxo atual (legenda como texto principal em tela) no `vizlec_runtime`.
 
 ### MVP Frontend (fluxo minimo)
 
-- [ ] Cadastro de canal -> videos -> roteiro.
+- [ ] Cadastro de canal -> videos -> roteiro (fase de migracao de dominio abaixo).
 - [ ] Tela de roteiro com revisao de blocos:
   - [ ] unir blocos
   - [ ] separar bloco (criar novo bloco)
@@ -44,23 +44,27 @@ Escopo fechado do MVP (local-first):
 ### MVP Backend/Timeline (fluxo minimo)
 
 - [ ] Persistir "texto exibido" vs "texto narrado (TTS)" por bloco (campos separados e versionados).
-- [ ] Remover validacoes que bloqueiam o fluxo por ausencia de `on-screen`.
+- [x] Remover validacoes que bloqueiam o fluxo por ausencia de `on-screen` no `vizlec_runtime`.
 - [ ] Persistir assets e metadados de audio por bloco (duracao real, status, revisao).
 - [ ] Pipeline de legendas:
-  - [ ] gerar arquivo de timestamps (SRT/VTT ou JSON de timings)
-  - [ ] gerar estilo de legenda fixa
-  - [ ] burn-in com ffmpeg
+  - [x] gerar arquivo de timestamps (JSON + SRT) com `faster-whisper`
+  - [x] gerar estilo de legenda fixa (template default `subtitle-yellow-bold-bottom-v1`)
+  - [x] burn-in com ffmpeg (`ASS`)
+  - [ ] expor configuracao/preview de templates de legenda no frontend
 - [ ] Pipeline de musica de fundo:
   - [x] asset de BGM por video (path local persistido na `LessonVersion` do `vizlec_runtime`)
   - [x] ganho/volume configuravel
   - [x] mix final com TTS
 - [ ] Render final via job persistido (retomavel), nao apenas script manual.
+  - [x] Base funcional via `vizlec_runtime` (worker + jobs + persistencia)
+  - [ ] Ajustes de progresso visual `x/y` no render cinematografico
 
 ### Criterios de aceite do MVP
 
 - [ ] Um roteiro completo pode ser processado localmente ate video final.
 - [ ] Usuario pode interromper e voltar depois sem perder revisoes (DB).
 - [ ] Video final sai com: audio TTS, transicao, legenda estatica, musica de fundo.
+- [x] Base funcional atingida no `vizlec_runtime` (faltando polimento/UX e migracao de dominio).
 - [ ] Video final do MVP e gerado sem `on-screen` (titulos/bullets), usando legenda como camada principal.
 - [ ] Fluxo principal roda sem depender de worker distribuido.
 
@@ -201,18 +205,58 @@ Problema atual:
 
 ## Fase 5 - Integracao TTS e timeline final
 
-Status: `TODO` (TTS base ja resolvido, falta acoplamento final robusto)
+Status: `IN_PROGRESS` (TTS + render + BGM + legenda base funcionando no `vizlec_runtime`)
 
 ### 5.1 Tarefas
 
 - [ ] Integrar retorno real de duracao da API de TTS no manifesto.
 - [ ] Mapear cenas -> chunks de audio -> timeline final.
-- [ ] Extrair timestamps de audio para legenda (SRT/VTT/JSON).
-- [ ] Burn-in de legenda estatica no render final.
-- [ ] Mixar musica de fundo com TTS (ganho configuravel por video).
+- [x] Extrair timestamps de audio para legenda (JSON + SRT) com `faster-whisper` no `vizlec_runtime`.
+- [x] Burn-in de legenda estatica no render final (ASS -> ffmpeg) no `vizlec_runtime`.
+- [x] Mixar musica de fundo com TTS (ganho configuravel por video) no `vizlec_runtime`.
+- [x] Mixer de preview no frontend (voice/music/master) com persistencia de ganhos no `vizlec_runtime`.
+- [ ] Garantir fidelidade final preview vs render (diferença residual WebAudio vs ffmpeg/AAC sob controle e validada).
 - [ ] Reintroduzir `on-screen` como recurso opcional por tipo de video (ex.: educativo usa bullets; narrativo usa apenas legenda).
 - [~] Definir regra de transicao por NIV/intensidade.
 - [ ] Inserir overlays/transicoes somente em cortes de maior impacto.
+
+### 5.5 Migracao de dominio (course/module/lesson -> channel/video)
+
+Status: `IN_PROGRESS`
+
+- [x] Frontend principal (`App` + `Editor`) consumindo aliases `channel/section/video/video-versions`
+- [x] API aliases HTTP `channel/section/video/video-versions`
+- [x] Enriquecimento de payloads HTTP/WS/SSE com aliases canonicos + reescrita de urls/paths
+- [x] Swagger/OpenAPI tags/metadata alinhados ao dominio novo
+- [x] Prisma Pass 1 (`@@map` explicito nas tabelas legadas)
+- [x] Prisma Pass 2 (models Prisma `Channel/Section/Video/VideoVersion` com tabelas legadas preservadas via `@@map`)
+  - [~] Prisma Pass 3 (renomeio semantico de relation/scalar fields) - em progresso por etapas para reduzir blast radius
+  - [x] Relation fields Prisma migrados para nomes canonicos (`sections/videos/videoVersions/video`, `videoVersion`)
+  - [x] API/worker adaptados aos novos relation fields do Prisma client (sem alterar colunas/tabelas fisicas)
+  - [~] FKs escalares canônicos com `@map` em progresso
+    - [x] `Section.courseId -> channelId @map("courseId")`
+    - [x] `Video.moduleId -> sectionId @map("moduleId")`
+    - [x] `VideoVersion.lessonId -> videoId @map("lessonId")`
+    - [x] `Block.lessonVersionId -> videoVersionId @map("lessonVersionId")`
+    - [x] `Job.lessonVersionId -> videoVersionId @map("lessonVersionId")`
+    - [x] `Notification.lessonId/lessonVersionId -> videoId/videoVersionId @map(...)`
+  - [x] API/worker recompilados apos migracao dos FKs escalares de `Block/Job` (Prisma client regenerado + `typecheck`)
+  - [ ] Planejar/roteirizar renomeio fisico de tabelas/colunas no SQLite (fase posterior, sem `@@map`)
+- [x] Storage root canonico `channels` com fallback `courses`
+- [x] Script de migracao de storage `courses -> channels` (`dry-run|copy|move|force`)
+- [x] `packages/shared`: helpers de storage canonicos (`channel/section/video`)
+- [x] `packages/shared`: helpers de alias de dominio extraidos (`domain-alias`)
+- [x] `packages/shared`: contratos de dominio/base (`domain-contracts`)
+- [x] `packages/shared`: contrato interno `/internal/jobs/event`
+- [x] `packages/shared`: contrato interno `/internal/inventory/delta`
+- [x] `packages/shared`: contrato interno `/internal/inventory/snapshot` + `assetRefs`
+- [x] `packages/shared`: catalogo compartilhado de comandos do agent-control (`WorkerAgentCommandName`)
+- [x] `packages/shared`: tipos do protocolo `agent-control` (request/response/ack)
+- [x] `packages/shared`: `AgentIntegrationConfig` compartilhado (API/worker)
+- [x] `packages/shared`: constantes de eventos WS/SSE (`WS_EVENT`, `JOB_STREAM_EVENT`)
+- [x] Frontend (`apps/web`) com constantes locais de eventos WS/SSE (reduzindo strings soltas)
+- [x] Frontend (`apps/web`) com helper local para parsing tipado de `vizlec:ws` (`readVizlecWsDetail`)
+- [x] Worker/API usando contratos compartilhados para endpoints internos acima
 
 ### 5.1.1 Base de transicoes (parcial implementada)
 
@@ -238,7 +282,7 @@ Status: `TODO` (TTS base ja resolvido, falta acoplamento final robusto)
 
 - [ ] Timeline final sem gaps de audio/video.
 - [ ] Duracao total bate com soma de audios (+ transicoes).
-- [ ] Legendas sincronizadas com audio (erro visual aceitavel).
+- [~] Legendas sincronizadas com audio (erro visual aceitavel) - base com `faster-whisper` + agrupamento de cues implementada; falta validacao em mais videos/templates.
 - [ ] Mix TTS + musica respeita volumes configurados.
 - [ ] Video final reproduzivel de ponta a ponta sem ajuste manual.
 
@@ -253,6 +297,7 @@ Status: `TODO`
 - [ ] Padronizar logs estruturados por `project_id`.
 - [ ] Criar relatorio final por execucao (tempo, modelos, imgs geradas, erros).
 - [ ] Definir "modo rapido" e "modo qualidade".
+- [x] Base de `modo rapido/qualidade` no render cinematografico (`VIZLEC_CINEMATIC_RENDER_MODE`, NVENC/supersample/fps via env) no `vizlec_runtime`.
 - [ ] Adicionar testes de regressao para parser/segmentador/esquemas JSON.
 - [ ] Corrigir progresso visual `x/y` do `concat_video` no `vizlec_runtime` (render cinematografico) para nao depender de `clip_mp4` legado e avançar durante o render final.
 
@@ -266,11 +311,12 @@ Status: `TODO`
 
 ## Ordem de implementacao (pratica)
 
-1. Fechar MVP local-first (legenda + TTS revisavel + mix BGM + render final persistido).
-2. Finalizar criterios de aceite da Fase 2 (LLM por bloco com metricas reais).
-3. Consolidar Fase 5 (timeline final automatica integrada ao backend/API).
-4. Atacar Fase 4 (reducao de imagens, maior ganho de tempo).
-5. Fechar Fase 3/6 de operacao (fila/rate-limit/logs/observabilidade).
+1. Migrar dominio completo no `vizlec_runtime` (`course/module/lesson` -> `channel/video`) sem "lembrancas" do modelo antigo na UX/API externa.
+2. Fechar MVP local-first no dominio novo (revisao por bloco + render final com legenda/BGM).
+3. Finalizar criterios de aceite da Fase 2 (LLM por bloco com metricas reais).
+4. Consolidar Fase 5 (timeline final automatica integrada ao backend/API).
+5. Atacar Fase 4 (reducao de imagens, maior ganho de tempo).
+6. Fechar Fase 3/6 de operacao (fila/rate-limit/logs/observabilidade).
 
 ---
 
@@ -307,8 +353,9 @@ Objetivo desta analise:
 
 - Dominio:
   - `Course` -> `Channel`
-  - `Lesson`/`LessonVersion` -> `Video`/`VideoVersion` (ou `Video` + `VideoBlocks`)
-  - remover acoplamentos de "modulos" no MVP (opcional futuro)
+  - `Module` -> remover do dominio (avaliar extincao completa) ou camada tecnica interna temporaria sem exposicao
+  - `Lesson`/`LessonVersion` -> `Video`/`VideoVersion`
+  - eliminar nomenclatura legacy da UX/API externa (sem aliases permanentes)
 - Fluxo visual:
   - manter melhorias cinematicas daqui (`effects.py`, `transitions.py`, ffmpeg pipeline)
   - substituir render "slide/aula" do vizlec pela pipeline de video cinematografico deste projeto
@@ -326,8 +373,10 @@ Objetivo desta analise:
   - [ ] Validar fluxo funcional pela UI (login/workspace/curso/aula) dentro da copia.
 - [ ] Extrair mapa de componentes reutilizaveis do frontend (`Editor`, players, review de audio, job UI).
 - [ ] Extrair contrato minimo de API para o MVP local (`channel/video/blocks/audio/image/render`).
-- [ ] Implementar camada de compatibilidade de dominio (`lesson` -> `video`) para acelerar port.
-- [ ] Recontextualizar frontend/rotas para `channel -> video` (segunda etapa, apos fluxo base funcionando).
+- [ ] Implementar migracao de dominio em duas etapas:
+  - [ ] Etapa A: renomeacao de UX/API externa (`channel/video`) mantendo compatibilidade interna temporaria.
+  - [ ] Etapa B: refactor de entidades Prisma/API/worker para remover referencias `course/module/lesson`.
+- [ ] Recontextualizar frontend/rotas para `channel -> video` (com remocao de termos legacy na UI).
 - [ ] Decidir abordagem:
   - [ ] A) portar frontend do vizlec para este backend
   - [ ] B) portar partes do backend vizlec (schema/API) para este projeto
@@ -343,6 +392,83 @@ Objetivo desta analise:
 - Legenda sera a camada padrao de texto em tela no MVP.
 - `on-screen` (titulos/bullets) fica fora do MVP e podera voltar depois como recurso opcional.
 - No `vizlec_runtime`, o render final cinematografico (bridge Python + ffmpeg) ja esta integrado, mas o progresso de UI (`x/y`) ainda precisa de ajuste fino para refletir corretamente o avanço por bloco durante `concat_video`.
+- A proxima fase prioritaria passa a ser **migracao de dominio completa** para `channel/video`, com reavaliacao das entidades de curso/modulo/licao e remocao de exposicao desses termos no produto final.
+
+---
+
+## Fase 5.5 - Migracao de dominio (`course/module/lesson` -> `channel/video`)
+
+Status: `IN_PROGRESS`
+
+Objetivo:
+- trocar o contexto do produto sem "herdar" nomenclatura antiga na UX/API externa
+- reavaliar entidades antigas e eliminar o que nao faz sentido para videos de canal
+
+### 5.5.1 Principios
+
+- [ ] Nao manter aliases permanentes de dominio antigo no frontend.
+- [~] API externa deve expor `channel/video` como linguagem oficial.
+- [ ] Entidades legacy podem existir temporariamente em camada interna apenas durante migracao.
+- [ ] Revisar cada entidade ligada a `Course/Module/Lesson` e decidir: renomear, fundir, eliminar.
+
+### 5.5.2 Revisao de entidades (obrigatoria)
+
+- [ ] `Course` -> `Channel` (renomeacao semantica)
+- [ ] `Module` -> avaliar remocao do dominio (camada intermediaria de aula nao e necessaria no produto atual)
+- [ ] `Lesson` -> `Video`
+- [ ] `LessonVersion` -> `VideoVersion`
+- [ ] `Block` -> manter (continua valido)
+- [ ] `Asset` -> manter (continua valido; revisar `kind` comments legados)
+- [ ] `Job` -> manter (revisar `scope/type` comments legados)
+- [ ] `Notification` -> revisar textos de contexto (`Course/Module/Lesson`)
+
+### 5.5.3 Plano tecnico (sequencia)
+
+- [~] Frontend: trocar labels, rotas, componentes e textos de UI para `channel/video`.
+  - [x] Fluxo principal (`App` + `Editor`) consumindo aliases `channel/video`.
+  - [x] Chamadas HTTP do frontend ativo (dashboard/importador/module-editor/links de video) migradas para aliases `channel/video`.
+  - [x] Labels principais (`sidebar`, `header`, `dashboard`, fluxo de edicao) ajustados.
+  - [ ] Limpeza de labels/telas secundarias.
+- [~] API: expor rotas `channel/video` e eventos com naming novo.
+  - [x] Aliases principais `channels/sections/videos/video-versions` implementados.
+  - [~] Respostas JSON dos aliases enriquecidas com campos de dominio novo em paralelo aos legados.
+  - [~] Payloads/listas aninhadas com aliases plurais (`modules->sections`, `lessons->videos`, `courses->channels`, `lessonVersions->videoVersions`) para build-status e respostas compostas.
+  - [~] Campos `url/path` em respostas JSON dos aliases reescritos para rotas `channel/video` quando vierem de payload legacy.
+  - [~] Eventos/ws payloads com aliases de dominio novo (`channelId/sectionId/videoId/videoVersionId`, `domainEntity`) em paralelo aos campos legacy.
+  - [~] SSE de jobs (`/jobs/:jobId/stream`) enriquecido com aliases de dominio novo e reescrita de URLs/paths.
+  - [~] Docs/contratos auxiliares (inventario de execucao de endpoints) com aliases `channel/video`.
+  - [~] Swagger/OpenAPI (metadata/tags principais) alinhado para `Channels/Sections/Videos` na superficie da API.
+  - [~] Normalizacao automatica de tags legacy (`Courses/Modules/Lessons`) para `Channels/Sections/Videos` em schemas de rota (OpenAPI).
+  - [ ] Schemas auxiliares e contratos restantes com naming novo.
+- [ ] Worker/API shared contracts: renomear comandos/event payloads com dominio novo.
+  - [x] `packages/shared/src/storage.ts` agora expõe helpers canônicos (`channel/section/video/videoVersion`) mantendo helpers legacy como wrappers para compatibilidade.
+  - [x] Helpers de alias de dominio (payloads/URLs para `channel/video`) extraidos para `packages/shared/src/domain-alias.ts` e reutilizados pela API.
+  - [x] Tipos/utilitarios compartilhados de dominio iniciados em `packages/shared/src/domain-contracts.ts` (mapeamento de entidades legacy -> canônicas).
+  - [~] Revisar contratos/event payloads tipados restantes em `packages/shared` para alias de dominio novo (além de storage).
+    - [x] Worker snapshot asset refs passaram a carregar aliases canônicos (`channelId/sectionId/videoId/videoVersionId`) via helper compartilhado.
+    - [x] Logs/eventos do worker (`logJobEvent`/`logWorkerAction`) agora aplicam helper compartilhado de alias de domínio quando payloads trazem IDs camelCase legacy.
+    - [x] Contrato interno `/internal/jobs/event` tipado em `packages/shared/src/internal-jobs.ts` e reutilizado por API + worker (lifecycle/phase/progressPercent).
+    - [x] Contrato interno `/internal/inventory/delta` tipado em `packages/shared/src/internal-inventory.ts` e reutilizado por API + worker (delta + normalização).
+- [~] Prisma/schema: migrar entidades/relacoes e comments de dominio.
+  - [x] Inventario estrutural de migracao (entidades, hotspots de query, storage, estrategia) documentado em `migration/vizlec_runtime/docs/domain-schema-migration-inventory.md`.
+  - [x] Definir estrategia Prisma da transicao (`@map/@@map` primeiro) e executar primeira passada segura (`@@map` explicito nas tabelas de dominio/reuso) em `migration/vizlec_runtime/packages/db/prisma/schema.prisma`.
+  - [x] Segunda passada Prisma: models Prisma/client renomeados para `Channel/Section/Video/VideoVersion` com `@@map` preservando tabelas fisicas legacy; API/worker refatorados para `prisma.channel/section/video/videoVersion`.
+  - [x] Prisma Pass 2.x (baixo risco): `Notification` migrou para campos canônicos no Prisma client (`videoId/videoVersionId`) com `@map("lessonId"/"lessonVersionId")`, mantendo colunas físicas legadas e ajustando API.
+  - [ ] Terceira passada Prisma: revisar/renomear relation field names e comments legados (`courses/modules/lessons/lessonVersions`, `courseId/moduleId/lessonId`) sem quebrar compatibilidade. (Adiado ate estabilizacao do runtime apos Pass 2; tentativa inicial aumentou blast radius no worker/API)
+- [~] Storage paths: avaliar migracao de `data/courses/...` para `data/channels/...`.
+  - [x] Root canônico configurável (`VIZLEC_STORAGE_DOMAIN_ROOT=channels`) com fallback automático para `courses`.
+  - [x] Script de migracao (`dry-run/copy/move`) criado em `migration/vizlec_runtime/scripts/migrate-storage-domain-root.cjs` + scripts `pnpm storage:migrate:*`.
+  - [ ] Executar migracao de dados/paths persistidos em ambiente validado e remover fallback legado.
+- [ ] Script de migracao de dados legacy -> novo dominio (quando schema mudar).
+  - [x] Script de renomeio fisico de dominio no SQLite (draft executavel `dry-run/apply`) em `migration/vizlec_runtime/scripts/prisma-domain-physical-rename-sqlite.cjs`
+  - [x] `dry-run` validado na base local (`vizlec.db`)
+
+### 5.5.4 Criterios de aceite
+
+- [ ] Usuario nao ve termos `course/module/lesson` na UX principal.
+- [ ] Fluxo completo roda em `channel/video` com blocos/TTS/imagem/render/legenda/BGM.
+- [ ] Dados antigos podem ser migrados ou lidos de forma controlada.
+- [ ] Nenhum bloco critico do pipeline depende semanticamente de `module` para funcionar.
 
 ---
 

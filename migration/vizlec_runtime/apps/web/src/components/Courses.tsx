@@ -83,8 +83,8 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
       <div className="p-8 max-w-7xl mx-auto pb-24">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-slate-800 dark:text-white tracking-tight">My Courses</h2>
-            <p className="text-sm text-muted-foreground mt-1 font-medium">Manage your curriculum and student engagement.</p>
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-white tracking-tight">My Channels</h2>
+            <p className="text-sm text-muted-foreground mt-1 font-medium">Manage your video channels and publishing pipeline.</p>
           </div>
 
           <div className="flex items-center gap-3 bg-card p-1.5 rounded-[5px] border border-border shadow-sm">
@@ -123,7 +123,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
 
         {error && (
           <div className="mb-6 rounded-[5px] border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-200">
-            Failed to load courses: {error}
+            Failed to load channels: {error}
           </div>
         )}
 
@@ -173,8 +173,8 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                         onEditCourse(course);
                       }}
                       className="h-8 w-8 rounded-[5px] bg-white/90 text-slate-600 shadow-sm transition-colors hover:text-primary dark:bg-slate-900/90 dark:text-slate-300"
-                      aria-label="Edit course"
-                      title="Edit course"
+                      aria-label="Edit channel"
+                      title="Edit channel"
                     >
                       <Pencil size={14} className="mx-auto" />
                     </button>
@@ -193,7 +193,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                   </div>
                   <div className="absolute inset-x-0 bottom-0 p-3 min-h-[108px] flex flex-col justify-end">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-orange-300/95 mb-1">
-                      {course.category || 'Course'}
+                      {course.category || 'Channel'}
                     </p>
                     <h3 className="text-sm font-bold text-white leading-[1.15] line-clamp-3 min-h-[3.45rem]">
                       {course.title}
@@ -201,7 +201,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                   </div>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="font-semibold">{course.lessons} lessons</span>
+                  <span className="font-semibold">{course.lessons} videos</span>
                   <span className="rounded-full bg-muted px-2 py-0.5 font-semibold">{course.build?.progressPercent ?? 0}% built</span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-bold uppercase tracking-tight">
@@ -213,10 +213,10 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                     <Eye size={11} strokeWidth={2} />
                     {course.views}
                   </span>
-                  <span className="text-slate-400">{course.moduleCount ?? 0} modules</span>
+                  <span className="text-slate-400">{course.moduleCount ?? 0} sections</span>
                   <span className="inline-flex items-center gap-1 text-amber-500">
                     <PlayCircle size={11} strokeWidth={2} />
-                    {course.lessons} lessons
+                    {course.lessons} videos
                   </span>
                 </div>
                 <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -239,7 +239,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                   </div>
                   <div className="text-right text-[11px] text-muted-foreground">
                     <p>{course.students} students</p>
-                    <p>{course.moduleCount ?? 0} modules</p>
+                    <p>{course.moduleCount ?? 0} sections</p>
                   </div>
                 </div>
               </div>
@@ -290,8 +290,8 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                         onEditCourse(course);
                       }}
                       className="h-8 w-8 rounded-[5px] bg-white/90 text-slate-600 shadow-sm transition-colors hover:text-primary dark:bg-slate-900/90 dark:text-slate-300"
-                      aria-label="Edit course"
-                      title="Edit course"
+                      aria-label="Edit channel"
+                      title="Edit channel"
                     >
                       <Pencil size={14} className="mx-auto" />
                     </button>
@@ -320,15 +320,15 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                       <Eye size={12} strokeWidth={2} />
                       {course.views}
                     </span>
-                    <span className="text-slate-400">{course.moduleCount ?? 0} modules</span>
+                    <span className="text-slate-400">{course.moduleCount ?? 0} sections</span>
                     <span className="inline-flex items-center gap-1 text-amber-500">
                       <PlayCircle size={12} strokeWidth={2} />
-                      {course.lessons} lessons
+                      {course.lessons} videos
                     </span>
                   </div>
 
                   <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-orange-600">
-                    {course.category || 'Course'}
+                    {course.category || 'Channel'}
                   </p>
 
                   <h3 className="min-h-[2.5rem] overflow-hidden text-base font-bold leading-tight line-clamp-2 break-words">
@@ -336,7 +336,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                   </h3>
 
                   <p className="mt-2 text-xs text-muted-foreground font-medium">
-                    {course.lessons} Lessons • {course.build?.progressPercent ?? 0}% built
+                    {course.lessons} Videos • {course.build?.progressPercent ?? 0}% built
                   </p>
 
                   <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -364,7 +364,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                         {course.students} students
                       </p>
                       <p className="text-[10px] font-bold uppercase tracking-tight text-muted-foreground">
-                        {course.moduleCount ?? 0} modules
+                        {course.moduleCount ?? 0} sections
                       </p>
                     </div>
                   </div>
@@ -426,15 +426,15 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                         <Eye size={12} strokeWidth={2} />
                         {course.views}
                       </span>
-                      <span className="text-slate-400">{course.moduleCount ?? 0} modules</span>
+                      <span className="text-slate-400">{course.moduleCount ?? 0} sections</span>
                       <span className="inline-flex items-center gap-1 text-amber-500">
                         <PlayCircle size={12} strokeWidth={2} />
-                        {course.lessons} lessons
+                        {course.lessons} videos
                       </span>
                     </div>
 
                     <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-orange-600">
-                      {course.category || 'Course'}
+                      {course.category || 'Channel'}
                     </p>
 
                     <h3 className="text-lg font-bold leading-tight mb-2">
@@ -442,7 +442,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                     </h3>
 
                     <p className="text-xs text-muted-foreground font-medium">
-                      {course.lessons} Lessons • {course.build?.progressPercent ?? 0}% built
+                      {course.lessons} Videos • {course.build?.progressPercent ?? 0}% built
                     </p>
 
                     <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -469,7 +469,7 @@ const Courses: React.FC<CoursesProps> = ({ courses, error, setView, onSelectCour
                           {course.students} students
                         </p>
                         <p className="text-[10px] font-bold uppercase tracking-tight text-muted-foreground">
-                          {course.moduleCount ?? 0} modules
+                          {course.moduleCount ?? 0} sections
                         </p>
                       </div>
                     </div>

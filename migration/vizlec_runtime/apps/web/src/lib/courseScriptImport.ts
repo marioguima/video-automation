@@ -118,7 +118,7 @@ const queueSegmentationForVersion = async (
   control?: ImportExecutionControl
 ) => {
   assertNotCanceled(control);
-  const segmentJob = await apiPost<{ id: string }>(`/lesson-versions/${versionId}/segment`, {
+  const segmentJob = await apiPost<{ id: string }>(`/video-versions/${versionId}/segment`, {
     requestId: makeRequestId(),
     purge: true
   });
@@ -146,7 +146,7 @@ const queueAudioForVersion = async (
   control?: ImportExecutionControl
 ) => {
   assertNotCanceled(control);
-  await apiPost<{ id: string }>(`/lesson-versions/${versionId}/tts`, {
+  await apiPost<{ id: string }>(`/video-versions/${versionId}/tts`, {
     requestId: makeRequestId(),
     ...(voiceId ? { voiceId } : {})
   });
@@ -172,7 +172,7 @@ const queueImageForVersion = async (
   control?: ImportExecutionControl
 ) => {
   assertNotCanceled(control);
-  await apiPost<{ id: string }>(`/lesson-versions/${versionId}/images`, {
+  await apiPost<{ id: string }>(`/video-versions/${versionId}/images`, {
     requestId: makeRequestId(),
     ...(templateId ? { templateId } : {})
   });
@@ -265,7 +265,7 @@ export async function importCourseScript(
   if (plan.courseTarget.mode === 'create') {
     assertNotCanceled(control);
     const name = trimRequired(plan.courseTarget.name, 'Course name');
-    createdCourse = await apiPost<CreatedCourse>('/courses', { name });
+    createdCourse = await apiPost<CreatedCourse>('/channels', { name });
     courseId = createdCourse.id;
     control?.onResourceCreated?.('course', createdCourse.id);
     notifyWithStage(`Course created: ${createdCourse.name}`, { kind: 'course' });
@@ -275,12 +275,12 @@ export async function importCourseScript(
 
   const createLessonAndVersion = async (moduleId: string, title: string, scriptText: string) => {
     assertNotCanceled(control);
-    const lesson = await apiPost<CreatedLesson>(`/modules/${moduleId}/lessons`, {
+    const lesson = await apiPost<CreatedLesson>(`/sections/${moduleId}/videos`, {
       title: trimRequired(title, 'Lesson title')
     });
     control?.onResourceCreated?.('lesson', lesson.id);
     notifyWithStage(`Lesson created: ${title}`, { kind: 'lesson', lessonTitle: title });
-    const version = await apiPost<CreatedVersion>(`/lessons/${lesson.id}/versions`, {
+    const version = await apiPost<CreatedVersion>(`/videos/${lesson.id}/versions`, {
       scriptText,
       ...(automation.voiceId ? { preferredVoiceId: automation.voiceId } : {}),
       ...(automation.templateId ? { preferredTemplateId: automation.templateId } : {})
@@ -297,7 +297,7 @@ export async function importCourseScript(
     }
     for (const moduleInput of parsed.modules) {
       assertNotCanceled(control);
-      const moduleRecord = await apiPost<CreatedModule>(`/courses/${courseId}/modules`, {
+      const moduleRecord = await apiPost<CreatedModule>(`/channels/${courseId}/sections`, {
         name: trimRequired(moduleInput.title, 'Module title'),
         order: nextModuleOrder
       });

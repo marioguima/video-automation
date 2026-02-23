@@ -256,7 +256,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
     } catch (err) {
       console.error(err);
       setModules(previousModules);
-      setReorderError('Could not save the new module order. Changes were reverted.');
+      setReorderError('Could not save the new section order. Changes were reverted.');
     } finally {
       setIsSavingReorder(false);
     }
@@ -298,7 +298,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
     } catch (err) {
       console.error(err);
       setModules(previousModules);
-      setReorderError('Could not save the new lesson order. Changes were reverted.');
+      setReorderError('Could not save the new video order. Changes were reverted.');
     } finally {
       setIsSavingReorder(false);
     }
@@ -447,25 +447,25 @@ const CourseModules: React.FC<CourseModulesProps> = ({
 
   const confirmActionDescription = (() => {
     if (!pendingCancelAction) return '';
-    return `This will stop ${pendingCancelAction.action} generation for all lessons in this course.`;
+    return `This will stop ${pendingCancelAction.action} generation for all videos in this channel.`;
   })();
 
   const deleteActionTitle = pendingDeleteAction
     ? pendingDeleteAction.scope === 'module'
-      ? 'Delete module?'
-      : 'Delete lesson?'
+      ? 'Delete section?'
+      : 'Delete video?'
     : '';
 
   const deleteActionDescription = (() => {
     if (!pendingDeleteAction) return '';
     if (pendingDeleteAction.scope === 'module') {
       const moduleItem = modules.find((item) => item.id === pendingDeleteAction.id);
-      const moduleName = moduleItem?.title || 'this module';
-      return `This will permanently delete "${moduleName}" in cascade, including all lessons inside it, generated assets, generated files, and empty folders left after cleanup. This cannot be undone.`;
+      const moduleName = moduleItem?.title || 'this section';
+      return `This will permanently delete "${moduleName}" in cascade, including all videos inside it, generated assets, generated files, and empty folders left after cleanup. This cannot be undone.`;
     }
     const lessonName =
       modules.flatMap((moduleItem) => moduleItem.lessons).find((lesson) => lesson.id === pendingDeleteAction.id)?.title ||
-      'this lesson';
+      'this video';
     return `This will permanently delete "${lessonName}" in cascade, including generated assets, generated files, and empty folders left after cleanup. This cannot be undone.`;
   })();
 
@@ -478,7 +478,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
             className="flex items-center gap-2 text-slate-500 hover:text-primary font-bold text-xs uppercase tracking-widest transition-colors"
           >
             <ChevronLeft size={16} />
-            Back to Courses
+            Back to Channels
           </button>
           <div className="flex items-center gap-2">
             <button
@@ -487,7 +487,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
               className="inline-flex items-center gap-2 h-9 px-3 rounded-[5px] border border-border text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/10 transition-colors text-[11px] font-semibold tracking-wide"
             >
               <Pencil size={14} />
-              Edit course
+              Edit channel
             </button>
             <button
               type="button"
@@ -495,7 +495,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
               className="inline-flex items-center gap-2 h-9 px-3 rounded-[5px] border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/10 transition-colors text-[11px] font-semibold tracking-wide"
             >
               <Trash2 size={14} />
-              Delete course
+              Delete channel
             </button>
           </div>
         </div>
@@ -523,10 +523,10 @@ const CourseModules: React.FC<CourseModulesProps> = ({
                 {course.category || 'General'}
               </span>
               <span className="px-3 py-1 bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded-full text-[10px] font-bold uppercase tracking-wider border border-slate-400/20">
-                {totalModules} Modules
+                {totalModules} Sections
               </span>
               <span className="px-3 py-1 bg-orange-600/10 text-orange-600 rounded-full text-[10px] font-bold uppercase tracking-wider border border-orange-600/20">
-                {totalLessons} Lessons
+                {totalLessons} Videos
               </span>
               <span className="flex items-center gap-1.5 text-muted-foreground text-xs font-semibold">
                 <Clock size={14} />
@@ -553,7 +553,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
 
         {error && (
           <div className="mb-6 rounded-[5px] border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-200">
-            Failed to load modules: {error}
+            Failed to load channel content: {error}
           </div>
         )}
         {reorderError && (
@@ -564,7 +564,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
 
         <div className="space-y-10">
           <div className="flex items-center justify-between gap-4">
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white">Course Content</h3>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-white">Channel Content</h3>
             <div className="flex flex-wrap items-center justify-end gap-2.5">
               {courseActions.map((action) => {
                 const ActionIcon = action.icon;
@@ -651,7 +651,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
                   className={`bg-card border border-border rounded-[5px] p-3 flex items-center justify-between cursor-pointer hover:border-primary/20 hover:bg-accent/40 transition-all group/header shadow-sm z-10 relative ${draggedModuleIndex === mIdx ? 'opacity-50 ring-2 ring-primary/20' : ''}`}
                 >
                   <div className="flex items-center gap-1.5 flex-1">
-                    {/* Grip para o Módulo */}
+                    {/* Drag handle for section */}
                     <div className="p-1 -ml-1 text-slate-300 dark:text-slate-700 cursor-grab active:cursor-grabbing hover:text-primary transition-colors">
                       <GripVertical size={16} />
                     </div>
@@ -681,7 +681,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
                           {module.title}
                         </h4>
                         <p className="mt-0.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none">
-                          {module.lessons.length} Lessons • {module.build?.progressPercent ?? 0}% Built
+                          {module.lessons.length} Videos • {module.build?.progressPercent ?? 0}% Built
                           {moduleProcessing ? ' • Processing' : ''}
                         </p>
                       </div>
@@ -724,7 +724,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
                   </div>
                 </div>
 
-                {/* Lessons Container */}
+                {/* Videos Container */}
                 <div className={`transition-all duration-300 ${expandedModules[module.id] ? 'overflow-visible max-h-[2000px] mt-2.5' : 'overflow-hidden max-h-0'}`}>
                   {/* Espinha Vertical Tracejada - Alinhada exatamente abaixo do ícone GripVertical */}
                   <div className="absolute left-[30px] top-[60px] bottom-6 w-[2px] border-l-2 border-dashed border-border -z-0"></div>
@@ -737,7 +737,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
                         Boolean(lesson.build?.lessonVersionId);
                       const finalVideoUrl =
                         finalVideoAvailable && lesson.build?.lessonVersionId
-                          ? `${API_BASE}/lesson-versions/${lesson.build.lessonVersionId}/final-video`
+                          ? `${API_BASE}/video-versions/${lesson.build.lessonVersionId}/final-video`
                           : null;
                       return (
                       <div 
@@ -853,7 +853,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
                       );
                     })}
 
-                    {/* Botão de Adicionar Lição */}
+                    {/* Add video button */}
                     <div className="relative ml-6">
                       <div className="absolute -left-[24px] top-1/2 -translate-y-1/2 w-[24px] h-[2px] border-t-2 border-dashed border-border"></div>
                       <button 
@@ -867,7 +867,7 @@ const CourseModules: React.FC<CourseModulesProps> = ({
                         className="w-full py-3 border-2 border-dashed border-border rounded-[5px] flex items-center justify-center gap-3 text-[11px] font-bold text-slate-400 hover:text-primary hover:border-primary/30 hover:bg-accent transition-all group"
                       >
                         <Plus size={16} className="group-hover:scale-110 transition-transform" />
-                        ADD NEW LESSON TO THIS MODULE
+                        ADD NEW VIDEO TO THIS SECTION
                       </button>
                     </div>
                   </div>
@@ -885,8 +885,8 @@ const CourseModules: React.FC<CourseModulesProps> = ({
               <Plus size={28} className="group-hover:text-primary" />
             </div>
             <div className="text-center">
-              <span className="block text-[12px] font-bold uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Add New Module Container</span>
-              <span className="block text-[9px] font-medium text-slate-400 dark:text-slate-500 mt-1 uppercase tracking-wider">Group your lessons by theme or topic</span>
+              <span className="block text-[12px] font-bold uppercase tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">Add New Section</span>
+              <span className="block text-[9px] font-medium text-slate-400 dark:text-slate-500 mt-1 uppercase tracking-wider">Optional grouping for videos by theme or topic</span>
             </div>
           </button>
         </div>
@@ -906,8 +906,8 @@ const CourseModules: React.FC<CourseModulesProps> = ({
       />
       <ConfirmDialog
         open={isDeleteCourseConfirmOpen}
-        title="Delete course?"
-        description="This will permanently delete this course in cascade, including all modules, all lessons, generated assets, generated files, and empty folders left after cleanup. This cannot be undone."
+        title="Delete channel?"
+        description="This will permanently delete this channel in cascade, including all sections, all videos, generated assets, generated files, and empty folders left after cleanup. This cannot be undone."
         confirmLabel="Delete"
         confirmClassName="bg-red-600 hover:bg-red-700 text-white"
         onCancel={() => setIsDeleteCourseConfirmOpen(false)}

@@ -54,7 +54,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
-    { id: 'courses', label: 'My Courses', Icon: LibraryIcon },
+    { id: 'courses', label: 'My Channels', Icon: LibraryIcon },
     { id: 'library', label: 'Library', Icon: FolderHeart },
     { id: 'team', label: 'Team', Icon: Users },
     { id: 'reports', label: 'Reports', Icon: BarChart3 },

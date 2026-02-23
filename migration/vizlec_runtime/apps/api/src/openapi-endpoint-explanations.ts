@@ -92,6 +92,25 @@ export const endpointExecutionInventoryByRoute: Record<string, EndpointExecution
   "POST /agent-control/validate-worker": { owner: "control-plane-owned", sourceOfTruth: "control_plane_db", callerOrigin: "edge_installer_or_worker", internalRouting: "pairing_bootstrap_control_plane", fallbackStrategy: "erro_controlado_com_auditoria" },
 };
 
+// Domain migration compatibility: expose the same execution inventory for the new
+// external vocabulary (channel/section/video) while internals remain legacy.
+const endpointInventoryAliasRules: Array<[RegExp, string]> = [
+  [/\/lesson-versions(?=\/|$)/g, "/video-versions"],
+  [/\/lessons(?=\/|$)/g, "/videos"],
+  [/\/modules(?=\/|$)/g, "/sections"],
+  [/\/courses(?=\/|$)/g, "/channels"]
+];
+
+for (const [route, inventory] of Object.entries({ ...endpointExecutionInventoryByRoute })) {
+  let aliasedRoute = route;
+  for (const [pattern, replacement] of endpointInventoryAliasRules) {
+    aliasedRoute = aliasedRoute.replace(pattern, replacement);
+  }
+  if (aliasedRoute !== route && !endpointExecutionInventoryByRoute[aliasedRoute]) {
+    endpointExecutionInventoryByRoute[aliasedRoute] = inventory;
+  }
+}
+
 const inventoryLabelMap: Record<string, string> = {
   "control-plane-owned": "Executado no servidor central da API.",
   "worker-owned": "Executado na maquina do cliente (worker/edge).",

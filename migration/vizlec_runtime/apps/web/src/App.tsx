@@ -20,6 +20,7 @@ import Auth from './components/Auth';
 import ImageModal from './components/ImageModal';
 import { ViewType, Course, LessonBlock, Module, Theme, Ticket, Notification } from './types';
 import { apiDelete, apiGet, apiPatch, apiPost, API_BASE, UNAUTHORIZED_EVENT } from './lib/api';
+import { WS_EVENT } from './lib/events';
 import { resolveCourseCategoryLabel } from './lib/courseCategories';
 
 type LegacyCourse = {
@@ -357,7 +358,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    apiGet<LegacyCourse[]>('/courses')
+    apiGet<LegacyCourse[]>('/channels')
       .then((items) => {
         setCourses(items.map(mapCourse));
         setCoursesError(null);
@@ -417,7 +418,7 @@ const App: React.FC = () => {
             } & EntityChangedPayload;
           };
           window.dispatchEvent(new CustomEvent('vizlec:ws', { detail: data }));
-          if (data.event === 'job_update') {
+          if (data.event === WS_EVENT.JOB_UPDATE) {
             const payload = data.payload;
             const buildStatus = payload?.buildStatus;
             const impactedCourseId = payload?.courseId ?? null;
@@ -452,7 +453,7 @@ const App: React.FC = () => {
             }
             return;
           }
-          if (data.event === 'entity_changed') {
+          if (data.event === WS_EVENT.ENTITY_CHANGED) {
             const payload = data.payload;
             const entity = payload?.entity;
             const action = payload?.action;
@@ -608,7 +609,7 @@ const App: React.FC = () => {
             }
             return;
           }
-          if (data.event !== 'notification' || !data.payload?.id) return;
+          if (data.event !== WS_EVENT.NOTIFICATION || !data.payload?.id) return;
           const payload = data.payload;
           const notificationId = payload.id;
           if (!notificationId) return;
@@ -714,14 +715,14 @@ const App: React.FC = () => {
     });
 
     try {
-      const modules = await apiGet<LegacyModule[]>(`/courses/${courseId}/modules`, {
+      const modules = await apiGet<LegacyModule[]>(`/channels/${courseId}/sections`, {
         cacheMs: 0,
         dedupe: false
       });
         const ordered = [...modules].sort((a, b) => a.order - b.order);
         const lessonsByModule = await Promise.all(
           ordered.map((module) =>
-            apiGet<LegacyLesson[]>(`/modules/${module.id}/lessons`, {
+            apiGet<LegacyLesson[]>(`/sections/${module.id}/videos`, {
               cacheMs: 0,
               dedupe: false
             })
@@ -732,7 +733,7 @@ const App: React.FC = () => {
         );
         let mapped = mappedBase;
         try {
-          const buildStatus = await apiGet<CourseBuildStatusPayload>(`/courses/${courseId}/build-status`, {
+          const buildStatus = await apiGet<CourseBuildStatusPayload>(`/channels/${courseId}/build-status`, {
             cacheMs: 0,
             dedupe: false
           });
@@ -917,7 +918,7 @@ const App: React.FC = () => {
         console.error(err);
       });
       if (notification.relatedLessonId) {
-        apiGet<LegacyLesson>(`/lessons/${notification.relatedLessonId}`)
+        apiGet<LegacyLesson>(`/videos/${notification.relatedLessonId}`)
           .then((lesson) => {
             setSelectedLesson(getLessonStub(lesson.id, lesson.title));
             setSelectedModuleIdForLesson(lesson.moduleId ?? null);
@@ -987,7 +988,7 @@ const App: React.FC = () => {
     };
     try {
       if (editingCourse) {
-        const updated = await apiPatch<LegacyCourse>(`/courses/${editingCourse.id}`, payload);
+        const updated = await apiPatch<LegacyCourse>(`/channels/${editingCourse.id}`, payload);
         setCourses((prev) =>
           prev.map((courseItem) =>
             courseItem.id === updated.id
@@ -1011,7 +1012,7 @@ const App: React.FC = () => {
             : prev
         );
       } else {
-        const created = await apiPost<LegacyCourse>('/courses', payload);
+        const created = await apiPost<LegacyCourse>('/channels', payload);
         const mapped = mapCourse(created);
         const nextCourse = {
           ...mapped,
@@ -1041,7 +1042,7 @@ const App: React.FC = () => {
 
   const handleDeleteCourse = async (id: string) => {
     try {
-      await apiDelete<{ ok: boolean }>(`/courses/${id}`);
+      await apiDelete<{ ok: boolean }>(`/channels/${id}`);
       setCourses((prev) => prev.filter((course) => course.id !== id));
       if (selectedCourse?.id === id) {
         setSelectedCourse(null);
@@ -1100,14 +1101,14 @@ const App: React.FC = () => {
     try {
       const existing = courseModules.find((m) => m.id === moduleData.id);
       if (existing) {
-        const updated = await apiPatch<LegacyModule>(`/modules/${moduleData.id}`, { name: title });
+        const updated = await apiPatch<LegacyModule>(`/sections/${moduleData.id}`, { name: title });
         setCourseModules((prev) =>
           prev.map((moduleItem) =>
             moduleItem.id === moduleData.id ? { ...moduleItem, title: updated.name } : moduleItem
           )
         );
       } else {
-        const created = await apiPost<LegacyModule>(`/courses/${selectedCourse.id}/modules`, { name: title });
+        const created = await apiPost<LegacyModule>(`/channels/${selectedCourse.id}/sections`, { name: title });
         const nextModule: Module = {
           id: created.id,
           title: created.name,
@@ -1141,7 +1142,7 @@ const App: React.FC = () => {
 
   const handleDeleteModuleContainer = async (id: string) => {
     try {
-      await apiDelete<{ ok: boolean }>(`/modules/${id}`);
+      await apiDelete<{ ok: boolean }>(`/sections/${id}`);
       setCourseModules((prev) => prev.filter((moduleItem) => moduleItem.id !== id));
       setCurrentView('modules');
     } catch (err) {
@@ -1151,7 +1152,7 @@ const App: React.FC = () => {
 
   const handleDeleteLesson = async (lessonId: string) => {
     try {
-      await apiDelete<{ ok: boolean }>(`/lessons/${lessonId}`);
+      await apiDelete<{ ok: boolean }>(`/videos/${lessonId}`);
       setCourseModules((prev) =>
         prev.map((moduleItem) => ({
           ...moduleItem,
@@ -1214,7 +1215,7 @@ const App: React.FC = () => {
 
   const handlePersistModulesReorder = async (modules: Module[]) => {
     if (!selectedCourse) return;
-    await apiPatch(`/courses/${selectedCourse.id}/structure/reorder`, {
+    await apiPatch(`/channels/${selectedCourse.id}/structure/reorder`, {
       modules: modules.map((moduleItem) => ({
         moduleId: moduleItem.id,
         lessonIds: moduleItem.lessons.map((lessonItem) => lessonItem.id)
@@ -1240,7 +1241,7 @@ const App: React.FC = () => {
   ): Promise<{ id: string; preferredVoiceId?: string | null; preferredTemplateId?: string | null } | null> => {
     const versions = await apiGet<
       Array<{ id: string; preferredVoiceId?: string | null; preferredTemplateId?: string | null }>
-    >(`/lessons/${lessonId}/versions`, {
+    >(`/videos/${lessonId}/versions`, {
       cacheMs: 0,
       dedupe: false
     });
@@ -1255,20 +1256,20 @@ const App: React.FC = () => {
     const versionId = version?.id ?? null;
     if (!versionId) return;
     if (action === 'blocks') {
-      await apiPost(`/lesson-versions/${versionId}/segment`, {
+      await apiPost(`/video-versions/${versionId}/segment`, {
         requestId: randomRequestId(),
         purge: true
       });
       return;
     }
     if (action === 'audio') {
-      await apiPost(`/lesson-versions/${versionId}/tts`, {
+      await apiPost(`/video-versions/${versionId}/tts`, {
         requestId: randomRequestId(),
         ...(version?.preferredVoiceId ? { voiceId: version.preferredVoiceId } : {})
       });
       return;
     }
-    await apiPost(`/lesson-versions/${versionId}/images`, {
+    await apiPost(`/video-versions/${versionId}/images`, {
       requestId: randomRequestId(),
       ...(version?.preferredTemplateId ? { templateId: version.preferredTemplateId } : {})
     });
@@ -1317,7 +1318,7 @@ const App: React.FC = () => {
     action: 'blocks' | 'audio' | 'images'
   ) => {
     try {
-      await apiPost(`/lessons/${lessonId}/generation/${action}/cancel`, {});
+      await apiPost(`/videos/${lessonId}/generation/${action}/cancel`, {});
     } catch (err) {
       console.error(err);
     }
@@ -1328,7 +1329,7 @@ const App: React.FC = () => {
     action: 'blocks' | 'audio' | 'images'
   ) => {
     try {
-      await apiPost(`/modules/${moduleId}/generation/${action}/cancel`, {});
+      await apiPost(`/sections/${moduleId}/generation/${action}/cancel`, {});
     } catch (err) {
       console.error(err);
     }
@@ -1337,7 +1338,7 @@ const App: React.FC = () => {
   const handleCancelCourseGeneration = async (action: 'blocks' | 'audio' | 'images') => {
     try {
       if (!selectedCourse?.id) return;
-      await apiPost(`/courses/${selectedCourse.id}/generation/${action}/cancel`, {});
+      await apiPost(`/channels/${selectedCourse.id}/generation/${action}/cancel`, {});
     } catch (err) {
       console.error(err);
     }

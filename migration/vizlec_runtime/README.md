@@ -105,6 +105,8 @@ Observacao:
 
 ## Documentacao especifica (MVP)
 - Legendas (faster-whisper + template default + cues): `docs/subtitles.md`
+- Migracao de dominio / base (inventario de schema e impacto): `docs/domain-schema-migration-inventory.md`
+- Rascunho da migracao fisica do SQLite (sem `@map/@@map`): `docs/prisma-physical-domain-rename-sqlite-draft.md`
 
 ## Render / FFmpeg / Subtitulos (env)
 As variaveis de render cinematografico, encoder FFmpeg (CPU/GPU) e subtitulos (`faster-whisper`) estao documentadas em:
@@ -114,3 +116,33 @@ As mais importantes para performance:
 - `VIDEO_AUTOMATION_FFMPEG_VCODEC` (`h264_nvenc` na RTX 3060)
 - `VIZLEC_CINEMATIC_RENDER_MODE` (`quality` / `preview`)
 - `VIDEO_AUTOMATION_SUPERSAMPLE`
+
+## Migracao de storage (`courses` -> `channels`)
+O runtime ja consegue ler `data/courses` (legado) e `data/channels` (novo) via fallback.
+Quando quiser migrar os arquivos fisicos, use:
+
+```powershell
+pnpm storage:migrate:dry-run
+pnpm storage:migrate:copy   # copia para data/channels
+pnpm storage:migrate:move   # move (remove origem ao final)
+pnpm storage:migrate:move:force  # permite destino nao-vazio
+```
+
+Observacoes:
+- `dry-run` e o modo padrao (nao grava nada).
+- `copy` e o mais seguro para validar.
+- `move` usa copy + cleanup da origem.
+- Se `data/channels` ja existir (ex.: runtime ja gravou algo), use `*:force`.
+
+## Migracao fisica do dominio no SQLite (draft)
+Quando o runtime estiver estabilizado e voces quiserem remover `@map/@@map`:
+
+```powershell
+pnpm db:domain-rename:dry-run
+pnpm db:domain-rename:apply
+```
+
+Observacoes:
+- o script faz backup automatico do `vizlec.db` antes de aplicar (a menos que use `--no-backup`)
+- nao execute com API/worker em execucao
+- isso e etapa posterior; hoje o runtime funciona com `@map/@@map`

@@ -15,6 +15,7 @@ import {
 import { LessonBlock } from '../types';
 import AIGenerationOverlay from './AIGenerationOverlay';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
+import { WS_EVENT, readVizlecWsDetail } from '../lib/events';
 
 interface ModuleEditorProps {
   moduleId: string | null;
@@ -73,7 +74,7 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
 
     let cancelled = false;
     setIsLoadingStoredScript(true);
-    apiGet<Array<{ id: string; scriptText: string }>>(`/lessons/${module.id}/versions`, { cacheMs: 0, dedupe: false })
+    apiGet<Array<{ id: string; scriptText: string }>>(`/videos/${module.id}/versions`, { cacheMs: 0, dedupe: false })
       .then((versions) => {
         if (cancelled) return;
         const latestScript = versions?.[0]?.scriptText?.trim() ?? '';
@@ -145,11 +146,13 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
 
   useEffect(() => {
     const onWs = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        event?: string;
-        payload?: { jobId?: string; status?: string; type?: string; blockId?: string | null };
-      }>).detail;
-      if (!detail || detail.event !== 'job_update') return;
+      const detail = readVizlecWsDetail<{
+        jobId?: string;
+        status?: string;
+        type?: string;
+        blockId?: string | null;
+      }>(event);
+      if (!detail || detail.event !== WS_EVENT.JOB_UPDATE) return;
       const payload = detail.payload;
       const jobId = payload?.jobId?.trim();
       const status = payload?.status?.trim() ?? '';
@@ -245,10 +248,10 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
     try {
       const clientId = dispatchAgentId ?? null;
       const lesson = isEditMode
-        ? await apiPatch<{ id: string; title: string }>(`/lessons/${module!.id}`, { title })
-        : await apiPost<{ id: string; title: string }>(`/modules/${moduleId}/lessons`, { title });
+        ? await apiPatch<{ id: string; title: string }>(`/videos/${module!.id}`, { title })
+        : await apiPost<{ id: string; title: string }>(`/sections/${moduleId}/videos`, { title });
       appendOutcomeLog(isEditMode ? 'Lesson updated.' : 'Lesson created.', 'INFO');
-      const version = await apiPost<{ id: string }>(`/lessons/${lesson.id}/versions`, {
+      const version = await apiPost<{ id: string }>(`/videos/${lesson.id}/versions`, {
         scriptText
       });
       appendOutcomeLog('Lesson script version created.', 'INFO');
@@ -278,7 +281,7 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
         moduleId
       );
       const segmentJob = await apiPost<{ id: string; status: string }>(
-        `/lesson-versions/${version.id}/segment`,
+        `/video-versions/${version.id}/segment`,
         {
           clientId,
           requestId: crypto.randomUUID(),

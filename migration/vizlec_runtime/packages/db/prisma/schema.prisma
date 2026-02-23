@@ -28,10 +28,10 @@ model Workspace {
   memberships WorkspaceMembership[]
   agents      Agent[]
   invitations Invitation[]
-  courses     Course[]
-  modules     Module[]
-  lessons     Lesson[]
-  lessonVersions LessonVersion[]
+  channels       Channel[]
+  sections       Section[]
+  videos         Video[]
+  videoVersions  VideoVersion[]
   blocks      Block[]
   assets      Asset[]
   jobs        Job[]
@@ -88,7 +88,7 @@ model Invitation {
   @@index([expiresAt, revokedAt, acceptedAt])
 }
 
-model Course {
+model Channel {
   id                  String   @id @default(cuid())
   workspaceId         String
   name                String
@@ -104,9 +104,10 @@ model Course {
   updatedAt           DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  modules   Module[]
+  sections  Section[]
 
   @@index([workspaceId, createdAt])
+  @@map("Course")
 }
 
 model SlideTemplate {
@@ -120,43 +121,45 @@ model SlideTemplate {
   @@index([isActive])
 }
 
-model Module {
+model Section {
   id        String   @id @default(cuid())
   workspaceId String
-  courseId  String
+  channelId String   @map("courseId")
   name      String
   order     Int
   createdAt DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  course     Course    @relation(fields: [courseId], references: [id])
-  lessons    Lesson[]
+  channel    Channel   @relation(fields: [channelId], references: [id])
+  videos     Video[]
 
-  @@index([courseId, order])
-  @@index([workspaceId, courseId, order])
+  @@index([channelId, order])
+  @@index([workspaceId, channelId, order])
+  @@map("Module")
 }
 
-model Lesson {
+model Video {
   id        String   @id @default(cuid())
   workspaceId String
-  moduleId  String
+  sectionId String   @map("moduleId")
   order     Int
   title     String
   createdAt DateTime @default(now())
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  module    Module         @relation(fields: [moduleId], references: [id])
-  versions  LessonVersion[]
+  section   Section        @relation(fields: [sectionId], references: [id])
+  videoVersions  VideoVersion[]
 
-  @@index([moduleId, order])
-  @@index([workspaceId, moduleId, order])
-  @@unique([moduleId, order])
+  @@index([sectionId, order])
+  @@index([workspaceId, sectionId, order])
+  @@unique([sectionId, order])
+  @@map("Lesson")
 }
 
-model LessonVersion {
+model VideoVersion {
   id                  String   @id @default(cuid())
   workspaceId         String
-  lessonId            String
+  videoId             String   @map("lessonId")
   scriptText          String
   speechRateWps       Float    @default(2.5)
   preferredVoiceId    String?
@@ -168,18 +171,19 @@ model LessonVersion {
   createdAt           DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lesson    Lesson    @relation(fields: [lessonId], references: [id])
+  video     Video     @relation(fields: [videoId], references: [id])
   blocks    Block[]
   jobs      Job[]
 
-  @@index([workspaceId, lessonId, createdAt])
+  @@index([workspaceId, videoId, createdAt])
   @@index([preferredTemplateId])
+  @@map("LessonVersion")
 }
 
 model Block {
   id                String   @id @default(cuid())
   workspaceId       String
-  lessonVersionId   String
+  videoVersionId    String   @map("lessonVersionId")
   index             Int
   sourceText        String
   ttsText           String
@@ -199,12 +203,13 @@ model Block {
   updatedAt         DateTime @updatedAt
 
   workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lessonVersion LessonVersion @relation(fields: [lessonVersionId], references: [id])
+  videoVersion VideoVersion @relation(fields: [videoVersionId], references: [id])
   assets        Asset[]
   jobs          Job[]
 
-  @@index([lessonVersionId, index])
-  @@index([workspaceId, lessonVersionId, index])
+  @@index([videoVersionId, index])
+  @@index([workspaceId, videoVersionId, index])
+  @@map("Block")
 }
 
 model Asset {
@@ -226,6 +231,7 @@ model Asset {
   @@index([blockId, kind])
   @@index([workspaceId, blockId, kind])
   @@index([templateId])
+  @@map("Asset")
 }
 
 model Job {
@@ -233,7 +239,7 @@ model Job {
   workspaceId     String
   /// String enum: lesson | block
   scope           String
-  lessonVersionId String?
+  videoVersionId String? @map("lessonVersionId")
   blockId         String?
   /// String enum: segment | on_screen | image_prompt | tts | probe_audio | comfyui_image | render_slide | render_clip | concat_video
   type            String
@@ -254,15 +260,16 @@ model Job {
   updatedAt       DateTime  @updatedAt
 
   workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lessonVersion LessonVersion? @relation(fields: [lessonVersionId], references: [id])
+  videoVersion VideoVersion? @relation(fields: [videoVersionId], references: [id])
   block         Block?         @relation(fields: [blockId], references: [id])
 
   @@index([status, priority])
   @@index([workspaceId, status, priority])
-  @@index([lessonVersionId])
+  @@index([videoVersionId])
   @@index([blockId])
   @@index([workspaceId, createdAt])
   @@index([templateId])
+  @@map("Job")
 }
 
 model Notification {
@@ -275,8 +282,8 @@ model Notification {
   jobId           String?
   jobType         String?
   jobStatus       String?
-  lessonId        String?
-  lessonVersionId String?
+  videoId         String?  @map("lessonId")
+  videoVersionId  String?  @map("lessonVersionId")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -285,5 +292,5 @@ model Notification {
   @@index([workspaceId, read, createdAt])
   @@index([read, createdAt])
   @@index([jobId, jobStatus])
-  @@index([lessonId])
+  @@index([videoId])
 }

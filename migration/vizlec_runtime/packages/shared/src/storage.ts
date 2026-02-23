@@ -12,16 +12,37 @@ export function dataRootDir(): string {
   return resolveDataDir();
 }
 
+function domainRootFolderName(): string {
+  const value = process.env.VIZLEC_STORAGE_DOMAIN_ROOT?.trim().toLowerCase();
+  if (!value) return "channels";
+  // Keep this constrained to simple folder names to avoid path traversal/config mistakes.
+  return /^[a-z0-9_-]+$/.test(value) ? value : "channels";
+}
+
+function legacyDomainRootFolderName(): string {
+  return "courses";
+}
+
+function resolveDomainRootPath(): string {
+  const canonical = path.join(dataRootDir(), domainRootFolderName());
+  const legacy = path.join(dataRootDir(), legacyDomainRootFolderName());
+  // Read/write existing legacy trees during migration; new installs use canonical folder.
+  if (!fs.existsSync(canonical) && fs.existsSync(legacy)) {
+    return legacy;
+  }
+  return canonical;
+}
+
 export function courseDir(courseId: string): string {
-  return path.join(dataRootDir(), "courses", courseId);
+  return channelDir(courseId);
 }
 
 export function moduleDir(courseId: string, moduleId: string): string {
-  return path.join(courseDir(courseId), "modules", moduleId);
+  return sectionDir(courseId, moduleId);
 }
 
 export function lessonDir(courseId: string, moduleId: string, lessonId: string): string {
-  return path.join(moduleDir(courseId, moduleId), "lessons", lessonId);
+  return videoDir(courseId, moduleId, lessonId);
 }
 
 export function lessonVersionDir(
@@ -30,7 +51,7 @@ export function lessonVersionDir(
   lessonId: string,
   versionId: string
 ): string {
-  return path.join(lessonDir(courseId, moduleId, lessonId), "versions", versionId);
+  return videoVersionDir(courseId, moduleId, lessonId, versionId);
 }
 
 export function blockDir(
@@ -40,7 +61,7 @@ export function blockDir(
   versionId: string,
   blockIndex: number
 ): string {
-  return path.join(lessonVersionDir(courseId, moduleId, lessonId, versionId), "blocks", String(blockIndex));
+  return videoBlockDir(courseId, moduleId, lessonId, versionId, blockIndex);
 }
 
 export function blockAudioDir(
@@ -50,7 +71,7 @@ export function blockAudioDir(
   versionId: string,
   blockIndex: number
 ): string {
-  return path.join(blockDir(courseId, moduleId, lessonId, versionId, blockIndex), "audio");
+  return videoBlockAudioDir(courseId, moduleId, lessonId, versionId, blockIndex);
 }
 
 export function blockImageRawDir(
@@ -60,7 +81,7 @@ export function blockImageRawDir(
   versionId: string,
   blockIndex: number
 ): string {
-  return path.join(blockDir(courseId, moduleId, lessonId, versionId, blockIndex), "image_raw");
+  return videoBlockImageRawDir(courseId, moduleId, lessonId, versionId, blockIndex);
 }
 
 export function blockSlideDir(
@@ -70,7 +91,7 @@ export function blockSlideDir(
   versionId: string,
   blockIndex: number
 ): string {
-  return path.join(blockDir(courseId, moduleId, lessonId, versionId, blockIndex), "slide");
+  return videoBlockSlideDir(courseId, moduleId, lessonId, versionId, blockIndex);
 }
 
 export function blockClipDir(
@@ -80,7 +101,7 @@ export function blockClipDir(
   versionId: string,
   blockIndex: number
 ): string {
-  return path.join(blockDir(courseId, moduleId, lessonId, versionId, blockIndex), "clip");
+  return videoBlockClipDir(courseId, moduleId, lessonId, versionId, blockIndex);
 }
 
 export function lessonFinalDir(
@@ -89,7 +110,7 @@ export function lessonFinalDir(
   lessonId: string,
   versionId: string
 ): string {
-  return path.join(lessonVersionDir(courseId, moduleId, lessonId, versionId), "final");
+  return videoFinalDir(courseId, moduleId, lessonId, versionId);
 }
 
 export function lessonManifestPath(
@@ -98,7 +119,7 @@ export function lessonManifestPath(
   lessonId: string,
   versionId: string
 ): string {
-  return path.join(lessonVersionDir(courseId, moduleId, lessonId, versionId), "manifest.json");
+  return videoManifestPath(courseId, moduleId, lessonId, versionId);
 }
 
 export function ensureLessonVersionDirs(
@@ -107,7 +128,106 @@ export function ensureLessonVersionDirs(
   lessonId: string,
   versionId: string
 ): void {
-  ensureDir(lessonVersionDir(courseId, moduleId, lessonId, versionId));
-  ensureDir(path.join(lessonVersionDir(courseId, moduleId, lessonId, versionId), "blocks"));
-  ensureDir(lessonFinalDir(courseId, moduleId, lessonId, versionId));
+  ensureVideoVersionDirs(courseId, moduleId, lessonId, versionId);
+}
+
+// Canonical domain helpers (channel -> section -> video)
+export function channelDir(channelId: string): string {
+  return path.join(resolveDomainRootPath(), channelId);
+}
+
+export function sectionDir(channelId: string, sectionId: string): string {
+  return path.join(channelDir(channelId), "modules", sectionId);
+}
+
+export function videoDir(channelId: string, sectionId: string, videoId: string): string {
+  return path.join(sectionDir(channelId, sectionId), "lessons", videoId);
+}
+
+export function videoVersionDir(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string
+): string {
+  return path.join(videoDir(channelId, sectionId, videoId), "versions", versionId);
+}
+
+export function videoBlockDir(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string,
+  blockIndex: number
+): string {
+  return path.join(videoVersionDir(channelId, sectionId, videoId, versionId), "blocks", String(blockIndex));
+}
+
+export function videoBlockAudioDir(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string,
+  blockIndex: number
+): string {
+  return path.join(videoBlockDir(channelId, sectionId, videoId, versionId, blockIndex), "audio");
+}
+
+export function videoBlockImageRawDir(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string,
+  blockIndex: number
+): string {
+  return path.join(videoBlockDir(channelId, sectionId, videoId, versionId, blockIndex), "image_raw");
+}
+
+export function videoBlockSlideDir(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string,
+  blockIndex: number
+): string {
+  return path.join(videoBlockDir(channelId, sectionId, videoId, versionId, blockIndex), "slide");
+}
+
+export function videoBlockClipDir(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string,
+  blockIndex: number
+): string {
+  return path.join(videoBlockDir(channelId, sectionId, videoId, versionId, blockIndex), "clip");
+}
+
+export function videoFinalDir(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string
+): string {
+  return path.join(videoVersionDir(channelId, sectionId, videoId, versionId), "final");
+}
+
+export function videoManifestPath(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string
+): string {
+  return path.join(videoVersionDir(channelId, sectionId, videoId, versionId), "manifest.json");
+}
+
+export function ensureVideoVersionDirs(
+  channelId: string,
+  sectionId: string,
+  videoId: string,
+  versionId: string
+): void {
+  ensureDir(videoVersionDir(channelId, sectionId, videoId, versionId));
+  ensureDir(path.join(videoVersionDir(channelId, sectionId, videoId, versionId), "blocks"));
+  ensureDir(videoFinalDir(channelId, sectionId, videoId, versionId));
 }
