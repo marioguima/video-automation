@@ -50,6 +50,15 @@ const FALLBACK_TITLE = "Bloco";
 const HORIZONTAL_RULE_RE = /^\s*---\s*$/;
 const BULLET_LINE_RE = /^\s*(?:[*+-]|\d+[.)])\s+.+$/;
 const TTS_BULLET_LINE_RE = /^\s*([*-])\s*(.+)$/;
+const SENTENCE_SPLIT_RE = /(?<=[.!?])\s+/;
+const TOKEN_RE = /[a-zA-ZÀ-ÿ0-9]+/g;
+const STOPWORDS_PT = new Set([
+  "a","o","as","os","de","da","do","das","dos","e","é","em","um",
+  "uma","para","por","com","que","na","no","nas","nos","se","ao",
+  "à","às","ou","como","mais","mas","já","não","sim","ser","foi",
+  "são","tem","também","quando","onde","isso","essa","esse","seu",
+  "sua","seus","suas","você","vocês","ele","ela","eles","elas"
+]);
 
 function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
@@ -57,6 +66,94 @@ function wordCount(text: string): number {
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function splitIntoSentences(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const parts = trimmed
+    .split(SENTENCE_SPLIT_RE)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : [trimmed];
+}
+
+function tokenizeForTopic(text: string): string[] {
+  const matches = text.toLowerCase().match(TOKEN_RE) ?? [];
+  return matches.filter((token) => token.length > 1 && !STOPWORDS_PT.has(token));
+}
+
+function termFreq(tokens: string[]): Map<string, number> {
+  const tf = new Map<string, number>();
+  for (const token of tokens) {
+    tf.set(token, (tf.get(token) ?? 0) + 1);
+  }
+  return tf;
+}
+
+function cosineSimilarity(a: Map<string, number>, b: Map<string, number>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (const value of a.values()) na += value * value;
+  for (const value of b.values()) nb += value * value;
+  for (const [key, aValue] of a.entries()) {
+    const bValue = b.get(key);
+    if (bValue) dot += aValue * bValue;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+function splitTextByTopic(text: string, options?: {
+  maxChars?: number;
+  minChars?: number;
+  similarityThreshold?: number;
+}): string[] {
+  const { maxChars, minChars = 120, similarityThreshold = 0.16 } = options ?? {};
+  const sentences = splitIntoSentences(text);
+  if (sentences.length === 0) return [];
+  if (sentences.length === 1) {
+    return maxChars ? splitTextByLimit(sentences[0], maxChars) : [sentences[0]];
+  }
+
+  const blocks: string[] = [];
+  let currentSentences: string[] = [sentences[0]!];
+  let prevTf = termFreq(tokenizeForTopic(sentences[0]!));
+
+  for (const sentence of sentences.slice(1)) {
+    const sentTf = termFreq(tokenizeForTopic(sentence));
+    const sim = cosineSimilarity(prevTf, sentTf);
+    const currentText = normalizeWhitespace(currentSentences.join(" "));
+    const candidate = normalizeWhitespace(`${currentText} ${sentence}`);
+    const mustSplitBySize = Boolean(maxChars && candidate.length > maxChars);
+    const canSplitByTopic = currentText.length >= minChars && sim < similarityThreshold;
+
+    if (mustSplitBySize || canSplitByTopic) {
+      if (currentText) blocks.push(currentText);
+      currentSentences = [sentence];
+    } else {
+      currentSentences.push(sentence);
+    }
+    prevTf = sentTf;
+  }
+
+  if (currentSentences.length > 0) {
+    blocks.push(normalizeWhitespace(currentSentences.join(" ")));
+  }
+
+  if (!maxChars) return blocks;
+
+  const finalBlocks: string[] = [];
+  for (const block of blocks) {
+    if (block.length <= maxChars) {
+      finalBlocks.push(block);
+      continue;
+    }
+    finalBlocks.push(...splitTextByLimit(block, maxChars));
+  }
+  return finalBlocks;
 }
 
 export function sanitizeNarratedScriptText(text: string): string {
@@ -186,7 +283,11 @@ function splitTextByLimit(text: string, maxChars: number): string[] {
 function splitBulletParagraph(paragraphLines: string[], maxChars: number): string[] {
   const hasBullet = paragraphLines.some((line) => BULLET_LINE_RE.test(line));
   if (!hasBullet) {
-    return splitTextByLimit(paragraphLines.join(" "), maxChars);
+    return splitTextByTopic(paragraphLines.join(" "), {
+      maxChars,
+      minChars: 120,
+      similarityThreshold: 0.16
+    });
   }
 
   const prefaceLines: string[] = [];
