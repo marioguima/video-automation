@@ -3976,6 +3976,12 @@ fastify.get(
             }
           }
         },
+        410: {
+          type: "object",
+          properties: {
+            error: { type: "string" }
+          }
+        },
         503: {
           type: "object",
           properties: {
@@ -4110,10 +4116,8 @@ fastify.get(
     }
   },
   async () => {
-    return prisma.slideTemplate.findMany({
-      where: { isActive: true },
-      orderBy: { createdAt: "asc" }
-    });
+    // Slides are disabled in the current MVP sandbox (image-only video pipeline).
+    return [];
   }
 );
 
@@ -6120,6 +6124,12 @@ fastify.patch(
             error: { type: "string" }
           }
         },
+        410: {
+          type: "object",
+          properties: {
+            error: { type: "string" }
+          }
+        },
         503: {
           type: "object",
           properties: {
@@ -6276,6 +6286,12 @@ fastify.get(
             error: { type: "string" }
           }
         },
+        410: {
+          type: "object",
+          properties: {
+            error: { type: "string" }
+          }
+        },
         503: {
           type: "object",
           properties: {
@@ -6411,6 +6427,12 @@ fastify.get(
             error: { type: "string" }
           }
         },
+        410: {
+          type: "object",
+          properties: {
+            error: { type: "string" }
+          }
+        },
         503: {
           type: "object",
           properties: {
@@ -6474,6 +6496,12 @@ fastify.get(
             error: { type: "string" }
           }
         },
+        410: {
+          type: "object",
+          properties: {
+            error: { type: "string" }
+          }
+        },
         503: {
           type: "object",
           properties: {
@@ -6483,47 +6511,8 @@ fastify.get(
       }
     }
   },
-  async (request, reply) => {
-    try {
-      const auth = await getAuthenticatedScope(request, reply);
-      if (!auth) return;
-      const { blockId } = request.params as { blockId: string };
-      const { templateId } = request.query as { templateId?: string };
-      if (!templateId) {
-        return reply.code(400).send({ error: "templateId is required" });
-      }
-      const agentSession = getConnectedAgentForWorkspace(auth.scope.workspaceId);
-      if (!agentSession) {
-        return reply.code(503).send({ error: "agent_offline" });
-      }
-      const upstream = await requestAgentWorkerCommand(agentSession, "block_slide_get", {
-        blockId,
-        templateId
-      });
-      if (upstream.statusCode === 400) {
-        return reply.code(400).send({
-          error: String(upstream.data.error ?? "templateId is required")
-        });
-      }
-      if (upstream.statusCode === 404) {
-        return reply.code(404).send({ error: String(upstream.data.error ?? "slide not found") });
-      }
-      if (upstream.statusCode !== 200) {
-        return reply.code(503).send({
-          error: String(upstream.data.error ?? "agent_response_invalid")
-        });
-      }
-      const bodyBase64 = typeof upstream.data.bodyBase64 === "string" ? upstream.data.bodyBase64 : "";
-      if (!bodyBase64) {
-        return reply.code(404).send({ error: "slide not found" });
-      }
-      const contentType = typeof upstream.data.contentType === "string" ? upstream.data.contentType : "image/png";
-      reply.header("Content-Type", contentType);
-      reply.header("Cache-Control", "no-store");
-      return reply.send(Buffer.from(bodyBase64, "base64"));
-    } catch (err) {
-      return reply.code(503).send({ error: (err as Error).message });
-    }
+  async (_request, reply) => {
+    return reply.code(410).send({ error: "slides_disabled_in_mvp" });
   }
 );
 
@@ -7163,6 +7152,10 @@ fastify.post(
           type: "object",
           properties: { error: { type: "string" } }
         },
+        410: {
+          type: "object",
+          properties: { error: { type: "string" } }
+        },
         503: {
           type: "object",
           properties: { error: { type: "string" } }
@@ -7170,35 +7163,8 @@ fastify.post(
       }
     }
   },
-  async (request, reply) => {
-    try {
-      const auth = await getAuthenticatedScope(request, reply);
-      if (!auth) return;
-      const { versionId } = request.params as { versionId: string };
-      const body = request.body as {
-        clientId?: string;
-        requestId?: string;
-        templateId?: string;
-      };
-      const dispatchClient = await resolveDispatchClientForRequest(request, body?.clientId);
-      if (!dispatchClient.ok) {
-        return reply.code(dispatchClient.statusCode).send({ error: dispatchClient.error });
-      }
-      const agentSession = getConnectedAgentForWorkspace(auth.scope.workspaceId, dispatchClient.clientId ?? undefined);
-      if (!agentSession) {
-        return reply.code(503).send({ error: "agent_offline" });
-      }
-      const upstream = await requestAgentWorkerCommand(agentSession, "lesson_version_slides_post", {
-        versionId,
-        templateId: body?.templateId?.trim(),
-        clientId: dispatchClient.clientId,
-        requestId: body?.requestId?.trim() || null
-      });
-      const statusCode = upstream.statusCode === 200 || upstream.statusCode === 201 ? upstream.statusCode : upstream.statusCode === 400 ? 400 : upstream.statusCode === 404 ? 404 : 503;
-      return reply.code(statusCode).send(upstream.data);
-    } catch (err) {
-      return reply.code(503).send({ error: (err as Error).message });
-    }
+  async (_request, reply) => {
+    return reply.code(410).send({ error: "slides_disabled_in_mvp" });
   }
 );
 
@@ -7369,6 +7335,12 @@ fastify.get(
             error: { type: "string" }
           }
         },
+        410: {
+          type: "object",
+          properties: {
+            error: { type: "string" }
+          }
+        },
         503: {
           type: "object",
           properties: {
@@ -7378,22 +7350,8 @@ fastify.get(
       }
     }
   },
-  async (request, reply) => {
-    try {
-      const auth = await getAuthenticatedScope(request, reply);
-      if (!auth) return;
-      const { versionId } = request.params as { versionId: string };
-      const { templateId } = request.query as { templateId?: string };
-      const agentSession = getConnectedAgentForWorkspace(auth.scope.workspaceId);
-      if (!agentSession) {
-        return reply.code(503).send({ error: "agent_offline" });
-      }
-      const upstream = await requestAgentWorkerCommand(agentSession, "lesson_version_slides_list", { versionId, templateId });
-      const statusCode = upstream.statusCode === 200 ? 200 : upstream.statusCode === 400 ? 400 : upstream.statusCode === 404 ? 404 : 503;
-      return reply.code(statusCode).send(upstream.data);
-    } catch (err) {
-      return reply.code(503).send({ error: (err as Error).message });
-    }
+  async (_request, reply) => {
+    return reply.code(410).send({ error: "slides_disabled_in_mvp" });
   }
 );
 
@@ -7607,22 +7565,8 @@ fastify.patch(
     }
 
     if (body?.onScreen !== undefined) {
-      const title = body.onScreen.title?.trim() || "";
-      if (!title) {
-        data.onScreenJson = null;
-      } else {
-        const bullets = Array.isArray(body.onScreen.bullets)
-          ? body.onScreen.bullets
-              .map((item) => String(item).trim())
-              .filter(Boolean)
-              .slice(0, 8)
-          : [];
-        const onScreen = {
-          title,
-          bullets
-        };
-        data.onScreenJson = JSON.stringify(onScreen);
-      }
+      // on-screen is disabled in MVP; explicitly clear legacy field if sent.
+      data.onScreenJson = null;
     }
 
     if (body?.ttsText !== undefined) {

@@ -915,6 +915,7 @@ const parseImagePrompt = (raw: string | null | undefined): { block_prompt?: stri
 
 const hasOnScreenText = (block: LessonBlock) => Boolean(block.onScreenText?.title?.trim());
 const hasImagePromptText = (block: LessonBlock) => Boolean(block.imagePrompt?.prompt?.trim());
+const SLIDES_DISABLED_MVP = true;
 
 const mapLegacyStatus = (status?: string | null): LessonBlock['status'] => {
   if (!status) return 'Empty';
@@ -1056,7 +1057,7 @@ const Editor: React.FC<EditorProps> = ({
   const [ttsHealthChecked, setTtsHealthChecked] = useState(false);
   const [ttsHealthError, setTtsHealthError] = useState<string | null>(null);
   const [ttsHealthWarmupActive, setTtsHealthWarmupActive] = useState(false);
-  const [imagePreviewTabs, setImagePreviewTabs] = useState<Record<string, 'composition' | 'raw'>>({});
+  const [imagePanelTabs, setImagePanelTabs] = useState<Record<string, 'image' | 'prompt'>>({});
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
   const [isMobileActionsMenuOpen, setIsMobileActionsMenuOpen] = useState(false);
   const [isScriptSidebarOpen, setIsScriptSidebarOpen] = useState(() => {
@@ -1238,20 +1239,8 @@ const Editor: React.FC<EditorProps> = ({
   }, [checkTtsHealth, ttsHealthError]);
 
   useEffect(() => {
-    apiGet<SlideTemplateOption[]>('/slide-templates')
-      .then((items) => {
-        setSlideTemplates(items);
-        setSelectedTemplateId((prev) => {
-          if (prev && items.some((item) => item.id === prev)) {
-            return prev;
-          }
-          return items.find((item) => item.kind === 'image')?.id ?? items[0]?.id ?? '';
-        });
-      })
-      .catch((err) => {
-        console.error(err);
-        setError(err.message ?? 'Failed to load templates.');
-      });
+    setSlideTemplates([]);
+    setSelectedTemplateId('');
 
     const agentQuery = dispatchAgentId ? `?agentId=${encodeURIComponent(dispatchAgentId)}` : '';
     apiGet<{ voices: TtsVoiceOption[] }>(`/tts/voices${agentQuery}`)
@@ -1404,12 +1393,11 @@ const Editor: React.FC<EditorProps> = ({
     apiGet<LegacyBlock[]>(`/lesson-versions/${selectedVersionId}/blocks`)
       .then((items) => {
         const mapped = items.map((block) => {
-          const onScreen = parseOnScreen(block.onScreenJson);
           const prompt = parseImagePrompt(block.imagePromptJson);
           return {
             id: block.id,
             number: String(block.index),
-            title: onScreen?.title ?? `Block ${block.index}`,
+            title: '',
             duration: '',
             status: mapLegacyStatus(block.status),
             thumbnail: '/lesson-placeholder.svg',
@@ -1418,8 +1406,8 @@ const Editor: React.FC<EditorProps> = ({
             originalText: block.sourceText ?? '',
             narratedText: block.ttsText ?? block.sourceText ?? '',
             onScreenText: {
-              title: onScreen?.title ?? '',
-              bullets: (onScreen?.bullets ?? []).map((item) => item ?? '')
+              title: '',
+              bullets: []
             },
             imagePrompt: {
               prompt: prompt?.block_prompt ?? '',
@@ -1444,34 +1432,16 @@ const Editor: React.FC<EditorProps> = ({
   }, [selectedVersionId]);
 
   useEffect(() => {
-    if (!selectedVersionId || !selectedTemplateId) {
-      setSlideAvailability({});
-      setSlideAvailabilityLoadedKey(null);
-      return;
-    }
-    const requestKey = `${selectedVersionId}:${selectedTemplateId}`;
+    setSlideAvailability({});
     setBrokenSlides({});
     setSlideAvailabilityLoadedKey(null);
-    apiGet<{ blocks: { blockId: string; exists: boolean }[] }>(
-      `/lesson-versions/${selectedVersionId}/slides?templateId=${selectedTemplateId}`,
-      { cacheMs: 0, dedupe: false }
-    )
-      .then((data) => {
-        const next: Record<string, boolean> = {};
-        data.blocks.forEach((item) => {
-          next[item.blockId] = item.exists;
-        });
-        setSlideAvailability(next);
-        setSlideAvailabilityLoadedKey(requestKey);
-      })
-      .catch((err) => {
-        console.error(err);
-        setSlideAvailability({});
-        setSlideAvailabilityLoadedKey(requestKey);
-      });
   }, [selectedVersionId, selectedTemplateId, assetsRevision]);
 
   useEffect(() => {
+    if (SLIDES_DISABLED_MVP) {
+      autoSlidesForTemplateSwitchRef.current = { key: null, armed: false };
+      return;
+    }
     if (!selectedVersionId || !selectedTemplateId) {
       hasInitializedTemplateSelectionRef.current = false;
       autoSlidesForTemplateSwitchRef.current = { key: null, armed: false };
@@ -2452,11 +2422,6 @@ const Editor: React.FC<EditorProps> = ({
     if (!lessonId) return;
     if (isGeneratingFinalVideo) return;
     const current = blocks.find((block) => block.id === id);
-    if (current && !hasOnScreenText(current)) {
-      setError(`O bloco ${current.number} está sem conteúdo on-screen. Preencha o título para regenerar o áudio.`);
-      scrollToBlock(current.id);
-      return;
-    }
     if (!(await ensureTtsReady())) return;
     invalidateFinalVideoLocal();
     const currentText = getNarratedDraft(id, current?.narratedText);
@@ -2491,47 +2456,11 @@ const Editor: React.FC<EditorProps> = ({
   }, [blocks, ensureTtsReady, getNarratedDraft, invalidateFinalVideoLocal, isGeneratingFinalVideo, lessonId, lessonVoiceId, saveNarratedText]);
 
   const handleGenerateSlides = async () => {
-    if (isGeneratingFinalVideo) return;
-    if (!selectedVersionId || !selectedTemplateId) {
-      setError('Select a template before generating slides.');
-      return;
-    }
-    const missingOnScreen = blocks.find((block) => !hasOnScreenText(block));
-    if (missingOnScreen) {
-      setError(`O bloco ${missingOnScreen.number} está sem conteúdo on-screen. Preencha o título para gerar slides.`);
-      scrollToBlock(missingOnScreen.id);
-      return;
-    }
-    setGeneratingStates((prev) => {
-      const next: typeof prev = {};
-      blocks.forEach((block) => {
-        next[block.id] = { ...prev[block.id], image: true };
-      });
-      return { ...prev, ...next };
-    });
-    setIsGeneratingAssets(true);
-    setAssetsJobMode('slides');
-    setSlidesPhase('waiting');
-    setSlidesProgress({ current: 0, total: blocks.length });
-    try {
-      const job = await apiPost<{ id: string; status: string }>(
-        `/lesson-versions/${selectedVersionId}/slides`,
-        { templateId: selectedTemplateId, clientId: dispatchAgentIdRef.current, requestId: crypto.randomUUID() }
-      );
-      setAssetsJobId(job.id);
-    } catch (err) {
-      console.error(err);
-      setError((err as Error).message ?? 'Failed to generate slides.');
-      setIsGeneratingAssets(false);
-      setAssetsJobMode('none');
-      setImagePhase('idle');
-      setImageProgress(null);
-      setSlidesPhase('idle');
-      setSlidesProgress(null);
-    }
+    setError('Slides are disabled in this MVP.');
   };
 
   useEffect(() => {
+    if (SLIDES_DISABLED_MVP) return;
     const autoState = autoSlidesForTemplateSwitchRef.current;
     if (!autoState.armed || !autoState.key) return;
     if (slideAvailabilityLoadedKey !== autoState.key) return;
@@ -2823,21 +2752,7 @@ const Editor: React.FC<EditorProps> = ({
       return;
     }
     if (action === 'generateSlides') {
-      if (hasHardLockGeneration) {
-        setError('Wait for block/final video generation to finish before generating slides.');
-        return;
-      }
-      if (blocks.length === 0) {
-        setError('No blocks available to generate slides.');
-        return;
-      }
-      if (missingOnScreenBlocks.length > 0) {
-        const first = missingOnScreenBlocks[0];
-        setError(`O bloco ${first.number} está sem conteúdo on-screen. Preencha para gerar slides.`);
-        scrollToBlock(first.id);
-        return;
-      }
-      handleGenerateSlides();
+      setError('Slides are disabled in this MVP.');
       return;
     }
     if (action === 'generateImages') {
@@ -2889,24 +2804,10 @@ const Editor: React.FC<EditorProps> = ({
           scrollToBlock(missingAudio.id);
           return;
         }
-        const missingSlides = missingSlideBlocksForFinal[0];
-        if (missingSlides) {
-          setError(`O bloco ${missingSlides.number} ainda não tem slide. Gere os slides antes do vídeo final.`);
-          scrollToBlock(missingSlides.id);
-          return;
-        }
-        if (templateRequiresImageAsset) {
-          const missingImageAsset = missingImageAssetsForFinal[0];
-          if (missingImageAsset) {
-            setError(`O bloco ${missingImageAsset.number} ainda não tem imagem. Gere as imagens para usar este template no vídeo final.`);
-            scrollToBlock(missingImageAsset.id);
-            return;
-          }
-        }
-        if (missingOnScreenBlocks.length > 0) {
-          const first = missingOnScreenBlocks[0];
-          setError(`O bloco ${first.number} está sem conteúdo on-screen. Ajuste o texto antes do vídeo final.`);
-          scrollToBlock(first.id);
+        const missingImageAsset = missingImageAssetsForFinal[0];
+        if (missingImageAsset) {
+          setError(`O bloco ${missingImageAsset.number} ainda não tem imagem. Gere as imagens antes do vídeo final.`);
+          scrollToBlock(missingImageAsset.id);
           return;
         }
         try {
@@ -3079,14 +2980,13 @@ const Editor: React.FC<EditorProps> = ({
   };
 
   const mergeLegacyBlock = (legacy: LegacyBlock) => {
-    const onScreen = parseOnScreen(legacy.onScreenJson);
     const prompt = parseImagePrompt(legacy.imagePromptJson);
     setBlocks((prev) => {
       const existingIndex = prev.findIndex((b) => b.id === legacy.id);
       const mapped: LessonBlock = {
         id: legacy.id,
         number: String(legacy.index),
-        title: onScreen?.title ?? `Block ${legacy.index}`,
+        title: '',
         duration: '',
         status: mapLegacyStatus(legacy.status),
         thumbnail: '/lesson-placeholder.svg',
@@ -3095,8 +2995,8 @@ const Editor: React.FC<EditorProps> = ({
         originalText: legacy.sourceText ?? '',
         narratedText: legacy.ttsText ?? legacy.sourceText ?? '',
         onScreenText: {
-          title: onScreen?.title ?? '',
-          bullets: (onScreen?.bullets ?? []).map((item) => item ?? '')
+          title: '',
+          bullets: []
         },
         imagePrompt: {
           prompt: prompt?.block_prompt ?? '',
@@ -3124,6 +3024,114 @@ const Editor: React.FC<EditorProps> = ({
       return next;
     });
   };
+
+  useEffect(() => {
+    const activeStreams = [
+      segmentJobId ? { jobId: segmentJobId, kind: 'segment' as const } : null,
+      ttsJobId ? { jobId: ttsJobId, kind: 'tts' as const } : null,
+      assetsJobId ? { jobId: assetsJobId, kind: assetsJobMode === 'slides' ? 'render_slide' as const : 'image' as const } : null,
+      finalVideoJobId ? { jobId: finalVideoJobId, kind: 'concat_video' as const } : null
+    ].filter((item): item is { jobId: string; kind: 'segment' | 'tts' | 'image' | 'render_slide' | 'concat_video' } => Boolean(item));
+
+    if (activeStreams.length === 0) return;
+
+    const sources: EventSource[] = [];
+    const parseData = (event: Event) => {
+      const msg = event as MessageEvent;
+      try {
+        return JSON.parse(msg.data) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    };
+
+    for (const stream of activeStreams) {
+      const es = new EventSource(`${API_BASE}/jobs/${stream.jobId}/stream`, { withCredentials: true });
+      sources.push(es);
+
+      es.addEventListener('block', (event) => {
+        const data = parseData(event);
+        const block = (data?.block ?? null) as LegacyBlock | null;
+        if (!block) return;
+        if (selectedVersionIdRef.current && block.lessonVersionId !== selectedVersionIdRef.current) return;
+        mergeLegacyBlock(block);
+      });
+
+      es.addEventListener('audio_block', (event) => {
+        const data = parseData(event);
+        const blockId = typeof data?.blockId === 'string' ? data.blockId : '';
+        if (!blockId) return;
+        setAudioUrls((prev) => ({ ...prev, [blockId]: `/blocks/${blockId}/audio/raw` }));
+        setAudioRevisions((prev) => ({ ...prev, [blockId]: (prev[blockId] ?? 0) + 1 }));
+      });
+
+      es.addEventListener('image', (event) => {
+        const data = parseData(event);
+        const blockId = typeof data?.blockId === 'string' ? data.blockId : '';
+        if (!blockId) return;
+        invalidateSlidesForBlocks([blockId]);
+        setBrokenRawImages((prev) => ({ ...prev, [blockId]: false }));
+        clearBrokenSlidesForBlocks([blockId]);
+        setImageUrls((prev) => ({ ...prev, [blockId]: `/blocks/${blockId}/image/raw` }));
+        setImageRevisions((prev) => ({ ...prev, [blockId]: (prev[blockId] ?? 0) + 1 }));
+      });
+
+      es.addEventListener('progress', (event) => {
+        const data = parseData(event);
+        const index = typeof data?.index === 'number' ? data.index : null;
+        const total = typeof data?.total === 'number' ? data.total : null;
+        if (index === null || total === null) return;
+        if (stream.kind === 'segment') {
+          setSegmentPhase('running');
+          setSegmentProgress({ current: index, total });
+          return;
+        }
+        if (stream.kind === 'tts') {
+          setTtsPhase('running');
+          setTtsProgress({ current: index, total });
+          return;
+        }
+        if (stream.kind === 'image') {
+          setImagePhase('running');
+          setImageProgress({ current: index, total });
+          return;
+        }
+        if (stream.kind === 'render_slide') {
+          setSlidesPhase('running');
+          setSlidesProgress({ current: index, total });
+          return;
+        }
+        if (stream.kind === 'concat_video') {
+          setFinalVideoPhase('running');
+          setFinalVideoProgress({ current: index, total });
+        }
+      });
+
+      es.addEventListener('final_video', (event) => {
+        const data = parseData(event);
+        const url = typeof data?.url === 'string' ? data.url : '';
+        if (!url) return;
+        setFinalVideoUrl(`${API_BASE}${url}?v=${Date.now()}`);
+      });
+
+      es.addEventListener('done', () => {
+        es.close();
+      });
+    }
+
+    return () => {
+      sources.forEach((source) => source.close());
+    };
+  }, [
+    assetsJobId,
+    assetsJobMode,
+    clearBrokenSlidesForBlocks,
+    finalVideoJobId,
+    invalidateSlidesForBlocks,
+    mergeLegacyBlock,
+    segmentJobId,
+    ttsJobId
+  ]);
 
   // 6.8.2.6.13: editor job lifecycle uses WS-only events (`vizlec:ws`).
 
@@ -3304,15 +3312,9 @@ const Editor: React.FC<EditorProps> = ({
     isAnyGenerationRunning ||
     blocks.length === 0 ||
     missingAudioBlocksForFinal.length > 0 ||
-    missingSlideBlocksForFinal.length > 0 ||
-    (templateRequiresImageAsset && missingImageAssetsForFinal.length > 0);
+    missingImageAssetsForFinal.length > 0;
   const isAudioReviewDisabled = audioReviewPlayableCount === 0 || isAnyGenerationRunning || isGeneratingFinalVideo;
   const contentValidationAlerts = [
-    ...missingOnScreenBlocks.map((block) => ({
-      key: `missing-onscreen-${block.id}`,
-      blockId: block.id,
-      message: `${block.number}: falta conteúdo on-screen (título).`
-    })),
     ...missingImagePromptBlocks.map((block) => ({
       key: `missing-prompt-${block.id}`,
       blockId: block.id,
@@ -3321,8 +3323,6 @@ const Editor: React.FC<EditorProps> = ({
   ];
   const mobileStatusLabel = isGeneratingFinalVideo
     ? 'Final video in progress'
-    : showTopSlidesBusy
-    ? `Slides ${topSlidesProgressLabel}`
     : showTopImageBusy
     ? `Images ${topImageProgressLabel}`
     : showTopTtsBusy
@@ -3927,7 +3927,7 @@ const Editor: React.FC<EditorProps> = ({
                         </button>
                       </div>
                       <div className="mt-0.5 pl-1 text-[11px] font-semibold text-foreground/80 line-clamp-2 leading-snug">
-                        {block.title}
+                        {(block.narratedText || block.originalText || '').trim()}
                       </div>
                     </div>
                   );
@@ -4295,29 +4295,6 @@ const Editor: React.FC<EditorProps> = ({
                     </button>
                   )}
 
-                  {showTopSlidesBusy ? (
-                    <button
-                      onClick={() => {
-                        setIsSlidesBatchCancelConfirmOpen(true);
-                        setIsMobileActionsMenuOpen(false);
-                      }}
-                      className="w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300"
-                    >
-                      Stop slides ({topSlidesProgressLabel})
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        handleGlobalAction('generateSlides');
-                        setIsMobileActionsMenuOpen(false);
-                      }}
-                      disabled={isGenerateSlidesDisabled}
-                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-indigo-500/20 bg-indigo-500/10 text-muted-foreground ${toolbarDisabledLikeAudioReview}`}
-                    >
-                      Generate slides
-                    </button>
-                  )}
-
                   {hasFinalVideoReady ? (
                     <a
                       href={finalVideoLink}
@@ -4509,47 +4486,6 @@ const Editor: React.FC<EditorProps> = ({
             </button>
           )}
 
-          {showTopSlidesBusy ? (
-            <div className="flex items-center h-8 rounded-[6px] border border-orange-500/35 bg-orange-500/10 shadow-sm overflow-hidden">
-              <div className="relative overflow-hidden flex items-center gap-2 px-3 h-8 text-[10px] font-bold text-orange-700 dark:text-orange-300 min-w-[180px]">
-                {topSlidesTotal > 0 && (
-                  <div
-                    className="absolute inset-y-0 left-0 bg-orange-500/25 transition-all duration-300"
-                    style={{
-                      width: `${topSlidesProgressWidth}%`
-                    }}
-                  />
-                )}
-                <span className="relative z-10 flex items-center gap-2 w-full">
-                  <RefreshCw size={14} className={slidesPhase === 'running' ? 'animate-spin' : ''} />
-                  <span className="truncate">
-                    {slidesPhase === 'waiting' ? 'Preparing slides...' : 'Generating slides...'}
-                  </span>
-                  {topSlidesTotal > 0 && (
-                    <span className="ml-auto inline-flex items-center rounded-[4px] bg-black/35 px-1.5 py-0.5 text-[9px] leading-none text-orange-200 tabular-nums">
-                      {topSlidesProgressLabel}
-                    </span>
-                  )}
-                </span>
-              </div>
-              <button
-                onClick={() => setIsSlidesBatchCancelConfirmOpen(true)}
-                className="h-8 px-2.5 text-[10px] font-bold rounded-r-[6px] border-l border-orange-500/30 bg-[rgba(239,68,68,0.08)] text-red-600 dark:text-red-100 hover:bg-[rgba(239,68,68,0.14)] hover:text-red-700 dark:hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button 
-              onClick={() => handleGlobalAction('generateSlides')}
-              disabled={isGenerateSlidesDisabled}
-              className={`flex items-center gap-2 px-3 h-8 bg-indigo-500/10 border border-indigo-500/20 rounded-[5px] text-[10px] font-bold text-muted-foreground hover:bg-indigo-500/15 transition-all shadow-sm ${toolbarDisabledLikeAudioReview}`}
-            >
-              <MonitorPlay size={14} className="text-current" />
-              Generate Slides
-            </button>
-          )}
-
           {/* Right Divider */}
           <div className="h-4 w-[1px] bg-[hsl(var(--editor-border))]/60"></div>
 
@@ -4698,7 +4634,6 @@ const Editor: React.FC<EditorProps> = ({
                 <div className="px-2 py-1 bg-primary/10 text-primary border border-primary/20 text-[10px] font-bold rounded-[5px] shadow-sm transition-colors">
                   {block.number}
                 </div>
-                <h3 className="text-[17px] font-medium text-foreground/30 dark:text-foreground/30">{block.title}</h3>
                 {audioReviewActive && audioReviewQueueSet.has(block.id) && (
                   <span
                     className={`px-2 py-1 text-[9px] font-bold uppercase tracking-widest rounded-[5px] border ${
@@ -4718,7 +4653,7 @@ const Editor: React.FC<EditorProps> = ({
                 )}
               </div>
 
-              <div className="bg-[hsl(var(--editor-surface))] border border-[hsl(var(--editor-border))] rounded-[5px] flex gap-6 overflow-hidden min-h-[600px]">
+              <div className="bg-[hsl(var(--editor-surface))] border border-[hsl(var(--editor-border))] rounded-[5px] flex gap-6 overflow-hidden min-h-[360px]">
                 {/** Overlay state for regeneration */}
                 {/** Keep inside each column for proper scroll and interaction lock */}
                 {/* Block editing section (left) */}
@@ -4767,22 +4702,6 @@ const Editor: React.FC<EditorProps> = ({
                   </div>
                 </section>
 
-                {/* 2. On-Screen Content Section */}
-                <section className="space-y-6 text-foreground">
-                  <div className="flex items-center justify-between border-b border-dashed border-[hsl(var(--editor-border))] pb-3">
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                      <Type size={14} className="text-orange-600" />
-                      On-Screen Content
-                    </div>
-                  </div>
-                  <OnScreenEditor
-                    blockId={block.id}
-                    value={block.onScreenText}
-                    onSave={saveOnScreen}
-                    disabled={Boolean(generatingStates[block.id]?.text || isGeneratingFinalVideo)}
-                    invalid={blockMissingOnScreen}
-                  />
-                </section>
               </div>
 
                 <div className="self-stretch border-l border-dashed border-[hsl(var(--editor-border))]/60"></div>
@@ -4790,100 +4709,51 @@ const Editor: React.FC<EditorProps> = ({
                 {/* Preview and Image Forge section (right) */}
                 <div className="w-[400px] bg-[hsl(var(--editor-surface))] p-8 flex flex-col gap-5 overflow-y-auto custom-scrollbar border-[hsl(var(--editor-border))] relative">
                 {(() => {
-                  const activeImageTab = imagePreviewTabs[block.id] ?? 'composition';
-                  const showingComposition = activeImageTab === 'composition';
+                  const currentImagePanelTab = imagePanelTabs[block.id] ?? 'image';
                   return (
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3 pb-2">
-                        <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                          <ImageIcon size={13} className="text-orange-600/80" />
-                          AI Image Generation
+                      <div className="flex items-center justify-between gap-2 p-1 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/40">
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setImagePanelTabs((prev) => ({ ...prev, [block.id]: 'image' }))}
+                            className={`h-8 px-3 rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                              currentImagePanelTab === 'image'
+                                ? 'bg-orange-600 text-white'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            Image
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setImagePanelTabs((prev) => ({ ...prev, [block.id]: 'prompt' }))}
+                            className={`h-8 px-3 rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                              currentImagePanelTab === 'prompt'
+                                ? 'bg-orange-600 text-white'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            Prompt
+                          </button>
                         </div>
-                        <div className="flex items-center gap-2">
+                        {currentImagePanelTab === 'prompt' ? (
                           <button
                             onClick={() => handleRegenerateImage(block.id)}
                             disabled={Boolean(generatingStates[block.id]?.image || isTextGenerationBusy || isGeneratingFinalVideo || blockMissingPrompt)}
                             title={blockMissingPrompt ? 'Preencha o prompt de imagem deste bloco para gerar a imagem.' : 'Generate image'}
-                            className={`flex items-center gap-2 px-3 h-9 bg-transparent border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[10px] font-bold text-muted-foreground transition-all shadow-sm ${
+                            className={`flex items-center gap-2 px-3 h-8 bg-transparent border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[10px] font-bold text-muted-foreground transition-all shadow-sm ${
                               generatingStates[block.id]?.image ? '' : 'hover:text-orange-600'
                             }`}
                           >
                             <RefreshCw size={14} className={`${generatingStates[block.id]?.image ? 'animate-spin text-orange-600' : 'text-muted-foreground'}`} />
                             Generate
                           </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setImagePreviewTabs((prev) => ({
-                                ...prev,
-                                [block.id]: showingComposition ? 'raw' : 'composition'
-                              }))
-                            }
-                            title={
-                              showingComposition
-                                ? 'Olho aberto: visão final do slide. Clique para ver a imagem IA.'
-                                : 'Olho fechado: imagem gerada pela IA. Clique para ver a composição final.'
-                            }
-                            aria-label={
-                              showingComposition
-                                ? 'Mostrar imagem gerada pela IA'
-                                : 'Mostrar composição final'
-                            }
-                            className="h-9 w-9 inline-flex items-center justify-center rounded-[6px] border border-[hsl(var(--editor-input-border))] text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            {showingComposition ? <Eye size={15} /> : <EyeOff size={15} />}
-                          </button>
-                        </div>
+                        ) : <div className="w-[94px]" />}
                       </div>
 
-                      {activeImageTab === 'composition' ? (
-                        <div className={`relative group/composition aspect-video rounded-[6px] overflow-hidden border border-border ${currentTemplate.previewColor} shadow-md`}>
-                          {block.slideUrl && !isSlideBrokenForActiveTemplate(block.id) ? (
-                            <img 
-                              src={block.slideUrl} 
-                              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 cursor-zoom-in opacity-100"
-                              alt="Slide"
-                              onClick={() => onImageClick?.(block.slideUrl || '')}
-                              onError={() => markBrokenSlideForActiveTemplate(block.id)}
-                            />
-                          ) : null}
-                          
-                          <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover/composition:opacity-100 transition-all z-20">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); onImageClick?.(block.slideUrl || ''); }}
-                              className="p-1.5 bg-black/50 hover:bg-orange-600 text-white rounded-md backdrop-blur-sm"
-                              title="View full composition"
-                            >
-                              <Maximize2 size={14} />
-                            </button>
-                            <a 
-                              href={block.slideUrl || undefined} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="p-1.5 bg-black/50 hover:bg-orange-600 text-white rounded-md backdrop-blur-sm"
-                              title="Download raw asset"
-                            >
-                              <ExternalLink size={14} />
-                            </a>
-                          </div>
-
-                          <div className={`absolute inset-0 p-6 flex flex-col pointer-events-none ${
-                            currentTemplate.layout === 'centered' ? 'items-center justify-center text-center' :
-                            currentTemplate.layout === 'split' ? 'items-start justify-center bg-gradient-to-r from-black/80 to-transparent pr-24' :
-                            'items-start justify-end bg-gradient-t-from-black/80 via-black/20 to-transparent'
-                          }`}>
-                            <h4 className="text-lg font-bold text-white mb-3 leading-tight drop-shadow-lg">{block.onScreenText.title}</h4>
-                            <ul className="space-y-1.5">
-                              {block.onScreenText.bullets.map((b, i) => (
-                                <li key={`preview-bullet-${block.id}-${i}`} className="flex items-center gap-2 text-[9px] font-medium text-white/80 drop-shadow">
-                                  <div className="w-1 h-1 bg-orange-400 rounded-full" /> {b}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="relative group/asset aspect-video rounded-[6px] overflow-hidden border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] shadow-sm">
+                      {currentImagePanelTab === 'image' ? (
+                      <div className="relative group/asset aspect-video rounded-[6px] overflow-hidden border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] shadow-sm">
                           {!brokenRawImages[block.id] && (block.rawImageUrl || block.generatedImageUrl) ? (
                             <img 
                               src={block.rawImageUrl || block.generatedImageUrl} 
@@ -4921,21 +4791,20 @@ const Editor: React.FC<EditorProps> = ({
                             </div>
                           )}
                         </div>
+                      ) : (
+                        <section className="space-y-3 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] p-4">
+                          <ImagePromptEditor
+                            blockId={block.id}
+                            value={block.imagePrompt}
+                            onSave={saveImagePrompt}
+                            disabled={Boolean(generatingStates[block.id]?.text || isTextGenerationBusy || isGeneratingFinalVideo)}
+                            invalid={blockMissingPrompt}
+                          />
+                        </section>
                       )}
                     </div>
                   );
                 })()}
-
-                {/* 3. AI Image Prompt */}
-                <section className="space-y-3 pt-2 border-t border-dashed border-[hsl(var(--editor-border))]">
-                  <ImagePromptEditor
-                    blockId={block.id}
-                    value={block.imagePrompt}
-                    onSave={saveImagePrompt}
-                    disabled={Boolean(generatingStates[block.id]?.text || isTextGenerationBusy || isGeneratingFinalVideo)}
-                    invalid={blockMissingPrompt}
-                  />
-                </section>
                 </div>
               </div>
             </div>
@@ -5089,7 +4958,7 @@ const Editor: React.FC<EditorProps> = ({
                             ? 'text-foreground/40'
                             : 'text-muted-foreground/50 group-hover:text-foreground/40'
                       }`}>
-                        {block.title}
+                        {(block.narratedText || block.originalText || '').trim()}
                       </p>
                     </div>
                     {hasError ? (

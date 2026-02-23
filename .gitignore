@@ -68,3 +68,4 @@ coverage/
 # Local media scratch/work dirs (keep source assets if needed)
 assets/generated/
 assets/tmp/
+migration/vizlec_runtime/data/courses/

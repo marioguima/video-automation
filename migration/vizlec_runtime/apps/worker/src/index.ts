@@ -1636,73 +1636,10 @@ async function handleWorkerCommandRequest(
   }
 
   if (request.payload.command === "block_slide_get") {
-    const blockId =
-      typeof request.payload.params?.blockId === "string"
-        ? request.payload.params.blockId.trim()
-        : "";
-    const templateId =
-      typeof request.payload.params?.templateId === "string"
-        ? request.payload.params.templateId.trim()
-        : "";
-    if (!blockId) {
-      return {
-        command: "block_slide_get",
-        statusCode: 400,
-        data: { error: "blockId is required" }
-      };
-    }
-    if (!templateId) {
-      return {
-        command: "block_slide_get",
-        statusCode: 400,
-        data: { error: "templateId is required" }
-      };
-    }
-    const template = await prisma.slideTemplate.findUnique({
-      where: { id: templateId }
-    });
-    if (!template || !template.isActive) {
-      return {
-        command: "block_slide_get",
-        statusCode: 404,
-        data: { error: "template not found" }
-      };
-    }
-    const assets = await prisma.asset.findMany({
-      where: { blockId, kind: "slide_png", templateId: template.id },
-      orderBy: { createdAt: "desc" }
-    });
-    let slidePath: string | null = null;
-    for (const item of assets) {
-      if (item.path && fs.existsSync(item.path)) {
-        slidePath = item.path;
-        break;
-      }
-    }
-    if (!slidePath) {
-      const block = await resolveBlockContext(blockId);
-      if (!block || !block.lessonVersion?.lesson?.module?.course) {
-        return {
-          command: "block_slide_get",
-          statusCode: 404,
-          data: { error: "slide not found" }
-        };
-      }
-      return {
-        command: "block_slide_get",
-        statusCode: 404,
-        data: { error: "slide not found" }
-      };
-    }
-    const body = await fs.promises.readFile(slidePath);
     return {
       command: "block_slide_get",
-      statusCode: 200,
-      data: {
-        contentType: "image/png",
-        bodyBase64: body.toString("base64"),
-        contentLength: body.length
-      }
+      statusCode: 410,
+      data: { error: "slides_disabled_in_mvp" }
     };
   }
 
@@ -1765,7 +1702,7 @@ async function handleWorkerCommandRequest(
     statusCode: 200 | 201 | 400 | 404;
     data: Record<string, unknown>;
   }> => {
-    const { versionId, templateId, clientId, requestId } = params;
+    const { versionId, clientId, requestId } = params;
     const version = await prisma.lessonVersion.findUnique({
       where: { id: versionId },
       include: {
@@ -1785,18 +1722,6 @@ async function handleWorkerCommandRequest(
         statusCode: 400,
         data: { error: "no blocks available to render final video" }
       };
-    }
-    if (templateId) {
-      const template = await prisma.slideTemplate.findUnique({
-        where: { id: templateId }
-      });
-      if (!template || !template.isActive) {
-        return {
-          command: "lesson_version_final_video_post",
-          statusCode: 404,
-          data: { error: "template not found" }
-        };
-      }
     }
     if (requestId) {
       const existingByRequest = await prisma.job.findFirst({
@@ -1864,7 +1789,8 @@ async function handleWorkerCommandRequest(
         status: "pending",
         clientId,
         requestId,
-        templateId: templateId || null
+        // Final video MVP in this sandbox is image-only (no slide/template dependency).
+        templateId: null
       }
     });
     requestWorkerWake("enqueue_final_video:created");
@@ -2007,54 +1933,11 @@ async function handleWorkerCommandRequest(
   };
 
   if (request.payload.command === "lesson_version_slides_post") {
-    const versionId =
-      typeof request.payload.params?.versionId === "string"
-        ? request.payload.params.versionId.trim()
-        : "";
-    const templateId =
-      typeof request.payload.params?.templateId === "string"
-        ? request.payload.params.templateId.trim()
-        : "";
-    const clientId =
-      typeof request.payload.params?.clientId === "string"
-        ? request.payload.params.clientId.trim()
-        : null;
-    const requestId =
-      typeof request.payload.params?.requestId === "string"
-        ? request.payload.params.requestId.trim()
-        : null;
-
-    if (!versionId) {
-      return {
-        command: "lesson_version_slides_post",
-        statusCode: 400,
-        data: { error: "lesson version not found" }
-      };
-    }
-    const version = await prisma.lessonVersion.findUnique({ where: { id: versionId } });
-    if (!version) {
-      return {
-        command: "lesson_version_slides_post",
-        statusCode: 404,
-        data: { error: "lesson version not found" }
-      };
-    }
-    if (!templateId) {
-      return {
-        command: "lesson_version_slides_post",
-        statusCode: 400,
-        data: { error: "templateId is required" }
-      };
-    }
-    const template = await prisma.slideTemplate.findUnique({ where: { id: templateId } });
-    if (!template || !template.isActive) {
-      return {
-        command: "lesson_version_slides_post",
-        statusCode: 404,
-        data: { error: "template not found" }
-      };
-    }
-    return enqueueRenderSlideJob({ versionId, templateId, clientId, requestId });
+    return {
+      command: "lesson_version_slides_post",
+      statusCode: 410,
+      data: { error: "slides_disabled_in_mvp" }
+    };
   }
 
   if (request.payload.command === "lesson_version_final_video_post") {
@@ -2062,7 +1945,7 @@ async function handleWorkerCommandRequest(
       typeof request.payload.params?.versionId === "string"
         ? request.payload.params.versionId.trim()
         : "";
-    const templateId =
+    const _templateIdIgnoredInMvp =
       typeof request.payload.params?.templateId === "string"
         ? request.payload.params.templateId.trim()
         : null;
@@ -2081,7 +1964,7 @@ async function handleWorkerCommandRequest(
         data: { error: "lesson version not found" }
       };
     }
-    return enqueueFinalVideoJob({ versionId, templateId, clientId, requestId });
+    return enqueueFinalVideoJob({ versionId, templateId: null, clientId, requestId });
   }
 
   const enqueueLessonImageJob = async (params: {
@@ -2446,94 +2329,10 @@ async function handleWorkerCommandRequest(
   }
 
   if (request.payload.command === "lesson_version_slides_list") {
-    const versionId =
-      typeof request.payload.params?.versionId === "string"
-        ? request.payload.params.versionId.trim()
-        : "";
-    const templateId =
-      typeof request.payload.params?.templateId === "string"
-        ? request.payload.params.templateId.trim()
-        : "";
-    if (!versionId) {
-      return {
-        command: "lesson_version_slides_list",
-        statusCode: 400,
-        data: { error: "versionId is required" }
-      };
-    }
-    if (!templateId) {
-      return {
-        command: "lesson_version_slides_list",
-        statusCode: 400,
-        data: { error: "templateId is required" }
-      };
-    }
-    const template = await prisma.slideTemplate.findUnique({
-      where: { id: templateId }
-    });
-    if (!template || !template.isActive) {
-      return {
-        command: "lesson_version_slides_list",
-        statusCode: 404,
-        data: { error: "template not found" }
-      };
-    }
-    const version = await prisma.lessonVersion.findUnique({
-      where: { id: versionId },
-      include: {
-        lesson: {
-          include: {
-            module: {
-              include: {
-                course: true
-              }
-            }
-          }
-        }
-      }
-    });
-    if (!version?.lesson?.module?.course) {
-      return {
-        command: "lesson_version_slides_list",
-        statusCode: 404,
-        data: { error: "lesson version not found" }
-      };
-    }
-    const blocks = await prisma.block.findMany({
-      where: { lessonVersionId: versionId },
-      select: { id: true, index: true },
-      orderBy: { index: "asc" }
-    });
-    const blockIds = blocks.map((block) => block.id);
-    const slideAssets =
-      blockIds.length === 0
-        ? []
-        : await prisma.asset.findMany({
-            where: {
-              blockId: { in: blockIds },
-              kind: "slide_png",
-              templateId: template.id
-            },
-            orderBy: { createdAt: "desc" }
-          });
-    const availableByBlock = new Set<string>();
-    for (const asset of slideAssets) {
-      if (!asset.blockId || availableByBlock.has(asset.blockId)) continue;
-      if (asset.path && fs.existsSync(asset.path)) {
-        availableByBlock.add(asset.blockId);
-      }
-    }
     return {
       command: "lesson_version_slides_list",
-      statusCode: 200,
-      data: {
-        templateId: template.id,
-        blocks: blocks.map((block) => ({
-          blockId: block.id,
-          index: block.index,
-          exists: availableByBlock.has(block.id)
-        }))
-      }
+      statusCode: 410,
+      data: { error: "slides_disabled_in_mvp" }
     };
   }
 
@@ -5077,10 +4876,9 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     job
   });
   await notifyRunningPhase(job, "cleanup");
-  const templateId = job.templateId?.trim() || null;
   logJobEvent("concat_video_started", job, {
     block_count: version.blocks.length,
-    template_id: templateId
+    visual_mode: "image_raw_only"
   });
   await notifyRunningPhase(job, "generation");
 
@@ -5095,17 +4893,19 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       throw new Error(`audio not found for block ${block.index}`);
     }
 
-    const slideAsset = await prisma.asset.findFirst({
+    const imageAsset = await prisma.asset.findFirst({
       where: {
-        kind: "slide_png",
-        blockId: block.id,
-        templateId: templateId ?? undefined
+        kind: "image_raw",
+        blockId: block.id
       },
       orderBy: { createdAt: "desc" }
     });
-    if (!slideAsset?.path || !fs.existsSync(slideAsset.path)) {
-      const templateHint = templateId ? ` (template ${templateId})` : "";
-      throw new Error(`slide not found for block ${block.index}${templateHint}`);
+    const visualAsset =
+      imageAsset?.path && fs.existsSync(imageAsset.path)
+        ? { kind: "image_raw" as const, path: imageAsset.path }
+        : null;
+    if (!visualAsset) {
+      throw new Error(`image not found for block ${block.index}`);
     }
 
     const clipDir = blockClipDir(
@@ -5116,7 +4916,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       block.index
     );
     ensureDir(clipDir);
-    const clipPath = path.join(clipDir, templateId ? `clip_${templateId}.mp4` : "clip.mp4");
+    const clipPath = path.join(clipDir, "clip.mp4");
 
     await runProcess(
       "ffmpeg",
@@ -5127,7 +4927,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
         "-framerate",
         "30",
         "-i",
-        slideAsset.path,
+        visualAsset.path,
         "-i",
         audioAsset.path,
         "-c:v",
@@ -5161,11 +4961,11 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
         blockId: block.id,
         kind: "clip_mp4",
         path: clipPath,
-        templateId,
+        templateId: null,
         metaJson: JSON.stringify({
-          templateId,
           sourceAudioPath: audioAsset.path,
-          sourceSlidePath: slideAsset.path
+          sourceVisualKind: visualAsset.kind,
+          sourceVisualPath: visualAsset.path
         })
       }
     });
@@ -5189,7 +4989,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     `${clipPaths.map((clipPath) => toConcatFileEntry(clipPath)).join("\n")}\n`,
     "utf8"
   );
-  const outputPath = path.join(finalDir, templateId ? `final_${templateId}.mp4` : "final.mp4");
+  const outputPath = path.join(finalDir, "final.mp4");
   const totalDurationSeconds = version.blocks.reduce((acc, block) => {
     const duration = typeof block.audioDurationS === "number" ? block.audioDurationS : 0;
     return acc + (Number.isFinite(duration) && duration > 0 ? duration : 0);
@@ -5255,21 +5055,21 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       blockId: version.blocks[0].id,
       kind: "final_mp4",
       path: outputPath,
-      templateId,
+      templateId: null,
       metaJson: JSON.stringify({
-        templateId,
-        blockCount: version.blocks.length
+        blockCount: version.blocks.length,
+        visualMode: "image_raw_only"
       })
     }
   });
 
-  const manifestPath = path.join(finalDir, templateId ? `manifest_${templateId}.json` : "manifest.json");
+  const manifestPath = path.join(finalDir, "manifest.json");
   await fs.promises.writeFile(
     manifestPath,
     JSON.stringify(
       {
         generatedAt: new Date().toISOString(),
-        templateId,
+        visualMode: "image_raw_only",
         blockCount: version.blocks.length,
         clips: version.blocks.map((block, idx) => ({
           blockId: block.id,
@@ -5295,13 +5095,13 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       blockId: version.blocks[0].id,
       kind: "manifest_json",
       path: manifestPath,
-      templateId
+      templateId: null
     }
   });
   logJobEvent("concat_video_completed", job, {
     output_path: outputPath,
     block_count: version.blocks.length,
-    template_id: templateId
+    visual_mode: "image_raw_only"
   });
 }
 
@@ -5836,7 +5636,7 @@ async function generateBlocksForVersion(options: {
           ttsText: sanitizeNarratedScriptText(draft.sourceText),
           wordCount: draft.wordCount,
           durationEstimateS: draft.durationEstimateS,
-          onScreenJson: JSON.stringify(result.meta.onScreen),
+          onScreenJson: null,
           imagePromptJson: JSON.stringify(result.meta.imagePrompt),
           segmentMs: Math.round(result.ms),
           segmentError: null,
@@ -5920,7 +5720,7 @@ async function generateBlocksForVersion(options: {
           await prisma.block.updateMany({
             where: { lessonVersionId: versionId, index: draft.index },
             data: {
-              onScreenJson: JSON.stringify(result.meta.onScreen),
+              onScreenJson: null,
               imagePromptJson: JSON.stringify(result.meta.imagePrompt),
               segmentMs: Math.round(result.ms),
               segmentError: null,
@@ -6480,22 +6280,7 @@ async function generateComfyImagesForBlocks(options: {
         prompt_chars: prompt.length
       });
 
-      if (template) {
-        await renderSlideForSingleBlock({
-          job,
-          template,
-          block: {
-            id: block.id,
-            index: block.index,
-            onScreenJson: block.onScreenJson,
-            workspaceId: block.workspaceId
-          },
-          courseId,
-          moduleId,
-          lessonId,
-          versionId
-        });
-      }
+      // Slides are disabled in MVP: image generation persists only `image_raw`.
     }
 
     logJobEvent("image_generation_completed", job, { block_count: blocks.length });
@@ -6571,51 +6356,15 @@ async function runJob(job: JobRecord): Promise<void> {
       return;
     }
     case "render_slide": {
-      if (!job.templateId) {
-        throw new Error("render_slide job missing templateId");
-      }
-      if (!job.lessonVersionId) {
-        throw new Error("render_slide job missing lessonVersionId");
-      }
-      const template = await resolveSlideTemplateById(job.templateId);
-      if (!template || !template.isActive) {
-        throw new Error("slide template not found");
-      }
-      await clearFinalVideoAssetsForVersion(job.lessonVersionId, {
-        reason: "render_slide",
-        job
-      });
-      await renderSlidesForTemplate({ job, template });
+      throw new Error("slides_disabled_in_mvp");
       return;
     }
     case "render_slide_text": {
-      if (!job.lessonVersionId) {
-        throw new Error("render_slide_text job missing lessonVersionId");
-      }
-      const template = await resolveDefaultSlideTemplate("text");
-      if (!template) {
-        throw new Error("default text template not found");
-      }
-      await clearFinalVideoAssetsForVersion(job.lessonVersionId, {
-        reason: "render_slide_text",
-        job
-      });
-      await renderSlidesForTemplate({ job, template });
+      throw new Error("slides_disabled_in_mvp");
       return;
     }
     case "render_slide_image": {
-      if (!job.lessonVersionId) {
-        throw new Error("render_slide_image job missing lessonVersionId");
-      }
-      const template = await resolveDefaultSlideTemplate("image");
-      if (!template) {
-        throw new Error("default image template not found");
-      }
-      await clearFinalVideoAssetsForVersion(job.lessonVersionId, {
-        reason: "render_slide_image",
-        job
-      });
-      await renderSlidesForTemplate({ job, template });
+      throw new Error("slides_disabled_in_mvp");
       return;
     }
     case "segment_block": {
@@ -6662,7 +6411,7 @@ async function runJob(job: JobRecord): Promise<void> {
       await prisma.block.update({
         where: { id: block.id },
         data: {
-          onScreenJson: JSON.stringify(result.meta.onScreen),
+          onScreenJson: null,
           imagePromptJson: JSON.stringify(result.meta.imagePrompt),
           segmentMs: Math.round(result.ms),
           segmentError: null,
