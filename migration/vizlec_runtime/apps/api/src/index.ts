@@ -9304,11 +9304,14 @@ fastify.get(
               }
             }
           });
-          if (blocks.length !== lastBlockCount) {
-            lastBlockCount = blocks.length;
+          const processedCount = blocks.reduce((sum, block) => {
+            return sum + (block.status === "segmentation_done" || block.status === "segment_error" ? 1 : 0);
+          }, 0);
+          if (processedCount !== lastBlockCount) {
+            lastBlockCount = processedCount;
             sendEvent(JOB_STREAM_EVENT.PROGRESS, {
               index: lastBlockCount,
-              total: expectedBlocks ?? lastBlockCount
+              total: expectedBlocks ?? blocks.length ?? lastBlockCount
             });
           }
         }
