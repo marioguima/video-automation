@@ -163,13 +163,15 @@ function logJobEvent(event: string, job: JobRecord, extra: Record<string, unknow
     event === "job_failed_retrying" ||
     event === "job_succeeded" ||
     event === "job_failed" ||
-    event === "job_canceled";
+    event === "job_canceled" ||
+    typeof extra.progressPercent === "number";
   if (shouldNotifyApi) {
     void (async () => {
       const resolvedCorrelationId = correlationId || (await ensureJobCorrelationId(job));
       const lifecycle = mapLifecycleFromLogEvent(event) ?? undefined;
       await notifyApiJobEvent(job.id, resolvedCorrelationId, {
-        lifecycle
+        lifecycle,
+        progressPercent: typeof extra.progressPercent === "number" ? extra.progressPercent : undefined
       });
     })();
   }
@@ -5786,7 +5788,8 @@ async function generateBlocksForVersion(options: {
             });
         logJobEvent("segment_block_saved", job, {
           block_index: saved.index,
-          duration_ms: result.ms
+          duration_ms: result.ms,
+          progressPercent: Math.round((draft.index / Math.max(1, drafts.length)) * 100)
         });
       } catch (err) {
         const created = await prisma.block.findFirst({
@@ -5820,7 +5823,8 @@ async function generateBlocksForVersion(options: {
         failed.push(draft.index);
         logJobEvent("segment_block_failed", job, {
           block_index: failedBlock.index,
-          error: serializeError(err)
+          error: serializeError(err),
+          progressPercent: Math.round((draft.index / Math.max(1, drafts.length)) * 100)
         });
       }
     }
@@ -5973,7 +5977,8 @@ async function generateQwenAudioForBlocks(options: {
     logJobEvent("tts_block_saved", job, {
       block_index: item.index,
       duration_s: duration ?? null,
-      path: result.output_path
+      path: result.output_path,
+      progressPercent: Math.round((item.index / Math.max(1, items.length)) * 100)
     });
   }
 
@@ -6098,7 +6103,8 @@ async function generateChatterboxAudioForBlocks(options: {
     logJobEvent("tts_block_saved", job, {
       block_index: item.index,
       duration_s: duration ?? null,
-      path: result.output_path
+      path: result.output_path,
+      progressPercent: Math.round((item.index / Math.max(1, items.length)) * 100)
     });
   };
 
@@ -6243,7 +6249,8 @@ async function generateXttsAudioForBlocks(options: {
     logJobEvent("tts_block_saved", job, {
       block_index: item.index,
       duration_s: duration ?? null,
-      path: result.output_path
+      path: result.output_path,
+      progressPercent: Math.round((item.index / Math.max(1, items.length)) * 100)
     });
   };
 
@@ -6406,7 +6413,8 @@ async function generateComfyImagesForBlocks(options: {
         block_index: block.index,
         path: outputPath,
         seed,
-        prompt_chars: prompt.length
+        prompt_chars: prompt.length,
+        progressPercent: Math.round((block.index / Math.max(1, blocks.length)) * 100)
       });
 
       // Slides are disabled in MVP: image generation persists only `image_raw`.
