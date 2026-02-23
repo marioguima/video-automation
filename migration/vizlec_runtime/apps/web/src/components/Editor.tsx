@@ -1731,6 +1731,7 @@ const Editor: React.FC<EditorProps> = ({
           type?: string;
           blockId?: string | null;
           lessonVersionId?: string | null;
+          progressPercent?: number | null;
         };
       }>).detail;
       if (!detail || detail.event !== 'job_update') return;
@@ -1740,6 +1741,10 @@ const Editor: React.FC<EditorProps> = ({
       const jobId = payload?.jobId?.trim();
       const status = payload?.status?.trim() ?? '';
       const type = payload?.type?.trim() ?? '';
+      const progressPercent =
+        typeof payload?.progressPercent === 'number' && Number.isFinite(payload.progressPercent)
+          ? Math.max(1, Math.min(99, Math.trunc(payload.progressPercent)))
+          : null;
       const blockId = payload?.blockId?.trim() ?? '';
       const blockScoped = blockId.length > 0;
       if (!jobId || !status || !type) return;
@@ -2054,6 +2059,13 @@ const Editor: React.FC<EditorProps> = ({
           setIsGeneratingFinalVideo(true);
           setFinalVideoJobId(jobId);
           setFinalVideoPhase(toPhase(status));
+          if (progressPercent !== null && blocks.length > 0) {
+            const estimatedCurrent = Math.max(
+              1,
+              Math.min(blocks.length, Math.trunc((progressPercent / 100) * blocks.length))
+            );
+            setFinalVideoProgress({ current: estimatedCurrent, total: blocks.length });
+          }
         }
       }
     };

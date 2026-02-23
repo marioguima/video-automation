@@ -298,6 +298,8 @@ function loadTtsSettings(): TtsSettings {
 
 
 const WORKER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const VIDEO_AUTOMATION_ROOT = path.resolve(WORKER_ROOT, "..", "..", "..", "..");
+const CINEMATIC_FINAL_RENDER_SCRIPT = path.join(WORKER_ROOT, "scripts", "render_cinematic_final.py");
 const QWEN_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "qwen_tts_generate.py");
 const CHATTERBOX_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "chatterbox_tts_generate.py");
 const COMFY_WORKFLOWS_DIR = path.join(WORKER_ROOT, "workflows");
@@ -400,6 +402,62 @@ async function execFileText(command: string, args: string[]): Promise<string> {
       resolve(stdout.trim());
     });
   });
+}
+
+async function renderCinematicFinalVideoWithPython(options: {
+  outputPath: string;
+  mediaFiles: string[];
+  audioFiles: string[];
+  durations: number[];
+  job: JobRecord;
+}): Promise<void> {
+  const pythonCommand =
+    process.env.VIZLEC_RENDER_PYTHON?.trim() ||
+    process.env.PYTHON_EXECUTABLE?.trim() ||
+    "python";
+  const payload = {
+    project_root: VIDEO_AUTOMATION_ROOT,
+    output_path: options.outputPath,
+    media_files: options.mediaFiles,
+    audio_files: options.audioFiles,
+    durations: options.durations,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    motion_preset: "D_zoom_cinematic",
+    zoom_transition_preset: "T6_inertial_ref",
+    transition: "XF3b_flash_white_occluded_6f",
+    transition_duration: 0.2
+  };
+  const tmpPayloadPath = path.join(
+    os.tmpdir(),
+    `vizlec_cinematic_payload_${options.job.id}_${Date.now()}.json`
+  );
+  await fs.promises.writeFile(tmpPayloadPath, JSON.stringify(payload, null, 2), "utf8");
+  let clipProgress = 0;
+  try {
+    await runProcess(
+      pythonCommand,
+      [CINEMATIC_FINAL_RENDER_SCRIPT, tmpPayloadPath],
+      {
+        cwd: VIDEO_AUTOMATION_ROOT,
+        logPrefix: "video:cinematic",
+        onStdoutLine: (line) => {
+          const match = line.match(/^__VIZLEC_RESULT__\s+clip_start\s+(\d+)\s+(\d+)$/);
+          if (!match) return;
+          const current = Number(match[1]);
+          const total = Number(match[2]);
+          if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return;
+          const pct = Math.max(1, Math.min(95, Math.trunc((current / total) * 95)));
+          if (pct <= clipProgress) return;
+          clipProgress = pct;
+          void notifyRunningProgress(options.job, pct);
+        }
+      }
+    );
+  } finally {
+    await fs.promises.unlink(tmpPayloadPath).catch(() => null);
+  }
 }
 
 type HttpJsonOptions = {
@@ -4882,7 +4940,19 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   });
   await notifyRunningPhase(job, "generation");
 
+  const finalDir = lessonFinalDir(
+    version.lesson.module.course.id,
+    version.lesson.module.id,
+    version.lesson.id,
+    version.id
+  );
+  ensureDir(finalDir);
+  const outputPath = path.join(finalDir, "final.mp4");
+  const mediaFiles: string[] = [];
+  const audioFiles: string[] = [];
+  const durations: number[] = [];
   const clipPaths: string[] = [];
+
   for (const block of version.blocks) {
     await assertLeaseValid(job.id);
     const audioAsset = await prisma.asset.findFirst({
@@ -4892,155 +4962,116 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     if (!audioAsset?.path || !fs.existsSync(audioAsset.path)) {
       throw new Error(`audio not found for block ${block.index}`);
     }
-
     const imageAsset = await prisma.asset.findFirst({
-      where: {
-        kind: "image_raw",
-        blockId: block.id
-      },
+      where: { kind: "image_raw", blockId: block.id },
       orderBy: { createdAt: "desc" }
     });
-    const visualAsset =
-      imageAsset?.path && fs.existsSync(imageAsset.path)
-        ? { kind: "image_raw" as const, path: imageAsset.path }
-        : null;
-    if (!visualAsset) {
+    if (!imageAsset?.path || !fs.existsSync(imageAsset.path)) {
       throw new Error(`image not found for block ${block.index}`);
     }
+    const duration =
+      typeof block.audioDurationS === "number" && Number.isFinite(block.audioDurationS) && block.audioDurationS > 0
+        ? block.audioDurationS
+        : 3;
 
-    const clipDir = blockClipDir(
-      version.lesson.module.course.id,
-      version.lesson.module.id,
-      version.lesson.id,
-      version.id,
-      block.index
-    );
-    ensureDir(clipDir);
-    const clipPath = path.join(clipDir, "clip.mp4");
-
-    await runProcess(
-      "ffmpeg",
-      [
-        "-y",
-        "-loop",
-        "1",
-        "-framerate",
-        "30",
-        "-i",
-        visualAsset.path,
-        "-i",
-        audioAsset.path,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-        "-pix_fmt",
-        "yuv420p",
-        "-vf",
-        "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-shortest",
-        "-movflags",
-        "+faststart",
-        clipPath
-      ],
-      { logPrefix: `video:clip:${block.index}` }
-    );
-
-    await prisma.asset.deleteMany({
-      where: { blockId: block.id, kind: "clip_mp4" }
-    });
-    await prisma.asset.create({
-      data: {
-        workspaceId: block.workspaceId,
-        blockId: block.id,
-        kind: "clip_mp4",
-        path: clipPath,
-        templateId: null,
-        metaJson: JSON.stringify({
-          sourceAudioPath: audioAsset.path,
-          sourceVisualKind: visualAsset.kind,
-          sourceVisualPath: visualAsset.path
-        })
-      }
-    });
-    clipPaths.push(clipPath);
+    mediaFiles.push(imageAsset.path);
+    audioFiles.push(audioAsset.path);
+    durations.push(duration);
     logJobEvent("render_clip_saved", job, {
       block_index: block.index,
-      path: clipPath
+      path: imageAsset.path,
+      cinematic_clip: true
     });
   }
 
-  const finalDir = lessonFinalDir(
-    version.lesson.module.course.id,
-    version.lesson.module.id,
-    version.lesson.id,
-    version.id
-  );
-  ensureDir(finalDir);
-  const concatFilePath = path.join(finalDir, `concat_${job.id}.txt`);
-  await fs.promises.writeFile(
-    concatFilePath,
-    `${clipPaths.map((clipPath) => toConcatFileEntry(clipPath)).join("\n")}\n`,
-    "utf8"
-  );
-  const outputPath = path.join(finalDir, "final.mp4");
-  const totalDurationSeconds = version.blocks.reduce((acc, block) => {
-    const duration = typeof block.audioDurationS === "number" ? block.audioDurationS : 0;
-    return acc + (Number.isFinite(duration) && duration > 0 ? duration : 0);
-  }, 0);
-  let lastConcatProgress = 0;
-
+  let usedCinematicBridge = false;
   try {
-    await runProcess(
-      "ffmpeg",
-      [
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        concatFilePath,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        outputPath
-      ],
-      {
-        logPrefix: "video:concat",
-        onStderrLine: (line) => {
-          if (!(totalDurationSeconds > 0)) return;
-          const match = line.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
-          if (!match) return;
-          const currentSeconds = parseFfmpegTimestampToSeconds(match[1] ?? "");
-          if (!currentSeconds || currentSeconds <= 0) return;
-          const rawPercent = Math.trunc((currentSeconds / totalDurationSeconds) * 100);
-          const clampedPercent = Math.max(1, Math.min(99, rawPercent));
-          if (clampedPercent <= lastConcatProgress) return;
-          lastConcatProgress = clampedPercent;
-          void notifyRunningProgress(job, clampedPercent);
+    await renderCinematicFinalVideoWithPython({
+      outputPath,
+      mediaFiles,
+      audioFiles,
+      durations,
+      job
+    });
+    usedCinematicBridge = true;
+    await notifyRunningProgress(job, 99);
+  } catch (err) {
+    logJobEvent("concat_video_cinematic_fallback", job, {
+      error: serializeError(err)
+    });
+    const legacyClipPaths: string[] = [];
+    for (let idx = 0; idx < version.blocks.length; idx += 1) {
+      const block = version.blocks[idx]!;
+      const audioPath = audioFiles[idx]!;
+      const imagePath = mediaFiles[idx]!;
+      const clipDir = blockClipDir(
+        version.lesson.module.course.id,
+        version.lesson.module.id,
+        version.lesson.id,
+        version.id,
+        block.index
+      );
+      ensureDir(clipDir);
+      const clipPath = path.join(clipDir, "clip.mp4");
+      await runProcess(
+        "ffmpeg",
+        [
+          "-y","-loop","1","-framerate","30","-i",imagePath,"-i",audioPath,
+          "-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p",
+          "-vf","scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
+          "-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",clipPath
+        ],
+        { logPrefix: `video:clip:${block.index}` }
+      );
+      await prisma.asset.deleteMany({ where: { blockId: block.id, kind: "clip_mp4" } });
+      await prisma.asset.create({
+        data: {
+          workspaceId: block.workspaceId,
+          blockId: block.id,
+          kind: "clip_mp4",
+          path: clipPath,
+          templateId: null,
+          metaJson: JSON.stringify({
+            sourceAudioPath: audioPath,
+            sourceVisualKind: "image_raw",
+            sourceVisualPath: imagePath
+          })
         }
-      }
+      });
+      legacyClipPaths.push(clipPath);
+    }
+    const concatFilePath = path.join(finalDir, `concat_${job.id}.txt`);
+    await fs.promises.writeFile(
+      concatFilePath,
+      `${legacyClipPaths.map((clipPath) => toConcatFileEntry(clipPath)).join("\n")}\n`,
+      "utf8"
     );
-  } finally {
-    await fs.promises.unlink(concatFilePath).catch(() => null);
+    const totalDurationSeconds = durations.reduce((a, b) => a + b, 0);
+    let lastConcatProgress = 0;
+    try {
+      await runProcess(
+        "ffmpeg",
+        ["-y","-f","concat","-safe","0","-i",concatFilePath,"-c:v","libx264","-preset","veryfast","-crf","20","-c:a","aac","-b:a","192k","-pix_fmt","yuv420p","-movflags","+faststart",outputPath],
+        {
+          logPrefix: "video:concat",
+          onStderrLine: (line) => {
+            if (!(totalDurationSeconds > 0)) return;
+            const match = line.match(/time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/);
+            if (!match) return;
+            const currentSeconds = parseFfmpegTimestampToSeconds(match[1] ?? "");
+            if (!currentSeconds || currentSeconds <= 0) return;
+            const rawPercent = Math.trunc((currentSeconds / totalDurationSeconds) * 100);
+            const clampedPercent = Math.max(1, Math.min(99, rawPercent));
+            if (clampedPercent <= lastConcatProgress) return;
+            lastConcatProgress = clampedPercent;
+            void notifyRunningProgress(job, clampedPercent);
+          }
+        }
+      );
+    } finally {
+      await fs.promises.unlink(concatFilePath).catch(() => null);
+    }
+    clipPaths.push(...legacyClipPaths);
   }
 
   await prisma.asset.deleteMany({
@@ -5058,7 +5089,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
       templateId: null,
       metaJson: JSON.stringify({
         blockCount: version.blocks.length,
-        visualMode: "image_raw_only"
+        visualMode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only"
       })
     }
   });
@@ -5069,12 +5100,12 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     JSON.stringify(
       {
         generatedAt: new Date().toISOString(),
-        visualMode: "image_raw_only",
+        visualMode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only",
         blockCount: version.blocks.length,
         clips: version.blocks.map((block, idx) => ({
           blockId: block.id,
           blockIndex: block.index,
-          path: clipPaths[idx]
+          path: clipPaths[idx] ?? null
         })),
         outputPath
       },
@@ -5101,7 +5132,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   logJobEvent("concat_video_completed", job, {
     output_path: outputPath,
     block_count: version.blocks.length,
-    visual_mode: "image_raw_only"
+    visual_mode: usedCinematicBridge ? "cinematic_image_raw_only" : "image_raw_only"
   });
 }
 

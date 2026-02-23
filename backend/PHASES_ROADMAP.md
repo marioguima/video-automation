@@ -254,6 +254,7 @@ Status: `TODO`
 - [ ] Criar relatorio final por execucao (tempo, modelos, imgs geradas, erros).
 - [ ] Definir "modo rapido" e "modo qualidade".
 - [ ] Adicionar testes de regressao para parser/segmentador/esquemas JSON.
+- [ ] Corrigir progresso visual `x/y` do `concat_video` no `vizlec_runtime` (render cinematografico) para nao depender de `clip_mp4` legado e avançar durante o render final.
 
 ### 6.2 Criterios de aceite
 
@@ -341,6 +342,7 @@ Objetivo desta analise:
 - "Local-first" significa execucao local do processamento, nao remocao de auth/workspace.
 - Legenda sera a camada padrao de texto em tela no MVP.
 - `on-screen` (titulos/bullets) fica fora do MVP e podera voltar depois como recurso opcional.
+- No `vizlec_runtime`, o render final cinematografico (bridge Python + ffmpeg) ja esta integrado, mas o progresso de UI (`x/y`) ainda precisa de ajuste fino para refletir corretamente o avanço por bloco durante `concat_video`.
 
 ---
 
