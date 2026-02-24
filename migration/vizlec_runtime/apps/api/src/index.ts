@@ -6052,7 +6052,15 @@ fastify.patch(
         voiceExists = index.voices.some((voice) => voice.id === preferredVoiceId);
       }
       if (!voiceExists) {
-        return reply.code(404).send({ error: "preferred voice not found" });
+        request.log.warn(
+          {
+            route: "/lesson-versions/:versionId/preferences",
+            versionId,
+            preferredVoiceId,
+            provider
+          },
+          "preferred voice id not found during preference save; accepting value for deferred validation"
+        );
       }
     }
 

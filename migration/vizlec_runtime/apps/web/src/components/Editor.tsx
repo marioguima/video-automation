@@ -867,6 +867,7 @@ type BgmLibraryItem = {
 type LegacyBlock = {
   id: string;
   lessonVersionId: string;
+  videoVersionId?: string;
   index: number;
   sourceText: string;
   ttsText: string;
@@ -1138,6 +1139,9 @@ const Editor: React.FC<EditorProps> = ({
   const singleImageJobsRef = useRef<Record<string, { blockId: string; done: boolean }>>({});
   const singleTextJobsRef = useRef<Record<string, { blockId: string; done: boolean }>>({});
   const processedTerminalJobEventsRef = useRef<Set<string>>(new Set());
+  const lastSegmentReadyCountRef = useRef<number | null>(null);
+  const lastTtsReadyCountRef = useRef<number | null>(null);
+  const lastImageReadyCountRef = useRef<number | null>(null);
   const segmentJobIdRef = useRef<string | null>(null);
   const ttsJobIdRef = useRef<string | null>(null);
   const assetsJobIdRef = useRef<string | null>(null);
@@ -1865,6 +1869,50 @@ const Editor: React.FC<EditorProps> = ({
 
   useEffect(() => {
     if (!selectedVersionId) return;
+    const readBuildVideoSnapshot = (
+      buildStatus: Record<string, unknown> | null | undefined,
+      targetVideoId: string,
+      targetVideoVersionId: string
+    ): {
+      blocksTotal: number | null;
+      blocksReady: number | null;
+      audioReady: number | null;
+      imagesReady: number | null;
+    } | null => {
+      if (!buildStatus || typeof buildStatus !== 'object') return null;
+      const sections = Array.isArray((buildStatus as { sections?: unknown[] }).sections)
+        ? ((buildStatus as { sections: unknown[] }).sections)
+        : Array.isArray((buildStatus as { modules?: unknown[] }).modules)
+          ? ((buildStatus as { modules: unknown[] }).modules)
+          : [];
+      for (const section of sections) {
+        if (!section || typeof section !== 'object') continue;
+        const videos = Array.isArray((section as { videos?: unknown[] }).videos)
+          ? ((section as { videos: unknown[] }).videos)
+          : [];
+        for (const video of videos) {
+          if (!video || typeof video !== 'object') continue;
+          const rec = video as Record<string, unknown>;
+          const scopedVideoId = typeof rec.videoId === 'string' ? rec.videoId.trim() : '';
+          const scopedVideoVersionId = typeof rec.videoVersionId === 'string' ? rec.videoVersionId.trim() : '';
+          if ((targetVideoId && scopedVideoId && scopedVideoId !== targetVideoId)) continue;
+          if ((targetVideoVersionId && scopedVideoVersionId && scopedVideoVersionId !== targetVideoVersionId)) continue;
+          const blocks = rec.blocks && typeof rec.blocks === 'object' ? (rec.blocks as Record<string, unknown>) : null;
+          const audio = rec.audio && typeof rec.audio === 'object' ? (rec.audio as Record<string, unknown>) : null;
+          const images = rec.images && typeof rec.images === 'object' ? (rec.images as Record<string, unknown>) : null;
+          const asInt = (value: unknown) =>
+            typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : null;
+          return {
+            blocksTotal: asInt(blocks?.total),
+            blocksReady: asInt(blocks?.ready),
+            audioReady: asInt(audio?.ready),
+            imagesReady: asInt(images?.ready)
+          };
+        }
+      }
+      return null;
+    };
+
     const toPhase = (status: string): JobPhase => {
       if (status === 'running') return 'running';
       if (status === 'pending') return 'waiting';
@@ -1881,6 +1929,8 @@ const Editor: React.FC<EditorProps> = ({
         lessonVersionId?: string | null;
         videoVersionId?: string | null;
         progressPercent?: number | null;
+        videoId?: string | null;
+        buildStatus?: Record<string, unknown> | null;
       }>(event);
       if (!detail || detail.event !== WS_EVENT.JOB_UPDATE) return;
       const payload = detail.payload;
@@ -2027,6 +2077,7 @@ const Editor: React.FC<EditorProps> = ({
 
       if (type === 'segment') {
         if (isTerminal(status) && segmentJobIdRef.current === jobId) {
+          lastSegmentReadyCountRef.current = null;
           setIsSegmenting(false);
           setSegmentJobId(null);
           setSegmentPhase('idle');
@@ -2057,12 +2108,43 @@ const Editor: React.FC<EditorProps> = ({
           setSegmentJobId(jobId);
           setIsSegmenting(true);
           setSegmentPhase(toPhase(status));
+          const snapshot = readBuildVideoSnapshot(
+            (payload?.buildStatus as Record<string, unknown> | null | undefined) ?? null,
+            payload?.videoId?.trim() ?? '',
+            selectedVersionId
+          );
+          const totalCount = snapshot?.blocksTotal ?? null;
+          const readyCount = snapshot?.blocksReady ?? null;
+
+          if (totalCount !== null && totalCount > 0) {
+            const safeReady = Math.min(totalCount, Math.max(0, readyCount ?? 0));
+            setSegmentProgress({
+              // UI adds +1 while running for historical zero-based progress streams.
+              current: status === 'running' ? Math.max(0, safeReady - 1) : safeReady,
+              total: totalCount
+            });
+            if (readyCount !== null && lastSegmentReadyCountRef.current !== safeReady) {
+              lastSegmentReadyCountRef.current = safeReady;
+              apiGet<LegacyBlock[]>(`/video-versions/${selectedVersionId}/blocks`, {
+                cacheMs: 0,
+                dedupe: false
+              })
+                .then((items) => {
+                  if (selectedVersionIdRef.current !== selectedVersionId) return;
+                  items.forEach((item) => mergeLegacyBlockRef.current(item));
+                })
+                .catch((err) => {
+                  console.error(err);
+                });
+            }
+          }
         }
         return;
       }
 
       if (type === 'tts') {
         if (isTerminal(status) && ttsJobIdRef.current === jobId) {
+          lastTtsReadyCountRef.current = null;
           setIsGeneratingTts(false);
           setTtsJobId(null);
           setTtsPhase('idle');
@@ -2113,12 +2195,74 @@ const Editor: React.FC<EditorProps> = ({
           setTtsJobId(jobId);
           setIsGeneratingTts(true);
           setTtsPhase(toPhase(status));
+          const snapshot = readBuildVideoSnapshot(
+            (payload?.buildStatus as Record<string, unknown> | null | undefined) ?? null,
+            payload?.videoId?.trim() ?? '',
+            selectedVersionId
+          );
+          const totalCount = snapshot?.blocksTotal ?? (blocks.length > 0 ? blocks.length : null);
+          const readyCount = snapshot?.audioReady ?? null;
+          if (totalCount && totalCount > 0) {
+            const safeReady = Math.min(totalCount, Math.max(0, readyCount ?? 0));
+            setTtsProgress({
+              current: status === 'running' ? Math.max(0, safeReady - 1) : safeReady,
+              total: totalCount
+            });
+            if (readyCount !== null && lastTtsReadyCountRef.current !== safeReady) {
+              lastTtsReadyCountRef.current = safeReady;
+              apiGet<{ blocks: { blockId: string; url?: string | null }[] }>(
+                `/video-versions/${selectedVersionId}/audios`,
+                { cacheMs: 0, dedupe: false }
+              )
+                .then((audioPayload) => {
+                  if (selectedVersionIdRef.current !== selectedVersionId) return;
+                  const nextUrls: Record<string, string> = {};
+                  const touchedBlocks: string[] = [];
+                  audioPayload.blocks.forEach((item) => {
+                    if (!item.url) return;
+                    nextUrls[item.blockId] = item.url;
+                    touchedBlocks.push(item.blockId);
+                  });
+                  setAudioUrls(nextUrls);
+                  if (touchedBlocks.length > 0) {
+                    setAudioRevisions((prev) => {
+                      const next = { ...prev };
+                      touchedBlocks.forEach((blockId) => {
+                        next[blockId] = (next[blockId] ?? 0) + 1;
+                      });
+                      return next;
+                    });
+                  }
+                })
+                .catch((err) => {
+                  console.error(err);
+                });
+            }
+            if (readyCount !== null && safeReady >= totalCount) {
+              lastTtsReadyCountRef.current = null;
+              setIsGeneratingTts(false);
+              setTtsJobId(null);
+              setTtsPhase('idle');
+              setTtsProgress(null);
+              setGeneratingStates((prev) => {
+                const next: typeof prev = {};
+                Object.keys(prev).forEach((key) => {
+                  next[key] = { ...prev[key], audio: false };
+                });
+                return next;
+              });
+              setAssetsRevision((prev) => prev + 1);
+            }
+          }
         }
         return;
       }
 
       if (type === 'image' || type === 'render_slide') {
         if (isTerminal(status) && assetsJobIdRef.current === jobId) {
+          if (type === 'image') {
+            lastImageReadyCountRef.current = null;
+          }
           const settledVersionId = selectedVersionIdRef.current;
           setIsGeneratingAssets(false);
           setAssetsJobId(null);
@@ -2177,6 +2321,75 @@ const Editor: React.FC<EditorProps> = ({
           } else {
             setAssetsJobMode('image');
             setImagePhase(toPhase(status));
+            const snapshot = readBuildVideoSnapshot(
+              (payload?.buildStatus as Record<string, unknown> | null | undefined) ?? null,
+              payload?.videoId?.trim() ?? '',
+              selectedVersionId
+            );
+            const totalCount = snapshot?.blocksTotal ?? (blocks.length > 0 ? blocks.length : null);
+            const readyCount = snapshot?.imagesReady ?? null;
+            if (totalCount && totalCount > 0) {
+              const safeReady = Math.min(totalCount, Math.max(0, readyCount ?? 0));
+              setImageProgress({
+                current: status === 'running' ? Math.max(0, safeReady - 1) : safeReady,
+                total: totalCount
+              });
+              if (readyCount !== null && lastImageReadyCountRef.current !== safeReady) {
+                lastImageReadyCountRef.current = safeReady;
+                apiGet<{ blocks: { blockId: string; url?: string | null }[] }>(
+                  `/video-versions/${selectedVersionId}/images`,
+                  { cacheMs: 0, dedupe: false }
+                )
+                  .then((imagePayload) => {
+                    if (selectedVersionIdRef.current !== selectedVersionId) return;
+                    const nextUrls: Record<string, string> = {};
+                    const touchedBlocks: string[] = [];
+                    imagePayload.blocks.forEach((item) => {
+                      if (!item.url) return;
+                      nextUrls[item.blockId] = item.url;
+                      touchedBlocks.push(item.blockId);
+                    });
+                    setImageUrls(nextUrls);
+                    if (touchedBlocks.length > 0) {
+                      invalidateSlidesForBlocks(touchedBlocks);
+                      clearBrokenSlidesForBlocks(touchedBlocks);
+                      setBrokenRawImages((prev) => {
+                        const next = { ...prev };
+                        touchedBlocks.forEach((blockId) => {
+                          next[blockId] = false;
+                        });
+                        return next;
+                      });
+                      setImageRevisions((prev) => {
+                        const next = { ...prev };
+                        touchedBlocks.forEach((blockId) => {
+                          next[blockId] = (next[blockId] ?? 0) + 1;
+                        });
+                        return next;
+                      });
+                    }
+                  })
+                  .catch((err) => {
+                    console.error(err);
+                  });
+              }
+              if (readyCount !== null && safeReady >= totalCount) {
+                lastImageReadyCountRef.current = null;
+                setIsGeneratingAssets(false);
+                setAssetsJobId(null);
+                setAssetsJobMode('none');
+                setImagePhase('idle');
+                setImageProgress(null);
+                setGeneratingStates((prev) => {
+                  const next: typeof prev = {};
+                  Object.keys(prev).forEach((key) => {
+                    next[key] = { ...prev[key], image: false };
+                  });
+                  return next;
+                });
+                setAssetsRevision((prev) => prev + 1);
+              }
+            }
           }
         }
         return;
@@ -3229,7 +3442,11 @@ const Editor: React.FC<EditorProps> = ({
         const data = parseData(event);
         const block = (data?.block ?? null) as LegacyBlock | null;
         if (!block) return;
-        if (selectedVersionIdRef.current && block.lessonVersionId !== selectedVersionIdRef.current) return;
+        const blockVersionId =
+          (typeof block.videoVersionId === 'string' && block.videoVersionId.trim()) ||
+          (typeof block.lessonVersionId === 'string' && block.lessonVersionId.trim()) ||
+          '';
+        if (selectedVersionIdRef.current && blockVersionId && blockVersionId !== selectedVersionIdRef.current) return;
         mergeLegacyBlockRef.current(block);
       });
 
