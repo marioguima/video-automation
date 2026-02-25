@@ -1359,7 +1359,7 @@ const Dashboard: React.FC<DashboardProps> = ({ setView, onSelectCourse, onEditCo
                                       y={(viewBox.cy || 0) + 30}
                                       className="fill-muted-foreground text-[10px] font-bold uppercase tracking-wide"
                                     >
-                                      Courses
+                                      Channels
                                     </tspan>
                                   </text>
                                 )

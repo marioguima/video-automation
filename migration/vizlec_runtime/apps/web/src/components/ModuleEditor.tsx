@@ -399,7 +399,7 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
         <div className="flex items-center justify-center gap-6 mb-16">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-orange-600 text-white flex items-center justify-center text-sm font-bold shadow-lg shadow-orange-600/30 ring-4 ring-orange-500/10">1</div>
-            <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-orange-600">Lesson Info</span>
+            <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-orange-600">Video Info</span>
           </div>
           
           <div className="w-16 h-[2px] bg-slate-200 dark:bg-slate-800 rounded-full"></div>
@@ -429,15 +429,15 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
                   <Layout className="text-orange-600" size={20} />
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-white">Lesson Registration</h1>
-                  <p className="text-xs text-muted-foreground font-medium">Step 1: Define the core content of your video lesson.</p>
+                  <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-white">Video Registration</h1>
+                  <p className="text-xs text-muted-foreground font-medium">Step 1: Define the core content of your video.</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
                 <div className="md:col-span-12 space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-                    Lesson Title
+                    Video Title
                   </label>
                   <input 
                     required
