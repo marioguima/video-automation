@@ -1,0 +1,13 @@
+{
+  "audio_path": "g:\\tool\\video-automation\\migration\\vizlec_runtime\\data\\subtitle_cpu_bench\\run_20260224_234301_medium_cpu_int8\\concat.wav",
+  "out_dir": "g:\\tool\\video-automation\\migration\\vizlec_runtime\\data\\subtitle_cpu_bench\\run_20260224_234301_medium_cpu_int8\\out",
+  "width": 1920,
+  "height": 1080,
+  "template_id": "subtitle-yellow-bold-bottom-v1",
+  "model": "medium",
+  "device": "cpu",
+  "compute_type": "int8",
+  "language": "pt",
+  "vad_filter": true,
+  "word_timestamps": true
+}

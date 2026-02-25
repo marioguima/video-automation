@@ -1,0 +1,62 @@
+{
+  "ok": true,
+  "returncode": 0,
+  "elapsed_s": 317.733,
+  "audio_duration_s": 198.603,
+  "rtf": 1.6,
+  "speed_x_realtime": 0.625,
+  "block_audio_files": 23,
+  "run_dir": "g:\\tool\\video-automation\\migration\\vizlec_runtime\\data\\subtitle_cpu_bench\\run_20260224_234301_medium_cpu_int8",
+  "outputs": {
+    "raw": true,
+    "cues": true,
+    "srt": true,
+    "ass": true
+  },
+  "stdout_tail": [
+    "{\"ok\": true, \"engine\": \"faster-whisper\", \"template_id\": \"subtitle-yellow-bold-bottom-v1\", \"raw_json_path\": \"G:\\\\tool\\\\video-automation\\\\migration\\\\vizlec_runtime\\\\data\\\\subtitle_cpu_bench\\\\run_20260224_234301_medium_cpu_int8\\\\out\\\\subtitles.raw.json\", \"cues_json_path\": \"G:\\\\tool\\\\video-automation\\\\migration\\\\vizlec_runtime\\\\data\\\\subtitle_cpu_bench\\\\run_20260224_234301_medium_cpu_int8\\\\out\\\\subtitles.cues.json\", \"srt_path\": \"G:\\\\tool\\\\video-automation\\\\migration\\\\vizlec_runtime\\\\data\\\\subtitle_cpu_bench\\\\run_20260224_234301_medium_cpu_int8\\\\out\\\\subtitles.srt\", \"ass_path\": \"G:\\\\tool\\\\video-automation\\\\migration\\\\vizlec_runtime\\\\data\\\\subtitle_cpu_bench\\\\run_20260224_234301_medium_cpu_int8\\\\out\\\\subtitles.default.ass\", \"segment_count\": 85, \"cue_count\": 85}"
+  ],
+  "stderr_tail": [],
+  "sample_segments": [
+    {
+      "start": 0.0,
+      "end": 3.7,
+      "text": "Se ela parou de responder antes de qualquer coisa, respira."
+    },
+    {
+      "start": 4.3,
+      "end": 6.6,
+      "text": "Eu sei o que acontece na sua cabeça nessa hora."
+    },
+    {
+      "start": 7.04,
+      "end": 9.4,
+      "text": "Você pega o celular de 5 em 5 minutos."
+    },
+    {
+      "start": 9.68,
+      "end": 11.54,
+      "text": "Fica relendo a última mensagem."
+    },
+    {
+      "start": 11.76,
+      "end": 12.42,
+      "text": "Começa a pensar."
+    },
+    {
+      "start": 12.7,
+      "end": 13.88,
+      "text": "Será que eu falei besteira?"
+    },
+    {
+      "start": 14.12,
+      "end": 14.96,
+      "text": "Será que exagerei?"
+    },
+    {
+      "start": 15.3,
+      "end": 16.68,
+      "text": "Será que ela perdeu o interesse?"
+    }
+  ]
+}

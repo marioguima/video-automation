@@ -1119,6 +1119,7 @@ const Editor: React.FC<EditorProps> = ({
   const [isAudioBatchCancelConfirmOpen, setIsAudioBatchCancelConfirmOpen] = useState(false);
   const [isSegmentCancelConfirmOpen, setIsSegmentCancelConfirmOpen] = useState(false);
   const [isSlidesBatchCancelConfirmOpen, setIsSlidesBatchCancelConfirmOpen] = useState(false);
+  const [isFinalVideoCancelConfirmOpen, setIsFinalVideoCancelConfirmOpen] = useState(false);
   const [slidesProgress, setSlidesProgress] = useState<{ current: number; total: number } | null>(null);
   const [slidesPhase, setSlidesPhase] = useState<JobPhase>('idle');
 
@@ -2412,7 +2413,6 @@ const Editor: React.FC<EditorProps> = ({
             setError('Failed to generate final video.');
           } else if (status === 'canceled') {
             setFinalVideoLastElapsedSeconds(null);
-            setError('Final video generation canceled.');
           }
           return;
         }
@@ -3333,6 +3333,22 @@ const Editor: React.FC<EditorProps> = ({
     } catch (err) {
       console.error(err);
       setError((err as Error).message ?? 'Failed to cancel slide generation.');
+    }
+  };
+
+  const handleConfirmCancelFinalVideo = async () => {
+    if (!isGeneratingFinalVideo || !finalVideoJobId) {
+      setIsFinalVideoCancelConfirmOpen(false);
+      return;
+    }
+    try {
+      await apiPost(`/jobs/${finalVideoJobId}/cancel`, {
+        clientId: dispatchAgentIdRef.current
+      });
+      setIsFinalVideoCancelConfirmOpen(false);
+    } catch (err) {
+      console.error(err);
+      setError((err as Error).message ?? 'Failed to cancel final video generation.');
     }
   };
 
@@ -4443,6 +4459,33 @@ const Editor: React.FC<EditorProps> = ({
         </div>
       )}
 
+      {isFinalVideoCancelConfirmOpen && (
+        <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-[8px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] shadow-2xl">
+            <div className="p-5 border-b border-[hsl(var(--editor-border))]">
+              <h3 className="text-lg font-bold">Cancel final video generation?</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                This will cancel the current final video job.
+              </p>
+            </div>
+            <div className="p-5 border-t border-[hsl(var(--editor-border))] flex items-center justify-end gap-3">
+              <button
+                onClick={() => setIsFinalVideoCancelConfirmOpen(false)}
+                className="px-4 h-9 rounded-[5px] border border-[hsl(var(--editor-border))] text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+              >
+                Keep Running
+              </button>
+              <button
+                onClick={handleConfirmCancelFinalVideo}
+                className="px-4 h-9 rounded-[5px] bg-red-600 text-white text-xs font-bold uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm"
+              >
+                Cancel Job
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {audioReviewActive && (
         <div className="fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div
@@ -4956,17 +4999,21 @@ const Editor: React.FC<EditorProps> = ({
                   ) : (
                     <button
                       onClick={() => {
-                        handleGlobalAction('generateFinalVideo');
+                        if (isGeneratingFinalVideo) {
+                          setIsFinalVideoCancelConfirmOpen(true);
+                        } else {
+                          handleGlobalAction('generateFinalVideo');
+                        }
                         setIsMobileActionsMenuOpen(false);
                       }}
-                      disabled={isGenerateFinalVideoDisabled}
+                      disabled={!isGeneratingFinalVideo && isGenerateFinalVideoDisabled}
                       className={`w-full h-9 px-3 rounded-[5px] text-left text-[11px] font-bold uppercase tracking-wide ${
                         isGeneratingFinalVideo
                           ? 'bg-orange-700 text-white'
                           : `bg-orange-600 text-white ${toolbarDisabledLikeAudioReview}`
                       }`}
                     >
-                      {isGeneratingFinalVideo ? `Final video... ${topFinalElapsedLabel}` : 'Generate final video'}
+                      {isGeneratingFinalVideo ? `Stop final video (${topFinalElapsedLabel})` : 'Generate final video'}
                     </button>
                   )}
                 </div>
@@ -5159,52 +5206,63 @@ const Editor: React.FC<EditorProps> = ({
               </button>
             </div>
           ) : (
-            <button 
-              onClick={() => handleGlobalAction('generateFinalVideo')}
-              disabled={isGenerateFinalVideoDisabled}
-              className={`relative overflow-hidden flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider px-5 h-8 rounded-[5px] transition-all shadow-lg active:scale-95 ${
-                isGeneratingFinalVideo
-                  ? 'bg-orange-700 text-white shadow-orange-500/20'
-                  : `bg-orange-600 text-white hover:bg-orange-700 shadow-orange-500/20 border border-transparent ${toolbarDisabledLikeAudioReview} disabled:shadow-none`
-              }`}
-            >
-              {isGeneratingFinalVideo && isFinalVideoBlockPhase && topFinalTotal > 0 && (
-                <div
-                  className="absolute inset-y-0 left-0 bg-orange-400/40 transition-all duration-300"
-                  style={{
-                    width: `${topFinalProgressWidth}%`
-                  }}
-                />
-              )}
-              {isGeneratingFinalVideo && isFinalVideoComposePhase && (
-                <>
-                  <div className="absolute inset-y-0 left-0 w-full bg-orange-400/15" />
+            <div className="flex items-center h-8 rounded-[5px] overflow-hidden shadow-lg shadow-orange-500/10">
+              <button 
+                onClick={() => handleGlobalAction('generateFinalVideo')}
+                disabled={isGenerateFinalVideoDisabled || isGeneratingFinalVideo}
+                className={`relative overflow-hidden flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider px-5 h-8 transition-all active:scale-95 ${
+                  isGeneratingFinalVideo
+                    ? 'bg-orange-700 text-white'
+                    : `rounded-[5px] bg-orange-600 text-white hover:bg-orange-700 border border-transparent ${toolbarDisabledLikeAudioReview} disabled:shadow-none`
+                } ${isGeneratingFinalVideo ? 'rounded-l-[5px]' : ''}`}
+              >
+                {isGeneratingFinalVideo && isFinalVideoBlockPhase && topFinalTotal > 0 && (
                   <div
-                    className="absolute inset-y-0 bg-orange-300/35 transition-all duration-1000"
+                    className="absolute inset-y-0 left-0 bg-orange-400/40 transition-all duration-300"
                     style={{
-                      left: `${topFinalComposeGaugeOffset}%`,
-                      width: '40%'
+                      width: `${topFinalProgressWidth}%`
                     }}
                   />
-                </>
-              )}
-              <span className="relative z-10 flex items-center gap-2">
-                {isGeneratingFinalVideo ? (
-                  <MonitorPlay size={15} className="animate-pulse" strokeWidth={2.5} />
-                ) : (
-                  <Clapperboard size={15} strokeWidth={2.5} />
                 )}
-                {isGeneratingFinalVideo
-                  ? finalVideoPhase === 'waiting'
-                    ? `Preparing final video pipeline... ${topFinalElapsedLabel}`
-                    : isFinalVideoBlockPhase
-                    ? `Rendering block videos... ${topFinalCurrent}/${topFinalTotal} • ${topFinalElapsedLabel}`
-                    : `Composing final video... ${topFinalElapsedLabel}`
-                  : topFinalLastElapsedLabel
-                  ? `Generate Final Video • ${topFinalLastElapsedLabel}`
-                  : 'Generate Final Video'}
-              </span>
-            </button>
+                {isGeneratingFinalVideo && isFinalVideoComposePhase && (
+                  <>
+                    <div className="absolute inset-y-0 left-0 w-full bg-orange-400/15" />
+                    <div
+                      className="absolute inset-y-0 bg-orange-300/35 transition-all duration-1000"
+                      style={{
+                        left: `${topFinalComposeGaugeOffset}%`,
+                        width: '40%'
+                      }}
+                    />
+                  </>
+                )}
+                <span className="relative z-10 flex items-center gap-2">
+                  {isGeneratingFinalVideo ? (
+                    <MonitorPlay size={15} className="animate-pulse" strokeWidth={2.5} />
+                  ) : (
+                    <Clapperboard size={15} strokeWidth={2.5} />
+                  )}
+                  {isGeneratingFinalVideo
+                    ? finalVideoPhase === 'waiting'
+                      ? `Preparing final video pipeline... ${topFinalElapsedLabel}`
+                      : isFinalVideoBlockPhase
+                      ? `Rendering block videos... ${topFinalCurrent}/${topFinalTotal} • ${topFinalElapsedLabel}`
+                      : `Composing final video... ${topFinalElapsedLabel}`
+                    : topFinalLastElapsedLabel
+                    ? `Generate Final Video • ${topFinalLastElapsedLabel}`
+                    : 'Generate Final Video'}
+                </span>
+              </button>
+              {isGeneratingFinalVideo && (
+                <button
+                  onClick={() => setIsFinalVideoCancelConfirmOpen(true)}
+                  className="h-8 px-2.5 text-[10px] font-bold rounded-r-[5px] border-l border-orange-500/30 bg-[rgba(239,68,68,0.08)] text-red-600 dark:text-red-100 hover:bg-[rgba(239,68,68,0.14)] hover:text-red-700 dark:hover:text-white transition-colors"
+                  title="Cancel final video generation"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           )}
           <div className="h-4 w-[1px] bg-[hsl(var(--editor-border))]/60"></div>
           <button

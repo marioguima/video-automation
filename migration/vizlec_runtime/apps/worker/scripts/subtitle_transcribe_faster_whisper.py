@@ -74,72 +74,19 @@ def _format_cue_text(words: list[str], max_chars_line: int = 34) -> str:
 def _build_cues(transcript_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cues: list[dict[str, Any]] = []
     for seg in transcript_segments:
-        words = seg.get("words") or []
-        if words:
-            buf: list[dict[str, Any]] = []
-            buf_chars = 0
-            for word in words:
-                token = _clean_text(str(word.get("word") or ""))
-                if not token:
-                    continue
-                token_len = len(token) + (1 if buf else 0)
-                should_flush = False
-                if buf and (len(buf) >= 8 or (buf_chars + token_len) > 52):
-                    should_flush = True
-                if should_flush:
-                    start = float(buf[0]["start"])
-                    end = float(buf[-1]["end"])
-                    text_words = [str(w["word"]).upper() for w in buf]
-                    cues.append(
-                        {
-                            "start": start,
-                            "end": max(end, start + 0.18),
-                            "text": _format_cue_text(text_words),
-                        }
-                    )
-                    buf = []
-                    buf_chars = 0
-                start = word.get("start")
-                end = word.get("end")
-                if start is None or end is None:
-                    continue
-                buf.append({"word": token, "start": float(start), "end": float(end)})
-                buf_chars += token_len
-            if buf:
-                start = float(buf[0]["start"])
-                end = float(buf[-1]["end"])
-                text_words = [str(w["word"]).upper() for w in buf]
-                cues.append(
-                    {
-                        "start": start,
-                        "end": max(end, start + 0.18),
-                        "text": _format_cue_text(text_words),
-                    }
-                )
-        else:
-            raw = _clean_text(str(seg.get("text") or "")).upper()
-            if not raw:
-                continue
-            parts = [p.strip() for p in re.split(r"(?<=[,;:.!?])\s+", raw) if p.strip()]
-            if not parts:
-                parts = [raw]
-            seg_start = float(seg.get("start") or 0)
-            seg_end = float(seg.get("end") or seg_start)
-            total_chars = sum(len(p) for p in parts) or 1
-            cursor = seg_start
-            for idx, part in enumerate(parts):
-                frac = len(part) / total_chars
-                dur = max(0.25, (seg_end - seg_start) * frac)
-                end = seg_end if idx == len(parts) - 1 else min(seg_end, cursor + dur)
-                words_for_lines = part.split()
-                cues.append(
-                    {
-                        "start": cursor,
-                        "end": max(end, cursor + 0.18),
-                        "text": _format_cue_text(words_for_lines),
-                    }
-                )
-                cursor = end
+        raw = _clean_text(str(seg.get("text") or "")).upper()
+        if not raw:
+            continue
+        seg_start = float(seg.get("start") or 0)
+        seg_end = float(seg.get("end") or seg_start)
+        cues.append(
+            {
+                "start": seg_start,
+                "end": max(seg_end, seg_start + 0.18),
+                # Keep each ASR segment as a single subtitle cue; only insert a visual line break if needed.
+                "text": _format_cue_text(raw.split(), max_chars_line=44),
+            }
+        )
 
     # sanitize ordering / overlaps
     sanitized: list[dict[str, Any]] = []
@@ -154,7 +101,7 @@ def _build_cues(transcript_segments: list[dict[str, Any]]) -> list[dict[str, Any
         if end <= start:
             end = start + 0.18
         sanitized.append({"start": start, "end": end, "text": text})
-    return _merge_short_cues(sanitized, min_duration=0.75)
+    return sanitized
 
 
 def _cue_text_len(text: str) -> int:
@@ -284,9 +231,9 @@ def main() -> int:
         print(json.dumps({"ok": False, "skipped": True, "reason": "faster_whisper_import_failed", "error": str(err)}))
         return 0
 
-    model_name = str(payload.get("model", os.getenv("VIZLEC_SUBTITLE_WHISPER_MODEL", "large-v3")))
-    device = str(payload.get("device", os.getenv("VIZLEC_SUBTITLE_WHISPER_DEVICE", "cuda")))
-    compute_type = str(payload.get("compute_type", os.getenv("VIZLEC_SUBTITLE_WHISPER_COMPUTE_TYPE", "float16")))
+    model_name = str(payload.get("model", os.getenv("VIZLEC_SUBTITLE_WHISPER_MODEL", "small")))
+    device = str(payload.get("device", os.getenv("VIZLEC_SUBTITLE_WHISPER_DEVICE", "cpu")))
+    compute_type = str(payload.get("compute_type", os.getenv("VIZLEC_SUBTITLE_WHISPER_COMPUTE_TYPE", "int8")))
     language = str(payload.get("language", payload.get("lang", "pt")))
     vad_filter = bool(payload.get("vad_filter", True))
     word_timestamps = bool(payload.get("word_timestamps", True))

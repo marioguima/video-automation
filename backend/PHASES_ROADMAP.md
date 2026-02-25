@@ -47,10 +47,11 @@ Escopo fechado do MVP (local-first):
 - [x] Remover validacoes que bloqueiam o fluxo por ausencia de `on-screen` no `vizlec_runtime`.
 - [ ] Persistir assets e metadados de audio por bloco (duracao real, status, revisao).
 - [ ] Pipeline de legendas:
-  - [x] gerar arquivo de timestamps (JSON + SRT) com `faster-whisper`
+  - [x] gerar arquivo de timestamps (JSON + SRT) (base implementada com `faster-whisper` no `vizlec_runtime`; padrao atual `cpu/int8`)
   - [x] gerar estilo de legenda fixa (template default `subtitle-yellow-bold-bottom-v1`)
   - [x] burn-in com ffmpeg (`ASS`)
   - [ ] expor configuracao/preview de templates de legenda no frontend
+  - [ ] Revisitar ASR em GPU/CUDA no Windows: `faster-whisper/ctranslate2` apresentou crash nativo recorrente (`3221226505`) em audio concatenado longo; padrao atual mantido em `faster-whisper` `cpu/int8`
 - [ ] Pipeline de musica de fundo:
   - [x] asset de BGM por video (path local persistido na `LessonVersion` do `vizlec_runtime`)
   - [x] ganho/volume configuravel
@@ -211,7 +212,7 @@ Status: `IN_PROGRESS` (TTS + render + BGM + legenda base funcionando no `vizlec_
 
 - [ ] Integrar retorno real de duracao da API de TTS no manifesto.
 - [ ] Mapear cenas -> chunks de audio -> timeline final.
-- [x] Extrair timestamps de audio para legenda (JSON + SRT) com `faster-whisper` no `vizlec_runtime`.
+- [x] Extrair timestamps de audio para legenda (JSON + SRT) no `vizlec_runtime` (padrao atual `faster-whisper` em `cpu/int8`; GPU/CUDA segue pendente por crash recorrente no Windows).
 - [x] Burn-in de legenda estatica no render final (ASS -> ffmpeg) no `vizlec_runtime`.
 - [x] Mixar musica de fundo com TTS (ganho configuravel por video) no `vizlec_runtime`.
 - [x] Mixer de preview no frontend (voice/music/master) com persistencia de ganhos no `vizlec_runtime`.
@@ -277,6 +278,50 @@ Status: `IN_PROGRESS`
   - `--xfade flash_white|flash_black|fade`
   - `--xfade all_flash_premium` (compara variantes premium white)
   - `--xfade all_flash_premium_wb` (compara premium white vs black)
+
+### 5.1.2 Variacao dinamica de edicao (Fase 1 - plano de implementacao)
+
+Status: `PLANNED`
+
+Objetivo desta fase:
+
+- reduzir fingerprint de template no render cinematografico sem quebrar o fluxo atual
+- manter `1 bloco = 1 cena` nesta primeira fase
+- gerar variacao real entre renderizacoes (nao idempotente por padrao)
+- melhorar observabilidade do que foi aplicado em cada clip/corte
+
+Escopo fechado desta fase (sem refator estrutural de manifesto/timeline):
+
+- [ ] Adicionar log estruturado/plano de edicao por render (`edit_plan.json` sidecar)
+  - [ ] registrar `run_id`, modo aleatorio (`non_idempotent`) e configuracao recebida
+  - [ ] registrar por clip: `motion_preset`, `zoom_transition_preset`, se foi aplicado/ignorado e motivo
+  - [ ] registrar por corte: transicao escolhida (`fade/flash/.../cut`) e duracao efetiva
+  - [ ] resumo final com contagem de presets/transicoes utilizados
+- [ ] Rotacionar efeitos por clip (motion / zoom transition) de forma aleatoria no backend
+  - [ ] manter compatibilidade com entrada atual (string unica continua funcionando)
+  - [ ] permitir modo automatico aleatorio (sem seed fixa, gera video diferente a cada render)
+  - [ ] logar exatamente quais presets foram usados por clip
+- [ ] Rotacionar transicoes por corte com suporte a `cut` (corte seco)
+  - [ ] incluir explicitamente `cut` como opcao valida no plano de transicao
+  - [ ] logar quais cortes foram secos vs transicao com efeito
+  - [ ] manter caminho legado atual (`apply_xfade_chain`) e introduzir caminho para plano misto por corte
+- [ ] Implementar `zoom punch` agressivo (primeira versao)
+  - [ ] adicionar preset novo em `backend/effects.py` (ex.: `P_zoom_punch_aggressive`)
+  - [ ] implementar branch dedicado no `ken_burns_filter(...)` (salto brusco + settle curto)
+  - [ ] registrar override de precedencia quando punch exigir desabilitar `zoom_transition_preset`
+
+Decisoes tecnicas registradas (Fase 1):
+
+- `zoom punch` entra primeiro em `ken_burns_filter(...)` (efeito de movimento de cena)
+- quando `zoom_transition_preset != "none"` e o clip exigir punch, o backend deve priorizar punch e registrar override no log
+- manter `1 bloco = 1 cena` (nao implementar `beats`/subcenas nesta fase)
+- aleatoriedade padrao sera sem seed fixa (nao idempotente), para re-render gerar variacao real
+
+Itens explicitamente fora do escopo desta fase (registrados para evolucao):
+
+- [ ] Seed opcional para reproducao/debug (`same input + same seed = mesmo plano`)
+- [ ] Quebrar `1 bloco = 1 cena` em `beats`/subcenas (manifest v2 / `visual_beats[]`)
+- [ ] Versao evoluida do punch no caminho `zoom_transition_filter(...)` (ex.: `T7_*`)
 
 ### 5.2 Criterios de aceite
 

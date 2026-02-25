@@ -44,18 +44,58 @@ def _concat_audio_ffmpeg(audio_files: list[str], output_path: str) -> None:
 
 def _run_subtitle_transcription(payload: dict, work_dir: Path) -> dict | None:
     script_path = Path(__file__).with_name("subtitle_transcribe_faster_whisper.py")
+    subtitle_python = sys.executable
     payload_path = work_dir / "subtitle_payload.json"
     payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    raw_stdout = _run([sys.executable, str(script_path), str(payload_path)])
+    completed = subprocess.run(
+        [subtitle_python, str(script_path), str(payload_path)],
+        capture_output=True,
+        text=True,
+        cwd=str(work_dir),
+    )
+    raw_stdout = completed.stdout or ""
+    raw_stderr = completed.stderr or ""
     lines = [line.strip() for line in raw_stdout.splitlines() if line.strip()]
-    if not lines:
+    parsed: dict | None = None
+    if lines:
+        last = lines[-1]
+        try:
+            data = json.loads(last)
+            if isinstance(data, dict):
+                parsed = data
+        except Exception:
+            parsed = None
+
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"command failed ({completed.returncode}): {subtitle_python} {script_path} {payload_path}\n{raw_stderr}"
+        )
+
+    return parsed
+
+
+def _promote_subtitle_outputs(subtitle_dir: Path, final_dir: Path) -> dict[str, str] | None:
+    names = [
+        "subtitles.raw.json",
+        "subtitles.cues.json",
+        "subtitles.srt",
+        "subtitles.default.ass",
+    ]
+    paths = {name: subtitle_dir / name for name in names}
+    if not all(p.exists() for p in paths.values()):
         return None
-    last = lines[-1]
-    try:
-        data = json.loads(last)
-    except Exception:
-        return None
-    return data
+    final_dir.mkdir(parents=True, exist_ok=True)
+    for name, src in paths.items():
+        dst = final_dir / name
+        if dst.exists():
+            dst.unlink()
+        shutil.copy2(src, dst)
+    return {
+        "raw_json_path": str(final_dir / "subtitles.raw.json"),
+        "cues_json_path": str(final_dir / "subtitles.cues.json"),
+        "srt_path": str(final_dir / "subtitles.srt"),
+        "ass_path": str(final_dir / "subtitles.default.ass"),
+    }
 
 
 def _burn_subtitles_ffmpeg(video_in: str, ass_path: str, video_out: str, work_dir: str) -> None:
@@ -120,7 +160,8 @@ def main() -> int:
         subtitle_ass_path = None
         if subtitle_enabled:
             print("__VIZLEC_RESULT__ subtitle_start", flush=True)
-            subtitle_out_dir = output_path.parent
+            subtitle_out_dir = tmp_dir_path / "subtitle_out"
+            subtitle_out_dir.mkdir(parents=True, exist_ok=True)
             subtitle_payload = {
                 "audio_path": concat_audio,
                 "out_dir": str(subtitle_out_dir),
@@ -142,6 +183,9 @@ def main() -> int:
                 subtitle_info = _run_subtitle_transcription(subtitle_payload, tmp_dir_path)
                 duration_ms = int((time.time() - started) * 1000)
                 if subtitle_info and subtitle_info.get("ok"):
+                    promoted = _promote_subtitle_outputs(subtitle_out_dir, output_path.parent)
+                    if promoted:
+                        subtitle_info.update(promoted)
                     subtitle_ass_path = subtitle_info.get("ass_path")
                     print(
                         f"__VIZLEC_RESULT__ subtitle_ready {subtitle_info.get('cue_count', 0)} {duration_ms}",
@@ -186,12 +230,28 @@ def main() -> int:
         )
         if subtitle_ass_path and Path(subtitle_ass_path).exists():
             print("__VIZLEC_RESULT__ subtitle_burn_start", flush=True)
-            _burn_subtitles_ffmpeg(
-                video_in=visual_output,
-                ass_path=subtitle_ass_path,
-                video_out=str(output_path),
-                work_dir=str(output_path.parent),
-            )
+            try:
+                _burn_subtitles_ffmpeg(
+                    video_in=visual_output,
+                    ass_path=subtitle_ass_path,
+                    video_out=str(output_path),
+                    work_dir=str(output_path.parent),
+                )
+            except Exception as burn_err:
+                print(
+                    json.dumps(
+                        {
+                            "warning": "subtitle_burn_failed",
+                            "error": str(burn_err),
+                            "ass_path": str(subtitle_ass_path),
+                            "video_in": str(visual_output),
+                            "video_out": str(output_path),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                raise
             print("__VIZLEC_RESULT__ subtitle_burn_done", flush=True)
 
     print(json.dumps({

@@ -1,0 +1,432 @@
+{
+  "template_id": "subtitle-yellow-bold-bottom-v1",
+  "width": 1920,
+  "height": 1080,
+  "cues": [
+    {
+      "start": 0.0,
+      "end": 3.7,
+      "text": "SE ELA PAROU DE RESPONDER ANTES\\NDE QUALQUER COISA, RESPIRA."
+    },
+    {
+      "start": 4.3,
+      "end": 6.6,
+      "text": "EU SEI O QUE ACONTECE NA\\NSUA CABEÇA NESSA HORA."
+    },
+    {
+      "start": 7.04,
+      "end": 9.4,
+      "text": "VOCÊ PEGA O CELULAR DE 5 EM 5 MINUTOS."
+    },
+    {
+      "start": 9.68,
+      "end": 11.54,
+      "text": "FICA RELENDO A ÚLTIMA MENSAGEM."
+    },
+    {
+      "start": 11.76,
+      "end": 12.42,
+      "text": "COMEÇA A PENSAR."
+    },
+    {
+      "start": 12.7,
+      "end": 13.88,
+      "text": "SERÁ QUE EU FALEI BESTEIRA?"
+    },
+    {
+      "start": 14.12,
+      "end": 14.96,
+      "text": "SERÁ QUE EXAGEREI?"
+    },
+    {
+      "start": 15.3,
+      "end": 16.68,
+      "text": "SERÁ QUE ELA PERDEU O INTERESSE?"
+    },
+    {
+      "start": 16.94,
+      "end": 20.2,
+      "text": "E QUANTO MAIS VOCÊ PENSA, MAIS\\NDÁ VONTADE DE FAZER ALGUMA COISA."
+    },
+    {
+      "start": 20.36,
+      "end": 21.66,
+      "text": "MANDAR OUTRA MENSAGEM."
+    },
+    {
+      "start": 21.78,
+      "end": 23.02,
+      "text": "PERGUNTAR SE ESTÁ TUDO BEM."
+    },
+    {
+      "start": 23.36,
+      "end": 25.96,
+      "text": "FINGIR QUE NÃO ACONTECEU\\NNADA E PUXAR OUTRO ASSUNTO."
+    },
+    {
+      "start": 26.52,
+      "end": 27.1,
+      "text": "OU PIOR."
+    },
+    {
+      "start": 27.76,
+      "end": 30.12,
+      "text": "MANDAR UM TEXTÃO EXPLICANDO\\NOS SEUS SENTIMENTOS."
+    },
+    {
+      "start": 30.28,
+      "end": 32.16,
+      "text": "E DEIXA EU TE FALAR UMA\\NCOISA COM HONESTIDADE."
+    },
+    {
+      "start": 32.56,
+      "end": 35.14,
+      "text": "É EXATAMENTE ISSO QUE TE\\NCOLOCA NUMA POSIÇÃO FRACA."
+    },
+    {
+      "start": 35.36,
+      "end": 37.04,
+      "text": "NÃO É O SILÊNCIO DELA QUE TE PREJUDICA."
+    },
+    {
+      "start": 37.3,
+      "end": 38.64,
+      "text": "É A SUA REAÇÃO AO SILÊNCIO."
+    },
+    {
+      "start": 38.76,
+      "end": 43.22,
+      "text": "PORQUE QUANDO VOCÊ REAGE NO IMPULSO, VOCÊ\\NMOSTRA QUE ESTÁ MAIS INTERESSADO QUE ELA"
+    },
+    {
+      "start": 43.22,
+      "end": 43.98,
+      "text": "NAQUELE MOMENTO."
+    },
+    {
+      "start": 44.5,
+      "end": 46.64,
+      "text": "E QUANDO ISSO ACONTECE, A DINÂMICA MUDA."
+    },
+    {
+      "start": 46.78,
+      "end": 50.18,
+      "text": "VOCÊ SAI DA POSIÇÃO DE ESCOLHA\\NE ENTRA NA POSIÇÃO DE ESPERA."
+    },
+    {
+      "start": 50.66,
+      "end": 52.66,
+      "text": "E NINGUÉM QUER SER O\\NCARA QUE ESTÁ ESPERANDO."
+    },
+    {
+      "start": 53.42,
+      "end": 55.44,
+      "text": "AGORA PRESTA ATENÇÃO NO QUE VOU TE DIZER."
+    },
+    {
+      "start": 55.44,
+      "end": 59.42,
+      "text": "QUANDO UMA MULHER PARA DE RESPONDER,\\NISSO PODE SIGNIFICAR VÁRIAS COISAS."
+    },
+    {
+      "start": 59.74,
+      "end": 61.4,
+      "text": "PODE SER QUE ELA ESTEJA OCUPADA."
+    },
+    {
+      "start": 61.56,
+      "end": 63.46,
+      "text": "PODE SER QUE TENHA PERDIDO\\NUM POUCO DO INTERESSE."
+    },
+    {
+      "start": 63.68,
+      "end": 66.86,
+      "text": "PODE SER QUE ESTEJA TESTANDO O\\NSEU NÍVEL DE CONTROLE EMOCIONAL."
+    },
+    {
+      "start": 67.24,
+      "end": 69.72,
+      "text": "PODE SER QUE TENHA OUTRA\\NOPÇÃO CHAMANDO ATENÇÃO."
+    },
+    {
+      "start": 70.12,
+      "end": 73.94,
+      "text": "MAS NENHUMA DESSAS SITUAÇÕES MELHORA\\NQUANDO VOCÊ DEMONSTRA ANSIEDADE."
+    },
+    {
+      "start": 74.12,
+      "end": 75.02,
+      "text": "TEXTÃO NÃO RESOLVE."
+    },
+    {
+      "start": 75.36,
+      "end": 76.44,
+      "text": "COBRANÇA NÃO RESOLVE."
+    },
+    {
+      "start": 76.68,
+      "end": 77.28,
+      "text": "TÁ TUDO BEM?"
+    },
+    {
+      "start": 77.44,
+      "end": 78.06,
+      "text": "NÃO RESOLVE."
+    },
+    {
+      "start": 78.32,
+      "end": 79.18,
+      "text": "IRONIA NÃO RESOLVE."
+    },
+    {
+      "start": 79.44,
+      "end": 81.4,
+      "text": "MANDAR MEME PRA QUEBRAR O CLIMA NÃO RESOLVE."
+    },
+    {
+      "start": 81.4,
+      "end": 86.48,
+      "text": "NA VERDADE, QUANTO MAIS VOCÊ TENTA RESOLVER,\\NMAIS VOCÊ REFORÇA QUE ESTÁ INCOMODADO."
+    },
+    {
+      "start": 86.66,
+      "end": 87.58,
+      "text": "E ISSO PESA."
+    },
+    {
+      "start": 87.82,
+      "end": 90.78,
+      "text": "ENTÃO QUAL É A ATITUDE\\NMADURA QUE VOCÊ NÃO FAZ NADA."
+    },
+    {
+      "start": 91.2,
+      "end": 92.82,
+      "text": "MAS NÃO É NADA DE DESESPERO."
+    },
+    {
+      "start": 92.96,
+      "end": 93.88,
+      "text": "É NADA DE CONTROLE."
+    },
+    {
+      "start": 94.54,
+      "end": 97.38,
+      "text": "VOCÊ NÃO MANDA MENSAGEM\\NPOR PELO MENOS 24 HORAS."
+    },
+    {
+      "start": 97.94,
+      "end": 99.22,
+      "text": "NÃO POSTA HISTÓRIA EMOCIONAL."
+    },
+    {
+      "start": 99.36,
+      "end": 100.52,
+      "text": "NÃO COLOCA EM DIRETA."
+    },
+    {
+      "start": 100.8,
+      "end": 102.48,
+      "text": "NÃO TENTA APARECER DE QUALQUER FORMA."
+    },
+    {
+      "start": 102.7,
+      "end": 104.6,
+      "text": "VOCÊ SIMPLESMENTE VOLTA PRA SUA VIDA."
+    },
+    {
+      "start": 104.86,
+      "end": 105.24,
+      "text": "TREINA."
+    },
+    {
+      "start": 105.5,
+      "end": 106.02,
+      "text": "TRABALHA."
+    },
+    {
+      "start": 106.26,
+      "end": 107.02,
+      "text": "SAI COM AMIGOS."
+    },
+    {
+      "start": 107.02,
+      "end": 108.36,
+      "text": "FAÇA SUAS COISAS."
+    },
+    {
+      "start": 108.64,
+      "end": 111.04,
+      "text": "PORQUE TEM UMA COISA QUE\\NVOCÊ PRECISA ENTENDER."
+    },
+    {
+      "start": 111.54,
+      "end": 115.46,
+      "text": "QUANDO VOCÊ CORRE ATRÁS DO SILÊNCIO\\NDELA, VOCÊ VAI ALI DO SILÊNCIO."
+    },
+    {
+      "start": 115.6,
+      "end": 117.84,
+      "text": "QUANDO VOCÊ NÃO REAGE, VOCÊ CRIA ESPAÇO."
+    },
+    {
+      "start": 118.18,
+      "end": 120.32,
+      "text": "E ESPAÇO É O QUE PERMITE\\NQUE ELA SINTA AUSÊNCIA."
+    },
+    {
+      "start": 120.74,
+      "end": 122.22,
+      "text": "AGORA, DEIXA EU SER BEM CLARO."
+    },
+    {
+      "start": 122.4,
+      "end": 123.46,
+      "text": "ISSO NÃO É JOGUINHO."
+    },
+    {
+      "start": 123.7,
+      "end": 124.54,
+      "text": "ISSO É POSTURA."
+    },
+    {
+      "start": 124.8,
+      "end": 128.04,
+      "text": "SE ELA REALMENTE TIVER INTERESSE,\\NELA VAI SENTIR A MUDANÇA."
+    },
+    {
+      "start": 128.22,
+      "end": 132.26,
+      "text": "SE ELA NÃO TIVER, INSISTIR SÓ VAI\\NPROLONGAR ALGO QUE JÁ ESTAVA FRACO."
+    },
+    {
+      "start": 132.38,
+      "end": 134.56,
+      "text": "E AQUI ESTÁ O PONTO QUE QUASE NINGUÉM FALA."
+    },
+    {
+      "start": 134.56,
+      "end": 137.16,
+      "text": "O OBJETIVO NÃO É FAZER ELA RESPONDER."
+    },
+    {
+      "start": 137.7,
+      "end": 141.22,
+      "text": "O OBJETIVO É VOCÊ NÃO SE DIMINUIR\\NTENTANDO FORÇAR A RESPOSTA."
+    },
+    {
+      "start": 141.54,
+      "end": 143.02,
+      "text": "EXISTE UMA DIFERENÇA ENORME."
+    },
+    {
+      "start": 143.34,
+      "end": 146.38,
+      "text": "PORQUE QUANDO VOCÊ TENTA\\NFORÇAR, VOCÊ SE DESVALORIZA."
+    },
+    {
+      "start": 146.54,
+      "end": 149.16,
+      "text": "QUANDO VOCÊ SEGURA, VOCÊ\\NPRESERVA SUA POSIÇÃO."
+    },
+    {
+      "start": 149.4,
+      "end": 153.9,
+      "text": "DEPOIS DESSAS 24 HORAS, VOCÊ PODE\\NMANDAR ALGO SIMPLES, DIRETO, CURTO."
+    },
+    {
+      "start": 154.1,
+      "end": 155.1,
+      "text": "SEM EMOÇÃO DEMAIS."
+    },
+    {
+      "start": 155.48,
+      "end": 156.2,
+      "text": "SEM COBRANÇA."
+    },
+    {
+      "start": 156.8,
+      "end": 159.48,
+      "text": "MAS ISSO PRECISA SER\\NFEITO COM A CABEÇA FRIA."
+    },
+    {
+      "start": 159.58,
+      "end": 162.04,
+      "text": "E A MAIORIA ERRA EXATAMENTE AQUI."
+    },
+    {
+      "start": 162.48,
+      "end": 163.56,
+      "text": "AGE NO IMPULSO."
+    },
+    {
+      "start": 163.56,
+      "end": 164.94,
+      "text": "AGE NA CARÊNCIA."
+    },
+    {
+      "start": 165.2,
+      "end": 166.42,
+      "text": "AGE NO MEDO DE PERDER."
+    },
+    {
+      "start": 166.86,
+      "end": 171.12,
+      "text": "E SE VOCÊ ESTÁ PASSANDO POR ISSO AGORA,\\NEU SEI COMO É FÁCIL PERDER A CABEÇA."
+    },
+    {
+      "start": 171.3,
+      "end": 173.34,
+      "text": "QUANDO ISSO ACONTECEU\\NCOMIGO, EU FIZ TUDO ERRADO."
+    },
+    {
+      "start": 173.78,
+      "end": 174.64,
+      "text": "MENSAGEM DEMAIS."
+    },
+    {
+      "start": 174.98,
+      "end": 176.0,
+      "text": "ANSIEDADE DEMAIS."
+    },
+    {
+      "start": 176.6,
+      "end": 177.2,
+      "text": "E SÓ PIOROU."
+    },
+    {
+      "start": 177.42,
+      "end": 181.8,
+      "text": "DEPOIS DISSO, EU PAREI E ORGANIZEI PRA\\NMIM MESMO UM PASSO A PASSO SIMPLES DO QUE"
+    },
+    {
+      "start": 181.8,
+      "end": 184.08,
+      "text": "FAZER QUANDO UMA MULHER COMEÇA A ESFRIAR."
+    },
+    {
+      "start": 184.2,
+      "end": 185.94,
+      "text": "JUSTAMENTE PRA NÃO AGIR NO IMPULSO."
+    },
+    {
+      "start": 186.02,
+      "end": 188.78,
+      "text": "EU DEIXEI ESSE MESMO GUIA NO\\NPRIMEIRO COMENTÁRIO FIXADO."
+    },
+    {
+      "start": 189.04,
+      "end": 192.28,
+      "text": "SE VOCÊ ESTIVER NESSA FASE, PODE\\NTE AJUDAR A MANTER A POSTURA."
+    },
+    {
+      "start": 192.28,
+      "end": 195.28,
+      "text": "PORQUE AGIR SEM PLANO, É O\\NQUE MAIS DESTRÓI SUAS CHANCES."
+    },
+    {
+      "start": 195.52,
+      "end": 198.4,
+      "text": "E O QUE VOCÊ PRECISA AGORA\\NNÃO É DESESPERO, É CONTROLE."
+    }
+  ]
+}

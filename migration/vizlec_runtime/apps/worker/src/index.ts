@@ -502,6 +502,22 @@ async function renderCinematicFinalVideoWithPython(options: {
           }
           if (/^__VIZLEC_RESULT__\s+subtitle_burn_done$/.test(line)) {
             void notifyRunningProgress(options.job, Math.max(clipProgress, 97));
+            return;
+          }
+          if (line.includes("\"warning\": \"subtitle_burn_failed\"") || line.includes("\"warning\":\"subtitle_burn_failed\"")) {
+            try {
+              const parsed = JSON.parse(line) as Record<string, unknown>;
+              logJobEvent("concat_video_subtitle_burn_failed", options.job, {
+                error: typeof parsed.error === "string" ? parsed.error : String(parsed.error ?? "unknown"),
+                ass_path: typeof parsed.ass_path === "string" ? parsed.ass_path : null,
+                video_in: typeof parsed.video_in === "string" ? parsed.video_in : null,
+                video_out: typeof parsed.video_out === "string" ? parsed.video_out : null
+              });
+            } catch {
+              logJobEvent("concat_video_subtitle_burn_failed", options.job, {
+                error: line
+              });
+            }
           }
         }
       }
@@ -4917,6 +4933,58 @@ async function applyBgmMixToFinalVideo(options: {
   });
 }
 
+async function burnSubtitlesIntoFinalVideo(options: {
+  finalVideoPath: string;
+  subtitleAssPath: string;
+  job: JobRecord;
+}): Promise<void> {
+  const { finalVideoPath, subtitleAssPath, job } = options;
+  const tmpOutput = `${finalVideoPath}.sub_burn.tmp.mp4`;
+  const vcodec = (process.env.VIDEO_AUTOMATION_FFMPEG_VCODEC ?? "libx264").trim().toLowerCase();
+  const vcodecArgs =
+    vcodec === "h264_nvenc"
+      ? [
+          "-c:v",
+          "h264_nvenc",
+          "-preset",
+          (process.env.VIDEO_AUTOMATION_FFMPEG_NVENC_PRESET ?? "p5").trim() || "p5",
+          "-cq",
+          (process.env.VIDEO_AUTOMATION_FFMPEG_NVENC_CQ ?? "21").trim() || "21"
+        ]
+      : [
+          "-c:v",
+          "libx264",
+          "-preset",
+          (process.env.VIDEO_AUTOMATION_FFMPEG_X264_PRESET ?? "veryfast").trim() || "veryfast",
+          "-crf",
+          (process.env.VIDEO_AUTOMATION_FFMPEG_X264_CRF ?? "18").trim() || "18"
+        ];
+  await runProcess(
+    "ffmpeg",
+    [
+      "-y",
+      "-i",
+      finalVideoPath,
+      "-vf",
+      `ass=${path.basename(subtitleAssPath)}`,
+      ...vcodecArgs,
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      tmpOutput
+    ],
+    { logPrefix: "video:subtitle_burn_fallback", cwd: path.dirname(subtitleAssPath) }
+  );
+  await fs.promises.rename(tmpOutput, finalVideoPath);
+  logJobEvent("concat_video_subtitle_burn_fallback_applied", job, {
+    subtitle_ass_path: subtitleAssPath,
+    output_path: finalVideoPath
+  });
+}
+
 async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<void> {
   const { job } = options;
   if (!job.videoVersionId) {
@@ -4966,6 +5034,15 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     version.id
   );
   ensureDir(finalDir);
+  const staleSubtitlePaths = [
+    path.join(finalDir, "subtitles.raw.json"),
+    path.join(finalDir, "subtitles.cues.json"),
+    path.join(finalDir, "subtitles.srt"),
+    path.join(finalDir, "subtitles.default.ass")
+  ];
+  for (const stalePath of staleSubtitlePaths) {
+    await fs.promises.unlink(stalePath).catch(() => null);
+  }
   const outputPath = path.join(finalDir, "final.mp4");
   const mediaFiles: string[] = [];
   const audioFiles: string[] = [];
@@ -5124,6 +5201,15 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   const subtitleCuesJsonPath = path.join(finalDir, "subtitles.cues.json");
   const subtitleSrtPath = path.join(finalDir, "subtitles.srt");
   const subtitleAssPath = path.join(finalDir, "subtitles.default.ass");
+  if (!usedCinematicBridge && fs.existsSync(subtitleAssPath)) {
+    await notifyRunningPhase(job, "generation");
+    await burnSubtitlesIntoFinalVideo({
+      finalVideoPath: outputPath,
+      subtitleAssPath,
+      job
+    });
+    await notifyRunningProgress(job, 99);
+  }
   const hasSubtitleOutput = fs.existsSync(subtitleAssPath);
 
   await prisma.asset.deleteMany({
