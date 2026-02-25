@@ -778,7 +778,7 @@ const ImagePromptEditor: React.FC<ImagePromptEditorProps> = React.memo(({ blockI
   };
 
   return (
-    <div className={`space-y-4 rounded-[7px] p-2 transition-colors ${disabled ? 'opacity-60' : ''} ${invalid ? 'bg-red-500/10 ring-1 ring-red-500/40' : ''}`} ref={containerRef}>
+    <div className={`space-y-2 rounded-[7px] p-1 transition-colors ${disabled ? 'opacity-60' : ''} ${invalid ? 'bg-red-500/10 ring-1 ring-red-500/40' : ''}`} ref={containerRef}>
       <div className="space-y-1.5">
         <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-tight">Prompt</label>
         <textarea
@@ -794,7 +794,7 @@ const ImagePromptEditor: React.FC<ImagePromptEditorProps> = React.memo(({ blockI
           disabled={disabled}
         />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-tight">Avoid</label>
           <input
@@ -1914,6 +1914,11 @@ const Editor: React.FC<EditorProps> = ({
     setFinalVideoLastElapsedSeconds(null);
   }, []);
 
+  const invalidateSubtitleAssetsLocal = useCallback(() => {
+    setSubtitleFiles({});
+    setSubtitleListRevision((prev) => prev + 1);
+  }, []);
+
   useEffect(() => {
     if (!selectedVersionId) return;
     const readBuildVideoSnapshot = (
@@ -2805,6 +2810,32 @@ const Editor: React.FC<EditorProps> = ({
     );
   }, [invalidateSlidesForBlocks, clearBrokenSlidesForBlocks]);
 
+  const clearAudioPreviewsForBlocks = useCallback((blockIds: string[]) => {
+    if (blockIds.length === 0) return;
+    const ids = new Set(blockIds);
+    setAudioUrls((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      blockIds.forEach((id) => {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    setBlocks((prev) =>
+      prev.map((block) =>
+        ids.has(block.id)
+          ? {
+              ...block,
+              audioUrl: undefined
+            }
+          : block
+      )
+    );
+  }, []);
+
   const updateBlock = useCallback((id: string, updates: Partial<LessonBlock>) => {
     setBlocks((prev) => prev.map(b => b.id === id ? { ...b, ...updates } : b));
   }, []);
@@ -2815,13 +2846,16 @@ const Editor: React.FC<EditorProps> = ({
     }
     try {
       await apiPatch(`/blocks/${blockId}`, { ttsText: value });
+      clearAudioPreviewsForBlocks([blockId]);
+      invalidateSubtitleAssetsLocal();
+      invalidateFinalVideoLocal();
       updateBlock(blockId, { narratedText: value });
       clearNarratedDraft(blockId);
     } catch (err) {
       console.error(err);
       setError((err as Error).message ?? 'Failed to save narrated text.');
     }
-  }, [updateBlock, clearNarratedDraft]);
+  }, [clearAudioPreviewsForBlocks, clearNarratedDraft, invalidateFinalVideoLocal, invalidateSubtitleAssetsLocal, updateBlock]);
 
   const saveOnScreen = useCallback(async (blockId: string, value: LessonBlock["onScreenText"]) => {
     try {
@@ -2856,12 +2890,14 @@ const Editor: React.FC<EditorProps> = ({
         seed: value.seedNumber
       };
       await apiPatch(`/blocks/${blockId}`, { imagePrompt: payload });
+      clearImagePreviewsForBlocks([blockId]);
+      invalidateFinalVideoLocal();
       updateBlock(blockId, { imagePrompt: value });
     } catch (err) {
       console.error(err);
       setError((err as Error).message ?? 'Failed to save image prompt.');
     }
-  }, [updateBlock]);
+  }, [clearImagePreviewsForBlocks, invalidateFinalVideoLocal, updateBlock]);
 
   const handleRegenerateText = useCallback(async (id: string) => {
     if (!lessonId) return;
@@ -2893,6 +2929,7 @@ const Editor: React.FC<EditorProps> = ({
     const current = blocks.find((block) => block.id === id);
     if (!(await ensureTtsReady())) return;
     invalidateFinalVideoLocal();
+    invalidateSubtitleAssetsLocal();
     const currentText = getNarratedDraft(id, current?.narratedText);
     if (currentText && current && currentText !== current.narratedText) {
       await saveNarratedText(id, currentText);
@@ -2922,7 +2959,7 @@ const Editor: React.FC<EditorProps> = ({
       setError((err as Error).message ?? 'Failed to regenerate audio.');
       setGeneratingStates(prev => ({ ...prev, [id]: { ...prev[id], audio: false } }));
     }
-  }, [blocks, ensureTtsReady, getNarratedDraft, invalidateFinalVideoLocal, isGeneratingFinalVideo, lessonId, lessonVoiceId, saveNarratedText]);
+  }, [blocks, ensureTtsReady, getNarratedDraft, invalidateFinalVideoLocal, invalidateSubtitleAssetsLocal, isGeneratingFinalVideo, lessonId, lessonVoiceId, saveNarratedText]);
 
   const handleGenerateSlides = async () => {
     setError('Slides are disabled in this MVP.');
@@ -3169,6 +3206,7 @@ const Editor: React.FC<EditorProps> = ({
         return { ...prev, ...next };
       });
       setAudioUrls({});
+      invalidateSubtitleAssetsLocal();
       setTtsProgress((prev) => prev ?? { current: 0, total: blocks.length });
       setTtsPhase('waiting');
       const job = await apiPost<{ id: string; status: string }>(
@@ -3192,7 +3230,7 @@ const Editor: React.FC<EditorProps> = ({
       setTtsProgress(null);
       return false;
     }
-  }, [blocks, ensureTtsReady, invalidateFinalVideoLocal, lessonVoiceId, saveNarratedText, selectedVersionId]);
+  }, [blocks, ensureTtsReady, invalidateFinalVideoLocal, invalidateSubtitleAssetsLocal, lessonVoiceId, saveNarratedText, selectedVersionId]);
 
   const handleGlobalAction = async (action: string) => {
     if (!lessonId) return;
@@ -4179,6 +4217,9 @@ const Editor: React.FC<EditorProps> = ({
   const missingAudioBlocksForFinal = blocks.filter((block) => !audioUrls[block.id]);
   const missingSlideBlocksForFinal = blocks.filter((block) => !slideAvailability[block.id]);
   const missingImageAssetsForFinal = blocks.filter((block) => !imageUrls[block.id] && !block.rawImageUrl && !block.generatedImageUrl);
+  const areBlocksPhaseReady = blocks.length > 0;
+  const areAudiosPhaseReady = blocks.length > 0 && missingAudioBlocksForFinal.length === 0;
+  const areImagesPhaseReady = blocks.length > 0 && missingImageAssetsForFinal.length === 0;
   const audioReviewCurrentBlockId = audioReviewQueue[audioReviewIndex] ?? '';
   const audioReviewCurrentBlock = audioReviewCurrentBlockId ? blocksById[audioReviewCurrentBlockId] : undefined;
   const audioReviewCurrentUrl = audioReviewCurrentBlock?.audioUrl;
@@ -5164,9 +5205,13 @@ const Editor: React.FC<EditorProps> = ({
                         setIsMobileActionsMenuOpen(false);
                       }}
                       disabled={isGenerateBlocksDisabled}
-                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border bg-[hsl(var(--editor-input))] border-[hsl(var(--editor-input-border))] text-muted-foreground ${toolbarDisabledLikeAudioReview}`}
+                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border ${
+                        areBlocksPhaseReady
+                          ? 'border-emerald-500/25 bg-emerald-500/10 text-muted-foreground'
+                          : 'bg-[hsl(var(--editor-input))] border-[hsl(var(--editor-input-border))] text-muted-foreground'
+                      } ${toolbarDisabledLikeAudioReview}`}
                     >
-                      Generate blocks
+                      {areBlocksPhaseReady ? 'Regenerate blocks' : 'Generate blocks'}
                     </button>
                   )}
 
@@ -5190,10 +5235,12 @@ const Editor: React.FC<EditorProps> = ({
                       className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border ${
                         ttsHealthChecked && !ttsHealthy
                           ? 'bg-red-500/10 border-red-500/30 text-red-500'
+                          : areAudiosPhaseReady
+                          ? 'bg-emerald-500/10 border-emerald-500/25 text-muted-foreground'
                           : 'bg-indigo-500/10 border-indigo-500/20 text-muted-foreground'
                       } ${toolbarDisabledLikeAudioReview}`}
                     >
-                      Generate audios
+                      {areAudiosPhaseReady ? 'Regenerate audios' : 'Generate audios'}
                     </button>
                   )}
 
@@ -5225,9 +5272,13 @@ const Editor: React.FC<EditorProps> = ({
                         setIsMobileActionsMenuOpen(false);
                       }}
                       disabled={isGenerateImagesDisabled}
-                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-indigo-500/20 bg-indigo-500/10 text-muted-foreground ${toolbarDisabledLikeAudioReview}`}
+                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border ${
+                        areImagesPhaseReady
+                          ? 'border-emerald-500/25 bg-emerald-500/10 text-muted-foreground'
+                          : 'border-indigo-500/20 bg-indigo-500/10 text-muted-foreground'
+                      } ${toolbarDisabledLikeAudioReview}`}
                     >
-                      Generate images
+                      {areImagesPhaseReady ? 'Regenerate images' : 'Generate images'}
                     </button>
                   )}
 
@@ -5350,10 +5401,14 @@ const Editor: React.FC<EditorProps> = ({
             <button 
               onClick={() => handleGlobalAction('generateBlocks')}
               disabled={isGenerateBlocksDisabled}
-              className={`flex items-center gap-2 px-3 h-8 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[10px] font-bold text-muted-foreground hover:text-orange-600 transition-all shadow-sm ${toolbarDisabledLikeAudioReview}`}
+              className={`flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all shadow-sm ${
+                areBlocksPhaseReady
+                  ? 'bg-emerald-500/10 border border-emerald-500/25 text-muted-foreground hover:bg-emerald-500/15'
+                  : 'bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] text-muted-foreground hover:text-orange-600'
+              } ${toolbarDisabledLikeAudioReview}`}
             >
               <Layers size={14} className="text-current" />
-              Generate Blocks
+              {areBlocksPhaseReady ? 'Regenerate Blocks' : 'Generate Blocks'}
             </button>
           )}
           <div className="h-5 w-[1px] bg-[hsl(var(--editor-border))]/60"></div>
@@ -5397,11 +5452,13 @@ const Editor: React.FC<EditorProps> = ({
               className={`relative overflow-hidden flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all shadow-sm ${
                 ttsHealthChecked && !ttsHealthy
                   ? 'bg-red-500/10 border border-red-500/30 text-red-500 hover:bg-red-500/15'
+                  : areAudiosPhaseReady
+                  ? 'bg-emerald-500/10 border border-emerald-500/25 text-muted-foreground hover:bg-emerald-500/15'
                   : 'bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15'
               } ${toolbarDisabledLikeAudioReview}`}
             >
               <AudioLines size={14} className="text-current" />
-              Generate Audios
+              {areAudiosPhaseReady ? 'Regenerate Audios' : 'Generate Audios'}
             </button>
           )}
 
@@ -5457,10 +5514,14 @@ const Editor: React.FC<EditorProps> = ({
             <button 
               onClick={() => handleGlobalAction('generateImages')}
               disabled={isGenerateImagesDisabled}
-              className={`relative overflow-hidden flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all shadow-sm bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15 ${toolbarDisabledLikeAudioReview}`}
+              className={`relative overflow-hidden flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all shadow-sm ${
+                areImagesPhaseReady
+                  ? 'bg-emerald-500/10 border border-emerald-500/25 text-muted-foreground hover:bg-emerald-500/15'
+                  : 'bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15'
+              } ${toolbarDisabledLikeAudioReview}`}
             >
               <ImageIcon size={14} className="text-current" />
-              <span className="truncate">Generate Images</span>
+              <span className="truncate">{areImagesPhaseReady ? 'Regenerate Images' : 'Generate Images'}</span>
             </button>
           )}
 
@@ -5668,39 +5729,67 @@ const Editor: React.FC<EditorProps> = ({
               key={block.id}
               id={`block-${block.id}`}
               ref={el => { blockRefs.current[block.id] = el; }}
-              className="max-w-[1200px] mx-auto space-y-3"
+              className="max-w-[1200px] mx-auto space-y-2"
             >
-              <div className="flex items-center gap-3 px-2">
-                <div className="px-2 py-1 bg-primary/10 text-primary border border-primary/20 text-[10px] font-bold rounded-[5px] shadow-sm transition-colors">
-                  {block.number}
-                </div>
-                {audioReviewActive && audioReviewQueueSet.has(block.id) && (
+              <div className="bg-[hsl(var(--editor-surface))] border border-[hsl(var(--editor-border))] rounded-[8px] overflow-hidden">
+                <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/35">
+                  <div className="px-2 py-1 bg-primary/10 text-primary border border-primary/20 text-[10px] font-bold rounded-[5px] shadow-sm transition-colors">
+                    {block.number}
+                  </div>
+                  <div className="text-[11px] font-semibold text-foreground/80">
+                    Block {block.number}
+                  </div>
                   <span
                     className={`px-2 py-1 text-[9px] font-bold uppercase tracking-widest rounded-[5px] border ${
-                      audioReviewMarked[block.id]
-                        ? 'bg-red-500/10 border-red-500/40 text-red-500'
-                        : block.id === audioReviewCurrentBlockId
-                        ? 'bg-orange-500/10 border-orange-500/40 text-orange-600'
+                      audioUrls[block.id]
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-300'
                         : 'bg-slate-500/10 border-slate-500/30 text-muted-foreground'
                     }`}
                   >
-                    {audioReviewMarked[block.id]
-                      ? 'Marked for Regeneration'
-                      : block.id === audioReviewCurrentBlockId
-                      ? 'Current in Review'
-                      : 'In Review Queue'}
+                    {audioUrls[block.id] ? 'Audio Ready' : 'Audio Pending'}
                   </span>
-                )}
-              </div>
+                  <span
+                    className={`px-2 py-1 text-[9px] font-bold uppercase tracking-widest rounded-[5px] border ${
+                      (imageUrls[block.id] || block.rawImageUrl || block.generatedImageUrl) && !brokenRawImages[block.id]
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-300'
+                        : blockMissingPrompt
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-300'
+                        : 'bg-slate-500/10 border-slate-500/30 text-muted-foreground'
+                    }`}
+                  >
+                    {(imageUrls[block.id] || block.rawImageUrl || block.generatedImageUrl) && !brokenRawImages[block.id]
+                      ? 'Image Ready'
+                      : blockMissingPrompt
+                      ? 'Prompt Missing'
+                      : 'Image Pending'}
+                  </span>
+                  {audioReviewActive && audioReviewQueueSet.has(block.id) && (
+                    <span
+                      className={`px-2 py-1 text-[9px] font-bold uppercase tracking-widest rounded-[5px] border ${
+                        audioReviewMarked[block.id]
+                          ? 'bg-red-500/10 border-red-500/40 text-red-500'
+                          : block.id === audioReviewCurrentBlockId
+                          ? 'bg-orange-500/10 border-orange-500/40 text-orange-600'
+                          : 'bg-slate-500/10 border-slate-500/30 text-muted-foreground'
+                      }`}
+                    >
+                      {audioReviewMarked[block.id]
+                        ? 'Marked for Regeneration'
+                        : block.id === audioReviewCurrentBlockId
+                        ? 'Current in Review'
+                        : 'In Review Queue'}
+                    </span>
+                  )}
+                </div>
 
-              <div className="bg-[hsl(var(--editor-surface))] border border-[hsl(var(--editor-border))] rounded-[5px] flex gap-6 overflow-hidden min-h-[360px]">
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-0">
                 {/** Overlay state for regeneration */}
                 {/** Keep inside each column for proper scroll and interaction lock */}
                 {/* Block editing section (left) */}
-                <div className="flex-1 p-8 space-y-12 relative">
+                <div className="min-w-0 p-4 lg:p-5 space-y-4 relative">
                 {/* 1. Script & TTS Section */}
-                <section className="space-y-6">
-                  <div className="flex items-center justify-between border-b border-dashed border-[hsl(var(--editor-border))] pb-3">
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-dashed border-[hsl(var(--editor-border))] pb-2">
                     <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
                       <Mic size={14} className="text-orange-600" />
                       Voiceover & Scripting
@@ -5709,7 +5798,7 @@ const Editor: React.FC<EditorProps> = ({
                       <button 
                         onClick={() => handleRegenerateText(block.id)}
                         disabled={Boolean(generatingStates[block.id]?.text || showTopSegmentBusy || isGeneratingFinalVideo)}
-                        className={`flex items-center gap-2 px-3 h-9 bg-transparent border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[10px] font-bold text-muted-foreground transition-all shadow-sm ${
+                        className={`flex items-center gap-2 px-3 h-8 bg-transparent border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[10px] font-bold text-muted-foreground transition-all shadow-sm ${
                           generatingStates[block.id]?.text ? '' : 'hover:text-orange-600'
                         }`}
                       >
@@ -5723,7 +5812,7 @@ const Editor: React.FC<EditorProps> = ({
                     </div>
                   </div>
                   
-                  <div className="space-y-3 group">
+                  <div className="space-y-2 group">
                     <NarratedAudioPanel
                       blockId={block.id}
                       originalText={block.originalText}
@@ -5744,24 +5833,22 @@ const Editor: React.FC<EditorProps> = ({
 
               </div>
 
-                <div className="self-stretch border-l border-dashed border-[hsl(var(--editor-border))]/60"></div>
-
                 {/* Preview and Image Forge section (right) */}
-                <div className="w-[400px] bg-[hsl(var(--editor-surface))] p-8 flex flex-col gap-5 overflow-y-auto custom-scrollbar border-[hsl(var(--editor-border))] relative">
+                <div className="bg-[hsl(var(--editor-surface))] p-4 lg:p-4 flex flex-col gap-2 overflow-y-auto custom-scrollbar border-t lg:border-t-0 lg:border-l border-[hsl(var(--editor-border))] relative">
                 {(() => {
                   const currentImagePanelTab =
                     imagePanelTabs[block.id] ??
                     (imageUrls[block.id] || block.rawImageUrl || block.generatedImageUrl ? 'image' : 'prompt');
                   return (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2 p-1 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/40">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-2 rounded-[5px] bg-[hsl(var(--editor-surface-2))] px-1.5 py-1">
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
                             onClick={() => setImagePanelTabs((prev) => ({ ...prev, [block.id]: 'image' }))}
-                            className={`h-8 px-3 rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                            className={`h-7 px-2.5 rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors ${
                               currentImagePanelTab === 'image'
-                                ? 'bg-orange-600 text-white'
+                                ? 'bg-[hsl(var(--editor-surface))] text-foreground shadow-sm'
                                 : 'text-muted-foreground hover:text-foreground'
                             }`}
                           >
@@ -5770,9 +5857,9 @@ const Editor: React.FC<EditorProps> = ({
                           <button
                             type="button"
                             onClick={() => setImagePanelTabs((prev) => ({ ...prev, [block.id]: 'prompt' }))}
-                            className={`h-8 px-3 rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                            className={`h-7 px-2.5 rounded-[4px] text-[10px] font-bold uppercase tracking-widest transition-colors ${
                               currentImagePanelTab === 'prompt'
-                                ? 'bg-orange-600 text-white'
+                                ? 'bg-orange-600 text-white shadow-sm'
                                 : 'text-muted-foreground hover:text-foreground'
                             }`}
                           >
@@ -5784,8 +5871,8 @@ const Editor: React.FC<EditorProps> = ({
                             onClick={() => handleRegenerateImage(block.id)}
                             disabled={Boolean(generatingStates[block.id]?.image || isTextGenerationBusy || isGeneratingFinalVideo || blockMissingPrompt)}
                             title={blockMissingPrompt ? 'Preencha o prompt de imagem deste bloco para gerar a imagem.' : 'Generate image'}
-                            className={`flex items-center gap-2 px-3 h-8 bg-transparent border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[10px] font-bold text-muted-foreground transition-all shadow-sm ${
-                              generatingStates[block.id]?.image ? '' : 'hover:text-orange-600'
+                            className={`flex items-center gap-2 px-3 h-7 bg-[hsl(var(--editor-surface))] border border-[hsl(var(--editor-input-border))] rounded-[5px] text-[10px] font-bold text-muted-foreground transition-all shadow-sm disabled:shadow-none ${
+                              generatingStates[block.id]?.image ? '' : 'hover:text-orange-600 hover:border-orange-200'
                             }`}
                           >
                             <RefreshCw size={14} className={`${generatingStates[block.id]?.image ? 'animate-spin text-orange-600' : 'text-muted-foreground'}`} />
@@ -5795,7 +5882,7 @@ const Editor: React.FC<EditorProps> = ({
                       </div>
 
                       {currentImagePanelTab === 'image' ? (
-                      <div className="relative group/asset aspect-video rounded-[6px] overflow-hidden border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] shadow-sm">
+                      <div className="relative group/asset aspect-[16/10] rounded-[6px] overflow-hidden border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] shadow-sm">
                           {!brokenRawImages[block.id] && (block.rawImageUrl || block.generatedImageUrl) ? (
                             <img 
                               src={block.rawImageUrl || block.generatedImageUrl} 
@@ -5834,7 +5921,7 @@ const Editor: React.FC<EditorProps> = ({
                           )}
                         </div>
                       ) : (
-                        <section className="space-y-3 rounded-[6px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] p-4">
+                        <section className="space-y-1 p-0">
                           <ImagePromptEditor
                             blockId={block.id}
                             value={block.imagePrompt}
@@ -5847,6 +5934,7 @@ const Editor: React.FC<EditorProps> = ({
                     </div>
                   );
                 })()}
+                </div>
                 </div>
               </div>
             </div>

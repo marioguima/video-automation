@@ -6653,6 +6653,55 @@ async function invalidateFinalVideoForLessonVersion(videoVersionId: string, reas
   fastify.log.info({ videoVersionId, reason, deletedFinalVideos: assets.length }, "Final video invalidated");
 }
 
+async function invalidateAssetsByBlock(
+  blockId: string,
+  kinds: string[],
+  reason: string
+): Promise<number> {
+  if (kinds.length === 0) return 0;
+  const assets = await prisma.asset.findMany({
+    where: {
+      blockId,
+      kind: { in: kinds }
+    },
+    select: { id: true, path: true, kind: true }
+  });
+  if (assets.length === 0) return 0;
+  for (const asset of assets) {
+    await unlinkIfExists(asset.path);
+    await pruneEmptyParentDirs(asset.path);
+  }
+  await prisma.asset.deleteMany({
+    where: { id: { in: assets.map((item) => item.id) } }
+  });
+  fastify.log.info({ blockId, reason, kinds, deletedAssets: assets.length }, "Block assets invalidated");
+  return assets.length;
+}
+
+async function invalidateSubtitleAssetsForLessonVersion(videoVersionId: string, reason: string): Promise<number> {
+  const subtitleKinds = ["subtitle_raw_json", "subtitle_cues_json", "subtitle_srt", "subtitle_ass"];
+  const assets = await prisma.asset.findMany({
+    where: {
+      kind: { in: subtitleKinds },
+      block: { videoVersionId }
+    },
+    select: { id: true, path: true, kind: true }
+  });
+  if (assets.length === 0) return 0;
+  for (const asset of assets) {
+    await unlinkIfExists(asset.path);
+    await pruneEmptyParentDirs(asset.path);
+  }
+  await prisma.asset.deleteMany({
+    where: { id: { in: assets.map((item) => item.id) } }
+  });
+  fastify.log.info(
+    { videoVersionId, reason, deletedSubtitleAssets: assets.length },
+    "Subtitle assets invalidated"
+  );
+  return assets.length;
+}
+
 async function deleteLessonCascade(videoId: string, workspaceId?: string): Promise<{ deletedLesson: boolean }> {
   const lesson = await prisma.video.findFirst({
     where: workspaceId ? { id: videoId, workspaceId } : { id: videoId },
@@ -7710,7 +7759,14 @@ fastify.patch(
       ttsText?: string;
     };
 
+    const existing = await prisma.block.findUnique({ where: { id: blockId } });
+    if (!existing) {
+      return reply.code(404).send({ error: "block not found" });
+    }
+
     const data: Record<string, string | null> = {};
+    let nextImagePromptJson: string | null | undefined;
+    let nextTtsText: string | undefined;
 
     if (body?.imagePrompt !== undefined) {
       const prompt = body?.imagePrompt?.block_prompt?.trim();
@@ -7724,6 +7780,7 @@ fastify.patch(
 
       if (!prompt) {
         data.imagePromptJson = null;
+        nextImagePromptJson = null;
       } else {
         const imagePrompt = {
           block_prompt: prompt,
@@ -7731,7 +7788,8 @@ fastify.patch(
           seed_hint: body?.imagePrompt?.seed_hint?.trim() || undefined,
           seed
         };
-        data.imagePromptJson = JSON.stringify(imagePrompt);
+        nextImagePromptJson = JSON.stringify(imagePrompt);
+        data.imagePromptJson = nextImagePromptJson;
       }
     }
 
@@ -7746,6 +7804,7 @@ fastify.patch(
         return reply.code(400).send({ error: "ttsText cannot be empty" });
       }
       data.ttsText = nextTts;
+      nextTtsText = nextTts;
     }
 
     if (Object.keys(data).length === 0) {
@@ -7753,6 +7812,26 @@ fastify.patch(
     }
 
     try {
+      const ttsChanged =
+        nextTtsText !== undefined && nextTtsText.trim() !== (existing.ttsText ?? "").trim();
+      const imagePromptChanged =
+        nextImagePromptJson !== undefined &&
+        (nextImagePromptJson ?? null) !== (existing.imagePromptJson ?? null);
+
+      if (ttsChanged) {
+        await invalidateAssetsByBlock(blockId, ["audio_raw", "clip_mp4"], "block_tts_text_changed");
+        await invalidateSubtitleAssetsForLessonVersion(existing.videoVersionId, "block_tts_text_changed");
+        await invalidateFinalVideoForLessonVersion(existing.videoVersionId, "block_tts_text_changed");
+      }
+      if (imagePromptChanged) {
+        await invalidateAssetsByBlock(
+          blockId,
+          ["image_raw", "slide_png", "clip_mp4"],
+          "block_image_prompt_changed"
+        );
+        await invalidateFinalVideoForLessonVersion(existing.videoVersionId, "block_image_prompt_changed");
+      }
+
       const updated = await prisma.block.update({
         where: { id: blockId },
         data
@@ -8232,6 +8311,7 @@ fastify.post(
       return reply.code(404).send({ error: "lesson version not found" });
     }
     await invalidateFinalVideoForLessonVersion(versionId, "tts_lesson_requested");
+    await invalidateSubtitleAssetsForLessonVersion(versionId, "tts_lesson_requested");
     const body = request.body as {
       clientId?: string;
       requestId?: string;
@@ -8338,6 +8418,7 @@ fastify.post(
       return reply.code(404).send({ error: "block not found" });
     }
     await invalidateFinalVideoForLessonVersion(block.videoVersionId, "tts_block_requested");
+    await invalidateSubtitleAssetsForLessonVersion(block.videoVersionId, "tts_block_requested");
 
     const result = await enqueueTtsJob({
       videoVersionId: block.videoVersionId,
