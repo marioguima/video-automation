@@ -177,3 +177,103 @@ test("dashboard inventory reconciliation: detecta divergencia base x disco, reca
   assert.equal(metrics2.inventoryReconciliation.mismatchDetected, true);
   assert.equal(metrics2.inventoryReconciliation.inconsistencyEvents, 1);
 });
+
+test("dashboard metrics ignora worker snapshot expirado e volta para baseline", async () => {
+  const bootstrapRes = await app.inject({
+    method: "POST",
+    url: "/auth/bootstrap-admin",
+    payload: {
+      name: "Owner Inventory Stale",
+      email: "owner-inventory-stale@vizlec.test",
+      password: "StrongPass123!"
+    }
+  });
+  assert.equal(bootstrapRes.statusCode, 201);
+  const cookie = Array.isArray(bootstrapRes.headers["set-cookie"])
+    ? bootstrapRes.headers["set-cookie"][0]
+    : bootstrapRes.headers["set-cookie"];
+  assert.ok(cookie);
+
+  const meRes = await app.inject({
+    method: "GET",
+    url: "/auth/me",
+    headers: { cookie }
+  });
+  assert.equal(meRes.statusCode, 200);
+  const workspaceId = (meRes.json() as { scope: { workspaceId: string } }).scope.workspaceId;
+
+  const agent = await prisma.agent.create({
+    data: { workspaceId, label: "agent-stale-snapshot", status: "online" }
+  });
+
+  const course = await prisma.course.create({
+    data: { workspaceId, name: "Curso Snapshot Expirado" }
+  });
+  const moduleRow = await prisma.module.create({
+    data: { workspaceId, courseId: course.id, name: "Modulo", order: 1 }
+  });
+  const lesson = await prisma.lesson.create({
+    data: { workspaceId, moduleId: moduleRow.id, order: 1, title: "Aula" }
+  });
+  const version = await prisma.lessonVersion.create({
+    data: { workspaceId, lessonId: lesson.id, scriptText: "texto" }
+  });
+  const block = await prisma.block.create({
+    data: {
+      workspaceId,
+      lessonVersionId: version.id,
+      index: 1,
+      sourceText: "bloco",
+      ttsText: "bloco",
+      wordCount: 1,
+      durationEstimateS: 7,
+      audioDurationS: 7
+    }
+  });
+
+  const audioPath = path.join(runtime.dataDir, "courses", "lesson-stale.wav");
+  fs.mkdirSync(path.dirname(audioPath), { recursive: true });
+  fs.writeFileSync(audioPath, Buffer.alloc(12, 3));
+  await prisma.asset.create({
+    data: {
+      workspaceId,
+      blockId: block.id,
+      kind: "audio_raw",
+      path: audioPath
+    }
+  });
+
+  const staleSnapshotRes = await app.inject({
+    method: "POST",
+    url: "/internal/inventory/snapshot",
+    headers: { "x-internal-token": "test-internal-token" },
+    payload: {
+      workspaceId,
+      agentId: agent.id,
+      snapshot: {
+        audioCount: 999,
+        durationSeconds: 999,
+        diskUsageBytes: 999,
+        updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
+      }
+    }
+  });
+  assert.equal(staleSnapshotRes.statusCode, 200);
+
+  const metricsRes = await app.inject({
+    method: "GET",
+    url: "/dashboard/metrics?range=7d",
+    headers: { cookie }
+  });
+  assert.equal(metricsRes.statusCode, 200);
+  const metrics = metricsRes.json() as {
+    totals: { audioCount: number; contentSeconds: number; storageUsedBytes: number };
+    inventoryReconciliation: { source: string; workerSnapshot: unknown };
+  };
+
+  assert.equal(metrics.totals.audioCount, 1);
+  assert.equal(metrics.totals.contentSeconds, 7);
+  assert.equal(metrics.totals.storageUsedBytes, 12);
+  assert.equal(metrics.inventoryReconciliation.source, "database_baseline");
+  assert.equal(metrics.inventoryReconciliation.workerSnapshot, null);
+});

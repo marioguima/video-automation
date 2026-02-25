@@ -297,6 +297,10 @@ const inventoryReconciliationByWorkspace = new Map<
   string,
   { fingerprint: string; inconsistencyEvents: number; lastDetectedAt: string | null }
 >();
+const inventorySnapshotStaleAfterMs = Math.max(
+  1_000,
+  Math.min(24 * 60 * 60 * 1000, Number(process.env.INVENTORY_SNAPSHOT_STALE_AFTER_MS ?? 60_000))
+);
 const pairingTokens = new Map<
   string,
   { workspaceId: string; createdByUserId: string; expiresAtMs: number; used: boolean }
@@ -693,8 +697,16 @@ function aggregateWorkspaceWorkerInventory(workspaceId: string): InventoryMetric
   let audioCount = 0;
   let durationSeconds = 0;
   let diskUsageBytes = 0;
+  const now = Date.now();
   inventoryStateByAgent.forEach((state) => {
     if (state.workspaceId !== workspaceId) return;
+    const updatedAtMs = new Date(state.updatedAt).getTime();
+    if (
+      !Number.isFinite(updatedAtMs) ||
+      now - updatedAtMs > inventorySnapshotStaleAfterMs
+    ) {
+      return;
+    }
     hasWorkerSnapshot = true;
     audioCount += Math.max(0, Math.trunc(state.audioCount));
     durationSeconds += Math.max(0, state.durationSeconds);
@@ -9879,6 +9891,28 @@ const start = async () => {
   await fastify.listen({ port: config.apiPort, host: config.apiHost });
 };
 
+let shuttingDown = false;
+const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGBREAK"];
+
+function installShutdownHandlers(): void {
+  for (const signal of shutdownSignals) {
+    process.on(signal, () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      void (async () => {
+        try {
+          fastify.log.info({ signal }, "Shutting down API");
+          await fastify.close();
+          process.exit(0);
+        } catch (err) {
+          fastify.log.error({ err, signal }, "Failed to close API gracefully");
+          process.exit(1);
+        }
+      })();
+    });
+  }
+}
+
 const isDirectExecution = (() => {
   const entry = process.argv[1];
   if (!entry) return false;
@@ -9886,6 +9920,7 @@ const isDirectExecution = (() => {
 })();
 
 if (isDirectExecution && process.env.VIZLEC_SKIP_API_LISTEN !== "true") {
+  installShutdownHandlers();
   start().catch((err) => {
     fastify.log.error(err, "Failed to start API");
     process.exit(1);

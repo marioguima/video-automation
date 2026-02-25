@@ -24,6 +24,7 @@ import {
   loadVoiceIndex,
   findVoiceById,
   resolveVoicePath,
+  domainRootDir,
   blockAudioDir,
   blockClipDir,
   blockImageRawDir,
@@ -646,7 +647,7 @@ const workerWsStartupTimeoutMs =
   Number.isFinite(parsedWorkerWsStartupTimeoutMs) && parsedWorkerWsStartupTimeoutMs > 0
     ? Math.max(5000, Math.min(300000, parsedWorkerWsStartupTimeoutMs))
     : 45000;
-const workerInventoryRootDir = path.join(config.dataDir, "courses");
+const workerInventoryRootDir = domainRootDir();
 const workerInventoryScanIntervalMs = Number(
   process.env.WORKER_INVENTORY_SCAN_INTERVAL_MS ?? 30000
 );

@@ -33,6 +33,10 @@ function resolveDomainRootPath(): string {
   return canonical;
 }
 
+export function domainRootDir(): string {
+  return resolveDomainRootPath();
+}
+
 export function courseDir(courseId: string): string {
   return channelDir(courseId);
 }
