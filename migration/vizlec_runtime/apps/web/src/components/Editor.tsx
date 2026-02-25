@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { 
   Sparkles, 
   RefreshCw, 
+  Loader2,
   Mic, 
   AudioLines,
   Image as ImageIcon,
@@ -33,7 +34,8 @@ import {
   Settings2,
   Ellipsis,
   Eye,
-  EyeOff
+  EyeOff,
+  Download
 } from 'lucide-react';
 import { LessonBlock, Template, Voice } from '../types';
 import { apiGet, apiPost, apiPatch, API_BASE } from '../lib/api';
@@ -1086,6 +1088,9 @@ const Editor: React.FC<EditorProps> = ({
   const [finalVideoProgress, setFinalVideoProgress] = useState<{ current: number; total: number } | null>(null);
   const [finalVideoPhase, setFinalVideoPhase] = useState<JobPhase>('idle');
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
+  const [isFinalVideoModalOpen, setIsFinalVideoModalOpen] = useState(false);
+  const [isDownloadingFinalVideo, setIsDownloadingFinalVideo] = useState(false);
+  const [finalVideoDownloadError, setFinalVideoDownloadError] = useState<string | null>(null);
   const [finalVideoElapsedSeconds, setFinalVideoElapsedSeconds] = useState(0);
   const [finalVideoLastElapsedSeconds, setFinalVideoLastElapsedSeconds] = useState<number | null>(null);
   const [audioReviewActive, setAudioReviewActive] = useState(false);
@@ -3665,6 +3670,92 @@ const Editor: React.FC<EditorProps> = ({
     finalVideoLastElapsedSeconds !== null ? formatElapsedTime(finalVideoLastElapsedSeconds) : null;
   const hasFinalVideoReady = Boolean(finalVideoUrl) && !isGeneratingFinalVideo;
   const finalVideoLink = finalVideoUrl ?? undefined;
+  const finalVideoModalSrc = finalVideoLink ? `${finalVideoLink}&modal=1` : undefined;
+  const downloadFinalVideoInChunks = async (url: string, rawTitle: string) => {
+    setIsDownloadingFinalVideo(true);
+    setFinalVideoDownloadError(null);
+    try {
+      const chunkSize = 2 * 1024 * 1024;
+      const chunks: BlobPart[] = [];
+      let start = 0;
+      let total: number | null = null;
+      let safety = 0;
+
+      while (total === null || start < total) {
+        if (safety++ > 10000) {
+          throw new Error('Download interrupted: too many chunks');
+        }
+        const end: number = total === null ? start + chunkSize - 1 : Math.min(total - 1, start + chunkSize - 1);
+        const response: Response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+          headers: { Range: `bytes=${start}-${end}` }
+        });
+        if (response.status === 416) {
+          const contentRange416 = response.headers.get('Content-Range');
+          const totalMatch = contentRange416 ? /bytes\s+\*\/(\d+)/i.exec(contentRange416) : null;
+          const reportedTotal = totalMatch ? Number(totalMatch[1]) : null;
+          if (reportedTotal !== null && Number.isFinite(reportedTotal)) {
+            total = reportedTotal;
+          }
+          if (chunks.length > 0 && total !== null && start >= total) {
+            break;
+          }
+        }
+        if (response.status !== 200 && response.status !== 206) {
+          const fallbackText = `${response.status} ${response.statusText}`.trim();
+          let message = fallbackText || 'Download failed';
+          try {
+            const data = await response.json() as { error?: string };
+            if (data?.error) message = data.error;
+          } catch {
+            // ignore non-json body
+          }
+          throw new Error(message);
+        }
+
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength === 0) {
+          throw new Error('Download failed: empty chunk');
+        }
+        chunks.push(buffer);
+
+        if (response.status === 206) {
+          const contentRange: string | null = response.headers.get('Content-Range');
+          const match: RegExpExecArray | null = contentRange ? /bytes\s+(\d+)-(\d+)\/(\d+)/i.exec(contentRange) : null;
+          if (match) {
+            const receivedEnd = Number(match[2]);
+            total = Number(match[3]);
+            start = receivedEnd + 1;
+          } else {
+            start += buffer.byteLength;
+          }
+        } else {
+          total = buffer.byteLength;
+          start = buffer.byteLength;
+        }
+      }
+
+      const safeBase = (rawTitle || 'final-video')
+        .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/[.\s]+$/g, '')
+        .trim() || 'final-video';
+      const blob = new Blob(chunks, { type: 'video/mp4' });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `${safeBase}.mp4`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (err) {
+      setFinalVideoDownloadError((err as Error).message || 'Download failed');
+    } finally {
+      setIsDownloadingFinalVideo(false);
+    }
+  };
   const topFinalComposeGaugeOffset = ((finalVideoElapsedSeconds * 16) % 140) - 40;
   const breadcrumbParts = [
     { key: 'channel' as const, label: (courseTitle ?? '').trim(), onClick: onGoCourse },
@@ -4976,15 +5067,17 @@ const Editor: React.FC<EditorProps> = ({
 
                   {hasFinalVideoReady ? (
                     <>
-                      <a
-                        href={finalVideoLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={() => setIsMobileActionsMenuOpen(false)}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsFinalVideoModalOpen(true);
+                          setFinalVideoDownloadError(null);
+                          setIsMobileActionsMenuOpen(false);
+                        }}
                         className="w-full h-9 px-3 rounded-[5px] text-left text-[11px] font-bold uppercase tracking-wide border border-emerald-500/35 bg-emerald-600 text-white inline-flex items-center"
                       >
                         View final video
-                      </a>
+                      </button>
                       <button
                         onClick={() => {
                           handleGlobalAction('generateFinalVideo');
@@ -5187,15 +5280,17 @@ const Editor: React.FC<EditorProps> = ({
           {/* Primary Action */}
           {hasFinalVideoReady ? (
             <div className="flex items-center h-8 rounded-[5px] border border-emerald-500/40 bg-emerald-600 shadow-lg shadow-emerald-500/10 overflow-hidden">
-              <a
-                href={finalVideoLink}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() => {
+                  setFinalVideoDownloadError(null);
+                  setIsFinalVideoModalOpen(true);
+                }}
                 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider px-5 h-8 text-white hover:bg-emerald-700 transition-colors"
               >
                 <ExternalLink size={14} />
                 View Final Video
-              </a>
+              </button>
               <button
                 onClick={() => handleGlobalAction('generateFinalVideo')}
                 disabled={isGenerateFinalVideoDisabled}
@@ -5925,6 +6020,63 @@ const Editor: React.FC<EditorProps> = ({
       </div>
 
       {/* Voice Selector Modal */}
+      {isFinalVideoModalOpen && finalVideoModalSrc && (
+        <div
+          className="fixed inset-0 z-[120] bg-black/75 backdrop-blur-sm p-3 sm:p-6"
+          onClick={() => setIsFinalVideoModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Final video preview"
+        >
+          <div
+            className="mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-[8px] border border-white/15 bg-black shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-slate-950/90 px-4 py-3 text-white">
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">Final Video</div>
+                <div className="truncate text-sm font-semibold">{lessonTitle || 'Preview'}</div>
+                {finalVideoDownloadError ? (
+                  <div className="mt-1 text-[11px] text-red-300">{finalVideoDownloadError}</div>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void downloadFinalVideoInChunks(finalVideoModalSrc, lessonTitle || 'final-video')}
+                  disabled={isDownloadingFinalVideo}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[5px] border border-emerald-300/25 bg-emerald-500/15 px-2.5 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-60"
+                  aria-label="Download final video"
+                  title="Download MP4"
+                >
+                  {isDownloadingFinalVideo ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  <span>Download MP4</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFinalVideoModalOpen(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[5px] border border-white/15 bg-white/5 text-white hover:bg-white/10"
+                  aria-label="Close video preview"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-black">
+              <video
+                key={finalVideoModalSrc}
+                src={finalVideoModalSrc}
+                controls
+                controlsList="nodownload"
+                playsInline
+                preload="metadata"
+                crossOrigin="use-credentials"
+                className="h-full w-full bg-black"
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <VoiceSelectorModal 
         isOpen={isVoiceModalOpen} 
         onClose={() => setIsVoiceModalOpen(false)} 

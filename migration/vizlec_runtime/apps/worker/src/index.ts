@@ -1675,6 +1675,11 @@ async function handleWorkerCommandRequest(
   }
 
   if (request.payload.command === "lesson_version_final_video_get") {
+    const FINAL_VIDEO_RANGE_CHUNK_BYTES = 2 * 1024 * 1024;
+    const range =
+      typeof request.payload.params?.range === "string"
+        ? request.payload.params.range.trim()
+        : "";
     const versionId =
       typeof request.payload.params?.versionId === "string"
         ? request.payload.params.versionId.trim()
@@ -1711,6 +1716,69 @@ async function handleWorkerCommandRequest(
         data: { error: "final video not found" }
       };
     }
+    const stat = await fs.promises.stat(videoPath);
+    const total = stat.size;
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
+      if (!match) {
+        return {
+          command: "lesson_version_final_video_get",
+          statusCode: 416,
+          data: { contentRange: `bytes */${total}` }
+        };
+      }
+
+      const rawStart = match[1];
+      const rawEnd = match[2];
+      let start = rawStart ? Number(rawStart) : Number.NaN;
+      let end = rawEnd ? Number(rawEnd) : Number.NaN;
+
+      if (Number.isNaN(start)) {
+        const suffixLength = Number(rawEnd);
+        if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+          return {
+            command: "lesson_version_final_video_get",
+            statusCode: 416,
+            data: { contentRange: `bytes */${total}` }
+          };
+        }
+        start = Math.max(0, total - suffixLength);
+        end = total - 1;
+      } else if (Number.isNaN(end)) {
+        end = Math.min(total - 1, start + FINAL_VIDEO_RANGE_CHUNK_BYTES - 1);
+      }
+
+      start = Math.max(0, start);
+      end = Math.min(total - 1, end, start + FINAL_VIDEO_RANGE_CHUNK_BYTES - 1);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+        return {
+          command: "lesson_version_final_video_get",
+          statusCode: 416,
+          data: { contentRange: `bytes */${total}` }
+        };
+      }
+
+      const length = end - start + 1;
+      const handle = await fs.promises.open(videoPath, "r");
+      try {
+        const chunk = Buffer.allocUnsafe(length);
+        const readResult = await handle.read(chunk, 0, length, start);
+        const body = chunk.subarray(0, readResult.bytesRead);
+        return {
+          command: "lesson_version_final_video_get",
+          statusCode: 206,
+          data: {
+            contentType: "video/mp4",
+            bodyBase64: body.toString("base64"),
+            contentLength: body.length,
+            contentRange: `bytes ${start}-${start + body.length - 1}/${total}`
+          }
+        };
+      } finally {
+        await handle.close();
+      }
+    }
+
     const body = await fs.promises.readFile(videoPath);
     return {
       command: "lesson_version_final_video_get",

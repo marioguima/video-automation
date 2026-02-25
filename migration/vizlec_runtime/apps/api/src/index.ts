@@ -6431,11 +6431,17 @@ fastify.get(
       summary: "Obtém vídeo final de uma versão",
       description: "Retorna o vídeo final renderizado de uma versão de lição",
       response: {
+        200: { type: "string", format: "binary" },
+        206: { type: "string", format: "binary" },
         404: {
           type: "object",
           properties: {
             error: { type: "string" }
           }
+        },
+        416: {
+          type: "object",
+          additionalProperties: true
         },
         410: {
           type: "object",
@@ -6457,17 +6463,27 @@ fastify.get(
       const auth = await getAuthenticatedScope(request, reply);
       if (!auth) return;
       const { versionId } = request.params as { versionId: string };
+      const range = typeof request.headers.range === "string" ? request.headers.range : undefined;
       const agentSession = getConnectedAgentForWorkspace(auth.scope.workspaceId);
       if (!agentSession) {
         return reply.code(503).send({ error: "agent_offline" });
       }
-      const upstream = await requestAgentWorkerCommand(agentSession, "lesson_version_final_video_get", { versionId });
+      const upstream = await requestAgentWorkerCommand(agentSession, "lesson_version_final_video_get", {
+        versionId,
+        range
+      });
       if (upstream.statusCode === 404) {
         return reply.code(404).send({
           error: String(upstream.data.error ?? "final video not found")
         });
       }
-      if (upstream.statusCode !== 200) {
+      if (upstream.statusCode === 416) {
+        if (typeof upstream.data.contentRange === "string") {
+          reply.header("Content-Range", upstream.data.contentRange);
+        }
+        return reply.code(416).send();
+      }
+      if (upstream.statusCode !== 200 && upstream.statusCode !== 206) {
         return reply.code(503).send({
           error: String(upstream.data.error ?? "agent_response_invalid")
         });
@@ -6479,7 +6495,15 @@ fastify.get(
       const contentType = typeof upstream.data.contentType === "string" ? upstream.data.contentType : "video/mp4";
       reply.header("Content-Type", contentType);
       reply.header("Cache-Control", "no-store");
-      return reply.send(Buffer.from(bodyBase64, "base64"));
+      reply.header("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Type");
+      reply.header("Accept-Ranges", "bytes");
+      if (typeof upstream.data.contentRange === "string") {
+        reply.header("Content-Range", upstream.data.contentRange);
+      }
+      if (typeof upstream.data.contentLength === "number") {
+        reply.header("Content-Length", String(upstream.data.contentLength));
+      }
+      return reply.code(upstream.statusCode).send(Buffer.from(bodyBase64, "base64"));
     } catch (err) {
       return reply.code(503).send({ error: (err as Error).message });
     }
