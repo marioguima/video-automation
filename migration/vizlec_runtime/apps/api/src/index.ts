@@ -1198,6 +1198,8 @@ const jobTargetLabel = (jobType?: string | null, singular = false): string => {
       return singular ? "slide" : "slides";
     case "concat_video":
       return singular ? "final video" : "final videos";
+    case "subtitle_transcription":
+      return singular ? "transcription" : "transcriptions";
     default:
       return singular ? "process" : "processes";
   }
@@ -4258,6 +4260,7 @@ const mapJobTypeToStep = (type: string): "blocks" | "audio" | "images" | "video"
   if (type === "segment" || type === "segment_block") return "blocks";
   if (type === "tts") return "audio";
   if (type === "image" || type === "comfyui_image" || type === "render_slide") return "images";
+  if (type === "subtitle_transcription") return null;
   if (type === "concat_video") return "video";
   return null;
 };
@@ -7170,6 +7173,92 @@ async function enqueueFinalVideoJob(options: { videoVersionId: string; templateI
   return { status: 201, job };
 }
 
+async function enqueueSubtitleTranscriptionJob(options: {
+  videoVersionId: string;
+  clientId: string | null;
+  requestId: string | null;
+}) {
+  const { videoVersionId, clientId, requestId } = options;
+  const versionScope = await prisma.videoVersion.findUnique({
+    where: { id: videoVersionId },
+    include: { blocks: { select: { id: true } } }
+  });
+  if (!versionScope) {
+    throw new Error("lesson version not found");
+  }
+  if (versionScope.blocks.length === 0) {
+    return {
+      status: 400 as const,
+      job: { error: "no blocks available to transcribe" } as Record<string, unknown>
+    };
+  }
+  if (requestId) {
+    const existingByRequest = await prisma.job.findFirst({
+      where: { requestId },
+      orderBy: { createdAt: "desc" }
+    });
+    if (existingByRequest) {
+      if (existingByRequest.status === "pending") {
+        await emitPendingCourseBuildEvent(existingByRequest);
+      }
+      return { status: 200 as const, job: existingByRequest };
+    }
+  }
+
+  const existing = await prisma.job.findFirst({
+    where: {
+      workspaceId: versionScope.workspaceId,
+      videoVersionId,
+      type: "subtitle_transcription",
+      status: { in: ["pending", "running"] }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+  if (existing) {
+    if (clientId && existing.clientId && existing.clientId !== clientId) {
+      // Different client has a running job; create a new one for this client.
+    } else {
+      if (existing.status === "running") {
+        const staleAfterMs = Number(process.env.JOB_STALE_AFTER_MS ?? 10 * 60 * 1000);
+        const now = Date.now();
+        const updatedAtMs = new Date(existing.updatedAt).getTime();
+        if (Number.isFinite(updatedAtMs) && now - updatedAtMs > staleAfterMs) {
+          const resetJob = await prisma.job.update({
+            where: { id: existing.id },
+            data: {
+              status: "pending",
+              error: "stale running job reset",
+              leaseExpiresAt: null
+            }
+          });
+          await emitPendingCourseBuildEvent(resetJob);
+          await notifyWorkerQueueChanged("enqueue_subtitle_transcription_reset_stale", versionScope.workspaceId, clientId);
+          return { status: 200 as const, job: resetJob };
+        }
+      }
+      if (existing.status === "pending") {
+        await emitPendingCourseBuildEvent(existing);
+      }
+      return { status: 200 as const, job: existing };
+    }
+  }
+
+  const job = await prisma.job.create({
+    data: {
+      workspaceId: versionScope.workspaceId,
+      scope: "lesson",
+      videoVersionId,
+      type: "subtitle_transcription",
+      status: "pending",
+      clientId,
+      requestId
+    }
+  });
+  await emitPendingCourseBuildEvent(job);
+  await notifyWorkerQueueChanged("enqueue_subtitle_transcription_created", versionScope.workspaceId, clientId);
+  return { status: 201 as const, job };
+}
+
 fastify.post(
   "/lesson-versions/:versionId/slides",
   {
@@ -7509,6 +7598,42 @@ fastify.get(
         return reply.code(503).send({ error: "agent_offline" });
       }
       const upstream = await requestAgentWorkerCommand(agentSession, "lesson_version_images_list", { versionId });
+      const statusCode = upstream.statusCode === 200 ? 200 : upstream.statusCode === 404 ? 404 : 503;
+      return reply.code(statusCode).send(upstream.data);
+    } catch (err) {
+      return reply.code(503).send({ error: (err as Error).message });
+    }
+  }
+);
+
+fastify.get(
+  "/lesson-versions/:versionId/subtitles",
+  {
+    schema: {
+      tags: ["Lessons"],
+      summary: "Lista arquivos de legenda de uma versão",
+      description: "Retorna o status dos arquivos de legenda/transcrição gerados para a versão",
+      response: {
+        200: { type: "object", additionalProperties: true },
+        404: { type: "object", properties: { error: { type: "string" } } },
+        503: { type: "object", properties: { error: { type: "string" } } }
+      }
+    }
+  },
+  async (request, reply) => {
+    try {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { versionId } = request.params as { versionId: string };
+      const agentSession = getConnectedAgentForWorkspace(auth.scope.workspaceId);
+      if (!agentSession) {
+        return reply.code(503).send({ error: "agent_offline" });
+      }
+      const upstream = await requestAgentWorkerCommand(
+        agentSession,
+        "lesson_version_subtitles_list" as any,
+        { versionId }
+      );
       const statusCode = upstream.statusCode === 200 ? 200 : upstream.statusCode === 404 ? 404 : 503;
       return reply.code(statusCode).send(upstream.data);
     } catch (err) {
@@ -8138,6 +8263,43 @@ fastify.post(
                 language: language || undefined
               }
             }
+    });
+    return reply.code(result.status).send(result.job);
+  }
+);
+
+fastify.post(
+  "/lesson-versions/:versionId/transcription",
+  {
+    schema: {
+      tags: ["Lessons"],
+      summary: "Gera transcrição/legendas da lição",
+      description: "Dispara a transcrição dos áudios da versão para gerar arquivos de legenda"
+    }
+  },
+  async (request, reply) => {
+    const { versionId } = request.params as { versionId: string };
+    const version = await prisma.videoVersion.findUnique({
+      where: { id: versionId }
+    });
+    if (!version) {
+      return reply.code(404).send({ error: "lesson version not found" });
+    }
+    const body = request.body as {
+      clientId?: string;
+      requestId?: string;
+    };
+    const dispatchClient = await resolveDispatchClientForRequest(request, body?.clientId);
+    if (!dispatchClient.ok) {
+      return reply.code(dispatchClient.statusCode).send({ error: dispatchClient.error });
+    }
+    const clientId = dispatchClient.clientId;
+    const requestId = body?.requestId?.trim() || null;
+
+    const result = await enqueueSubtitleTranscriptionJob({
+      videoVersionId: versionId,
+      clientId,
+      requestId
     });
     return reply.code(result.status).send(result.job);
   }
@@ -9217,6 +9379,8 @@ fastify.get(
     let lastImageCount = 0;
     let expectedClips: number | null = null;
     let lastClipCount = 0;
+    let expectedSubtitleAssets: number | null = null;
+    let lastSubtitleAssetCount = 0;
     let finalVideoSent = false;
     if (job.type === "segment" && job.videoVersionId) {
       const version = await prisma.videoVersion.findUnique({
@@ -9295,6 +9459,14 @@ fastify.get(
         blockCount: total,
         mode: "final_video",
         templateId: job.templateId ?? null
+      });
+    }
+    if (job.type === "subtitle_transcription" && job.videoVersionId) {
+      expectedSubtitleAssets = 4;
+      sendEvent("start", {
+        versionId: job.videoVersionId,
+        blockCount: 1,
+        mode: "subtitle_transcription"
       });
     }
 
@@ -9659,6 +9831,25 @@ fastify.get(
             }
           }
         }
+        if (current.type === "subtitle_transcription" && current.videoVersionId) {
+          if (expectedSubtitleAssets === null) {
+            expectedSubtitleAssets = 4;
+          }
+          const generated = await prisma.asset.count({
+            where: {
+              kind: { in: ["subtitle_raw_json", "subtitle_cues_json", "subtitle_srt", "subtitle_ass"] },
+              block: { videoVersionId: current.videoVersionId },
+              createdAt: { gte: current.createdAt }
+            }
+          });
+          if (generated !== lastSubtitleAssetCount) {
+            lastSubtitleAssetCount = generated;
+            sendEvent(JOB_STREAM_EVENT.PROGRESS, {
+              index: generated,
+              total: expectedSubtitleAssets ?? generated
+            });
+          }
+        }
         if (current.status === "succeeded" || current.status === "failed" || current.status === "canceled") {
           sendEvent(JOB_STREAM_EVENT.DONE, { job: current, blockCount: lastBlockCount });
           reply.raw.end();
@@ -9846,6 +10037,10 @@ fastify.get("/video-versions/:versionId/images", async (request, reply) => {
   const { versionId } = request.params as { versionId: string };
   return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/images`);
 });
+fastify.get("/video-versions/:versionId/subtitles", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/subtitles`);
+});
 fastify.get("/video-versions/:versionId/job-state", async (request, reply) => {
   const { versionId } = request.params as { versionId: string };
   return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/job-state`);
@@ -9877,6 +10072,10 @@ fastify.post("/video-versions/:versionId/tts", async (request, reply) => {
 fastify.post("/video-versions/:versionId/images", async (request, reply) => {
   const { versionId } = request.params as { versionId: string };
   return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/images`);
+});
+fastify.post("/video-versions/:versionId/transcription", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/transcription`);
 });
 fastify.post("/video-versions/:versionId/final-video", async (request, reply) => {
   const { versionId } = request.params as { versionId: string };

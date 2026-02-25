@@ -323,6 +323,7 @@ function loadTtsSettings(): TtsSettings {
 const WORKER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VIDEO_AUTOMATION_ROOT = path.resolve(WORKER_ROOT, "..", "..", "..", "..");
 const CINEMATIC_FINAL_RENDER_SCRIPT = path.join(WORKER_ROOT, "scripts", "render_cinematic_final.py");
+const SUBTITLE_TRANSCRIBE_SCRIPT = path.join(WORKER_ROOT, "scripts", "subtitle_transcribe_faster_whisper.py");
 const MAX_MIX_GAIN = Math.pow(10, 6 / 20);
 const QWEN_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "qwen_tts_generate.py");
 const CHATTERBOX_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "chatterbox_tts_generate.py");
@@ -525,6 +526,171 @@ async function renderCinematicFinalVideoWithPython(options: {
     );
   } finally {
     await fs.promises.unlink(tmpPayloadPath).catch(() => null);
+  }
+}
+
+function parseLastJsonLine(stdout: string): Record<string, unknown> | null {
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (let idx = lines.length - 1; idx >= 0; idx -= 1) {
+    const line = lines[idx]!;
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      // ignore non-JSON lines
+    }
+  }
+  return null;
+}
+
+async function generateSubtitleAssetsFromAudioFiles(options: {
+  audioFiles: string[];
+  finalDir: string;
+  job: JobRecord;
+}): Promise<void> {
+  if (options.audioFiles.length === 0) {
+    throw new Error("no audio files available for subtitle transcription");
+  }
+  const pythonCommand =
+    process.env.VIZLEC_RENDER_PYTHON?.trim() ||
+    process.env.PYTHON_EXECUTABLE?.trim() ||
+    "python";
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vizlec-subtitles-"));
+  const concatAudioPath = path.join(tmpDir, "audio_concat.wav");
+  const concatListPath = path.join(tmpDir, "concat.txt");
+  const subtitleOutDir = path.join(tmpDir, "subtitle_out");
+  const subtitlePayloadPath = path.join(tmpDir, "subtitle_payload.json");
+  ensureDir(subtitleOutDir);
+
+  try {
+    await fs.promises.writeFile(
+      concatListPath,
+      `${options.audioFiles.map((filePath) => toConcatFileEntry(filePath)).join("\n")}\n`,
+      "utf8"
+    );
+    await runProcess(
+      "ffmpeg",
+      [
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        concatListPath,
+        "-c:a",
+        "pcm_s16le",
+        concatAudioPath
+      ],
+      { logPrefix: "subtitle:concat" }
+    );
+
+    const payload = {
+      audio_path: concatAudioPath,
+      out_dir: subtitleOutDir,
+      width: 1920,
+      height: 1080,
+      language: (process.env.VIZLEC_SUBTITLE_LANGUAGE ?? "pt").trim() || "pt",
+      template_id: "subtitle-yellow-bold-bottom-v1",
+      vad_filter: String(process.env.VIZLEC_SUBTITLE_VAD_FILTER ?? "1").trim() !== "0",
+      word_timestamps: String(process.env.VIZLEC_SUBTITLE_WORD_TIMESTAMPS ?? "1").trim() !== "0",
+      model: (process.env.VIZLEC_SUBTITLE_WHISPER_MODEL ?? "").trim() || undefined,
+      device: (process.env.VIZLEC_SUBTITLE_WHISPER_DEVICE ?? "").trim() || undefined,
+      compute_type: (process.env.VIZLEC_SUBTITLE_WHISPER_COMPUTE_TYPE ?? "").trim() || undefined
+    };
+    await fs.promises.writeFile(subtitlePayloadPath, JSON.stringify(payload, null, 2), "utf8");
+
+    logJobEvent("subtitle_transcription_started", options.job, {
+      audio_count: options.audioFiles.length,
+      subtitle_device: payload.device ?? null,
+      subtitle_model: payload.model ?? null
+    });
+    await notifyRunningPhase(options.job, "generation");
+    const { stdout } = await runProcess(
+      pythonCommand,
+      [SUBTITLE_TRANSCRIBE_SCRIPT, subtitlePayloadPath],
+      {
+        cwd: tmpDir,
+        logPrefix: "subtitle:asr"
+      }
+    );
+    const parsed = parseLastJsonLine(stdout);
+    if (parsed?.ok !== true) {
+      if (parsed?.skipped) {
+        throw new Error(String(parsed.reason ?? "subtitle transcription skipped"));
+      }
+      throw new Error("subtitle transcription did not return success payload");
+    }
+
+    ensureDir(options.finalDir);
+    const subtitleDefs = [
+      { file: "subtitles.raw.json", kind: "subtitle_raw_json", format: "raw_json" },
+      { file: "subtitles.cues.json", kind: "subtitle_cues_json", format: "cues_json" },
+      { file: "subtitles.srt", kind: "subtitle_srt", format: "srt" },
+      { file: "subtitles.default.ass", kind: "subtitle_ass", format: "ass" }
+    ] as const;
+    const subtitlePaths = subtitleDefs.map((def) => path.join(options.finalDir, def.file));
+    for (const stalePath of subtitlePaths) {
+      await fs.promises.unlink(stalePath).catch(() => null);
+    }
+    for (const def of subtitleDefs) {
+      const src = path.join(subtitleOutDir, def.file);
+      const dst = path.join(options.finalDir, def.file);
+      if (!fs.existsSync(src)) {
+        throw new Error(`subtitle output missing: ${def.file}`);
+      }
+      await fs.promises.copyFile(src, dst);
+    }
+
+    const version = await prisma.videoVersion.findUnique({
+      where: { id: options.job.videoVersionId ?? "" },
+      include: {
+        blocks: {
+          orderBy: { index: "asc" },
+          select: { id: true, workspaceId: true }
+        }
+      }
+    });
+    if (!version || version.blocks.length === 0) {
+      throw new Error("lesson version not found for subtitle asset persistence");
+    }
+    const anchorBlock = version.blocks[0]!;
+    await prisma.asset.deleteMany({
+      where: {
+        kind: { in: subtitleDefs.map((def) => def.kind) },
+        block: { videoVersionId: version.id }
+      }
+    });
+    for (const def of subtitleDefs) {
+      const dst = path.join(options.finalDir, def.file);
+      await prisma.asset.create({
+        data: {
+          workspaceId: anchorBlock.workspaceId,
+          blockId: anchorBlock.id,
+          kind: def.kind,
+          path: dst,
+          templateId: "subtitle-yellow-bold-bottom-v1",
+          metaJson: JSON.stringify({
+            generatedBy: "subtitle_transcription",
+            format: def.format,
+            templateId: "subtitle-yellow-bold-bottom-v1"
+          })
+        }
+      });
+    }
+    logJobEvent("subtitle_transcription_completed", options.job, {
+      audio_count: options.audioFiles.length,
+      cue_count: typeof parsed.cue_count === "number" ? parsed.cue_count : null,
+      segment_count: typeof parsed.segment_count === "number" ? parsed.segment_count : null
+    });
+    await notifyRunningProgress(options.job, 100);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => null);
   }
 }
 
@@ -1901,6 +2067,112 @@ async function handleWorkerCommandRequest(
     };
   };
 
+  const enqueueSubtitleTranscriptionJob = async (params: {
+    versionId: string;
+    clientId: string | null;
+    requestId: string | null;
+  }): Promise<{
+    command: "lesson_version_transcription_post";
+    statusCode: 200 | 201 | 400 | 404;
+    data: Record<string, unknown>;
+  }> => {
+    const { versionId, clientId, requestId } = params;
+    const version = await prisma.videoVersion.findUnique({
+      where: { id: versionId },
+      include: {
+        blocks: { select: { id: true } }
+      }
+    });
+    if (!version) {
+      return {
+        command: "lesson_version_transcription_post",
+        statusCode: 404,
+        data: { error: "lesson version not found" }
+      };
+    }
+    if (version.blocks.length === 0) {
+      return {
+        command: "lesson_version_transcription_post",
+        statusCode: 400,
+        data: { error: "no blocks available to transcribe" }
+      };
+    }
+    if (requestId) {
+      const existingByRequest = await prisma.job.findFirst({
+        where: { requestId },
+        orderBy: { createdAt: "desc" }
+      });
+      if (existingByRequest) {
+        if (existingByRequest.status === "pending") {
+          requestWorkerWake("enqueue_subtitle_transcription:existing_by_request");
+        }
+        return {
+          command: "lesson_version_transcription_post",
+          statusCode: 200,
+          data: existingByRequest as unknown as Record<string, unknown>
+        };
+      }
+    }
+    const existing = await prisma.job.findFirst({
+      where: {
+        workspaceId: version.workspaceId,
+        videoVersionId: versionId,
+        type: "subtitle_transcription",
+        status: { in: ["pending", "running"] }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    if (existing && !(clientId && existing.clientId && existing.clientId !== clientId)) {
+      if (existing.status === "running") {
+        const staleAfterMs = Number(process.env.JOB_STALE_AFTER_MS ?? 10 * 60 * 1000);
+        const now = Date.now();
+        const updatedAtMs = new Date(existing.updatedAt).getTime();
+        if (Number.isFinite(updatedAtMs) && now - updatedAtMs > staleAfterMs) {
+          const resetJob = await prisma.job.update({
+            where: { id: existing.id },
+            data: {
+              status: "pending",
+              error: "stale running job reset",
+              leaseExpiresAt: null
+            }
+          });
+          requestWorkerWake("enqueue_subtitle_transcription:reset_stale");
+          return {
+            command: "lesson_version_transcription_post",
+            statusCode: 200,
+            data: resetJob as unknown as Record<string, unknown>
+          };
+        }
+      }
+      if (existing.status === "pending") {
+        requestWorkerWake("enqueue_subtitle_transcription:existing_pending");
+      }
+      return {
+        command: "lesson_version_transcription_post",
+        statusCode: 200,
+        data: existing as unknown as Record<string, unknown>
+      };
+    }
+
+    const job = await prisma.job.create({
+      data: {
+        workspaceId: version.workspaceId,
+        scope: "lesson",
+        videoVersionId: versionId,
+        type: "subtitle_transcription",
+        status: "pending",
+        clientId,
+        requestId
+      }
+    });
+    requestWorkerWake("enqueue_subtitle_transcription:created");
+    return {
+      command: "lesson_version_transcription_post",
+      statusCode: 201,
+      data: job as unknown as Record<string, unknown>
+    };
+  };
+
   const enqueueRenderSlideJob = async (params: {
     versionId: string;
     templateId: string;
@@ -2065,6 +2337,29 @@ async function handleWorkerCommandRequest(
       };
     }
     return enqueueFinalVideoJob({ versionId, templateId: null, clientId, requestId });
+  }
+
+  if (request.payload.command === "lesson_version_transcription_post") {
+    const versionId =
+      typeof request.payload.params?.versionId === "string"
+        ? request.payload.params.versionId.trim()
+        : "";
+    const clientId =
+      typeof request.payload.params?.clientId === "string"
+        ? request.payload.params.clientId.trim()
+        : null;
+    const requestId =
+      typeof request.payload.params?.requestId === "string"
+        ? request.payload.params.requestId.trim()
+        : null;
+    if (!versionId) {
+      return {
+        command: "lesson_version_transcription_post",
+        statusCode: 400,
+        data: { error: "lesson version not found" }
+      };
+    }
+    return enqueueSubtitleTranscriptionJob({ versionId, clientId, requestId });
   }
 
   const enqueueLessonImageJob = async (params: {
@@ -2373,6 +2668,63 @@ async function handleWorkerCommandRequest(
     };
   }
 
+  if (request.payload.command === "lesson_version_subtitles_list") {
+    const versionId =
+      typeof request.payload.params?.versionId === "string"
+        ? request.payload.params.versionId.trim()
+        : "";
+    if (!versionId) {
+      return {
+        command: "lesson_version_subtitles_list",
+        statusCode: 400,
+        data: { error: "versionId is required" }
+      };
+    }
+    const version = await prisma.videoVersion.findUnique({
+      where: { id: versionId }
+    });
+    if (!version) {
+      return {
+        command: "lesson_version_subtitles_list",
+        statusCode: 404,
+        data: { error: "lesson version not found" }
+      };
+    }
+    const subtitleKinds = [
+      "subtitle_raw_json",
+      "subtitle_cues_json",
+      "subtitle_srt",
+      "subtitle_ass"
+    ] as const;
+    const assets = await prisma.asset.findMany({
+      where: {
+        kind: { in: [...subtitleKinds] },
+        block: { videoVersionId: versionId }
+      },
+      orderBy: { createdAt: "desc" },
+      distinct: ["kind"],
+      select: { kind: true, path: true, createdAt: true }
+    });
+    const byKind = new Map(assets.map((asset) => [asset.kind, asset]));
+    const items = subtitleKinds.map((kind) => {
+      const asset = byKind.get(kind);
+      const exists = Boolean(asset?.path && fs.existsSync(asset.path));
+      return {
+        kind,
+        exists,
+        createdAt: asset?.createdAt ?? null
+      };
+    });
+    return {
+      command: "lesson_version_subtitles_list",
+      statusCode: 200,
+      data: {
+        items,
+        ready: items.some((item) => item.kind === "subtitle_srt" && item.exists)
+      }
+    };
+  }
+
   if (request.payload.command === "lesson_version_images_list") {
     const versionId =
       typeof request.payload.params?.versionId === "string"
@@ -2509,6 +2861,7 @@ async function handleWorkerCommandRequest(
     const imageBatchJob = pickLatestLessonJob("image");
     const segmentJob = pickLatestLessonJob("segment");
     const slidesJob = pickLatestLessonJob("render_slide");
+    const transcriptionJob = pickLatestLessonJob("subtitle_transcription");
     const finalVideoJob = pickLatestLessonJob("concat_video");
 
     const readSegmentAutoQueue = (
@@ -2528,7 +2881,7 @@ async function handleWorkerCommandRequest(
 
     const autoQueuePlan = readSegmentAutoQueue(segmentJob?.metaJson);
 
-    const [tts, image, segment, slides, finalVideo] = await Promise.all([
+    const [tts, image, segment, slides, transcription, finalVideo] = await Promise.all([
       (async () => {
         if (!ttsBatchJob) {
           if (
@@ -2670,6 +3023,24 @@ async function handleWorkerCommandRequest(
         };
       })(),
       (async () => {
+        if (!transcriptionJob) return idleState(1);
+        const generatedCount = await prisma.asset.count({
+          where: {
+            kind: { in: ["subtitle_raw_json", "subtitle_cues_json", "subtitle_srt", "subtitle_ass"] },
+            block: { videoVersionId: versionId },
+            createdAt: { gte: transcriptionJob.createdAt }
+          }
+        });
+        return {
+          active: true,
+          jobId: transcriptionJob.id,
+          status: transcriptionJob.status,
+          phase: toPhase(transcriptionJob.status),
+          current: generatedCount,
+          total: 4
+        };
+      })(),
+      (async () => {
         if (!finalVideoJob) return idleState();
         const generatedCount = await prisma.asset.count({
           where: {
@@ -2726,6 +3097,7 @@ async function handleWorkerCommandRequest(
         tts,
         image,
         slides,
+        transcription,
         finalVideo,
         blockJobs,
         queue: {
@@ -5054,6 +5426,61 @@ async function burnSubtitlesIntoFinalVideo(options: {
   });
 }
 
+async function transcribeSubtitlesForVersion(options: { job: JobRecord }): Promise<void> {
+  const { job } = options;
+  if (!job.videoVersionId) {
+    throw new Error("subtitle_transcription job missing lessonVersionId");
+  }
+  await assertLeaseValid(job.id);
+  const version = await prisma.videoVersion.findUnique({
+    where: { id: job.videoVersionId },
+    include: {
+      video: {
+        include: {
+          section: {
+            include: {
+              channel: true
+            }
+          }
+        }
+      },
+      blocks: { orderBy: { index: "asc" } }
+    }
+  });
+  if (!version?.video?.section?.channel) {
+    throw new Error("lesson version not found");
+  }
+  if (version.blocks.length === 0) {
+    throw new Error("no blocks found for lesson version");
+  }
+
+  const finalDir = lessonFinalDir(
+    version.video.section.channel.id,
+    version.video.section.id,
+    version.video.id,
+    version.id
+  );
+  const audioFiles: string[] = [];
+  for (const block of version.blocks) {
+    await assertLeaseValid(job.id);
+    const audioAsset = await prisma.asset.findFirst({
+      where: { kind: "audio_raw", blockId: block.id },
+      orderBy: { createdAt: "desc" }
+    });
+    if (!audioAsset?.path || !fs.existsSync(audioAsset.path)) {
+      throw new Error(`audio not found for block ${block.index}`);
+    }
+    audioFiles.push(audioAsset.path);
+  }
+
+  await ensureMemoryForSubtitleTranscription(job);
+  await generateSubtitleAssetsFromAudioFiles({
+    audioFiles,
+    finalDir,
+    job
+  });
+}
+
 async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<void> {
   const { job } = options;
   if (!job.videoVersionId) {
@@ -6951,6 +7378,10 @@ async function runJob(job: JobRecord): Promise<void> {
     }
     case "concat_video": {
       await renderFinalVideoForVersion({ job });
+      return;
+    }
+    case "subtitle_transcription": {
+      await transcribeSubtitlesForVersion({ job });
       return;
     }
     default:

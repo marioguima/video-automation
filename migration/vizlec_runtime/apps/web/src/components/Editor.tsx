@@ -25,6 +25,7 @@ import {
   X,
   Search,
   Headphones,
+  Captions,
   Volume2,
   VolumeX,
   Copy,
@@ -913,12 +914,22 @@ type JobStatePayload = {
   tts: JobStateEntry;
   image: JobStateEntry;
   slides: JobStateEntry;
+  transcription?: JobStateEntry;
   finalVideo: JobStateEntry;
   blockJobs?: {
     segment?: Array<{ jobId: string; blockId: string; status: string; phase: JobPhase }>;
     tts?: Array<{ jobId: string; blockId: string; status: string; phase: JobPhase }>;
     image?: Array<{ jobId: string; blockId: string; status: string; phase: JobPhase }>;
   };
+};
+
+type SubtitleListPayload = {
+  ready?: boolean;
+  items?: Array<{
+    kind: string;
+    exists: boolean;
+    createdAt?: string | null;
+  }>;
 };
 
 const templateColors = [
@@ -1083,6 +1094,12 @@ const Editor: React.FC<EditorProps> = ({
   const [assetsJobId, setAssetsJobId] = useState<string | null>(null);
   const [assetsJobMode, setAssetsJobMode] = useState<'none' | 'image' | 'slides'>('none');
   const [ttsJobId, setTtsJobId] = useState<string | null>(null);
+  const [transcriptionJobId, setTranscriptionJobId] = useState<string | null>(null);
+  const [isGeneratingTranscription, setIsGeneratingTranscription] = useState(false);
+  const [transcriptionProgress, setTranscriptionProgress] = useState<{ current: number; total: number } | null>(null);
+  const [transcriptionPhase, setTranscriptionPhase] = useState<JobPhase>('idle');
+  const [subtitleFiles, setSubtitleFiles] = useState<Record<string, boolean>>({});
+  const [subtitleListRevision, setSubtitleListRevision] = useState(0);
   const [finalVideoJobId, setFinalVideoJobId] = useState<string | null>(null);
   const [isGeneratingFinalVideo, setIsGeneratingFinalVideo] = useState(false);
   const [finalVideoProgress, setFinalVideoProgress] = useState<{ current: number; total: number } | null>(null);
@@ -1150,6 +1167,7 @@ const Editor: React.FC<EditorProps> = ({
   const lastImageReadyCountRef = useRef<number | null>(null);
   const segmentJobIdRef = useRef<string | null>(null);
   const ttsJobIdRef = useRef<string | null>(null);
+  const transcriptionJobIdRef = useRef<string | null>(null);
   const assetsJobIdRef = useRef<string | null>(null);
   const finalVideoJobIdRef = useRef<string | null>(null);
   const selectedVersionIdRef = useRef<string | null>(null);
@@ -1208,6 +1226,10 @@ const Editor: React.FC<EditorProps> = ({
   useEffect(() => {
     ttsJobIdRef.current = ttsJobId;
   }, [ttsJobId]);
+
+  useEffect(() => {
+    transcriptionJobIdRef.current = transcriptionJobId;
+  }, [transcriptionJobId]);
 
   useEffect(() => {
     assetsJobIdRef.current = assetsJobId;
@@ -1703,6 +1725,11 @@ const Editor: React.FC<EditorProps> = ({
       setTtsJobId(null);
       setTtsPhase('idle');
       setTtsProgress(null);
+      setIsGeneratingTranscription(false);
+      setTranscriptionJobId(null);
+      setTranscriptionPhase('idle');
+      setTranscriptionProgress(null);
+      setSubtitleFiles({});
       ttsBatchStartPendingRef.current = false;
       setIsGeneratingAssets(false);
       setAssetsJobId(null);
@@ -1795,6 +1822,20 @@ const Editor: React.FC<EditorProps> = ({
           setFinalVideoJobId(null);
           setFinalVideoPhase('idle');
           setFinalVideoProgress(null);
+        }
+        if (state.transcription?.active) {
+          setIsGeneratingTranscription(true);
+          setTranscriptionJobId(state.transcription.jobId ?? null);
+          setTranscriptionPhase(state.transcription.phase);
+          setTranscriptionProgress({
+            current: state.transcription.current,
+            total: state.transcription.total
+          });
+        } else {
+          setIsGeneratingTranscription(false);
+          setTranscriptionJobId(null);
+          setTranscriptionPhase('idle');
+          setTranscriptionProgress(null);
         }
         if (state.finalVideoReady && selectedVersionId) {
           setFinalVideoUrl((prev) => prev ?? `${API_BASE}/video-versions/${selectedVersionId}/final-video?v=${Date.now()}`);
@@ -2401,6 +2442,32 @@ const Editor: React.FC<EditorProps> = ({
         return;
       }
 
+      if (type === 'subtitle_transcription') {
+        if (isTerminal(status) && transcriptionJobIdRef.current === jobId) {
+          setIsGeneratingTranscription(false);
+          setTranscriptionJobId(null);
+          setTranscriptionPhase('idle');
+          setTranscriptionProgress(null);
+          if (status === 'succeeded') {
+            setSubtitleListRevision((prev) => prev + 1);
+          } else if (status === 'failed') {
+            setError('Failed to generate transcription.');
+          }
+          return;
+        }
+        if (!isTerminal(status)) {
+          setIsGeneratingTranscription(true);
+          setTranscriptionJobId(jobId);
+          setTranscriptionPhase(toPhase(status));
+          if (progressPercent !== null) {
+            const total = 4;
+            const estimatedCurrent = Math.max(0, Math.min(total, Math.trunc((progressPercent / 100) * total)));
+            setTranscriptionProgress({ current: estimatedCurrent, total });
+          }
+        }
+        return;
+      }
+
       if (type === 'concat_video') {
         if (isTerminal(status) && finalVideoJobIdRef.current === jobId) {
           const startedAt = finalVideoStartedAtRef.current;
@@ -2441,6 +2508,30 @@ const Editor: React.FC<EditorProps> = ({
       window.removeEventListener('vizlec:ws', onWsEvent as EventListener);
     };
   }, [invalidateFinalVideoLocal, selectedVersionId]);
+
+  useEffect(() => {
+    if (!selectedVersionId) {
+      setSubtitleFiles({});
+      return;
+    }
+    apiGet<SubtitleListPayload>(`/video-versions/${selectedVersionId}/subtitles`, {
+      cacheMs: 0,
+      dedupe: false
+    })
+      .then((data) => {
+        const next: Record<string, boolean> = {};
+        (data.items ?? []).forEach((item) => {
+          if (typeof item.kind === 'string') {
+            next[item.kind] = Boolean(item.exists);
+          }
+        });
+        setSubtitleFiles(next);
+      })
+      .catch((err) => {
+        console.error(err);
+        setSubtitleFiles({});
+      });
+  }, [selectedVersionId, subtitleListRevision]);
 
   useEffect(() => {
     if (!selectedVersionId) {
@@ -3107,10 +3198,15 @@ const Editor: React.FC<EditorProps> = ({
     if (!lessonId) return;
     const hasActiveTextGeneration = isSegmenting || singleTextQueue.active > 0;
     const hasActiveAudioGeneration = isGeneratingTts || singleTtsQueue.active > 0;
+    const hasActiveTranscriptionGeneration = isGeneratingTranscription;
     const hasActiveImageOrSlideGeneration = isGeneratingAssets || singleImageQueue.active > 0;
     const hasHardLockGeneration = hasActiveTextGeneration || isGeneratingFinalVideo;
     const hasOtherGenerationRunning =
-      hasActiveTextGeneration || hasActiveAudioGeneration || hasActiveImageOrSlideGeneration || isGeneratingFinalVideo;
+      hasActiveTextGeneration ||
+      hasActiveAudioGeneration ||
+      hasActiveTranscriptionGeneration ||
+      hasActiveImageOrSlideGeneration ||
+      isGeneratingFinalVideo;
 
     if (isGeneratingFinalVideo && action !== 'generateFinalVideo') {
       setError('Wait for final video generation to finish before editing or starting new jobs.');
@@ -3163,8 +3259,51 @@ const Editor: React.FC<EditorProps> = ({
       await startBatchTtsGeneration();
         return;
       }
+      if (action === 'generateTranscription') {
+        if (hasOtherGenerationRunning) {
+          setError('Wait for current block/audio/image/transcription/final video jobs to finish before generating transcription.');
+          return;
+        }
+        if (!selectedVersionId) {
+          setError('Create a video version before generating transcription.');
+          return;
+        }
+        if (blocks.length === 0) {
+          setError('No blocks available to generate transcription.');
+          return;
+        }
+        const missingAudio = missingAudioBlocksForFinal[0];
+        if (missingAudio) {
+          setError(`O bloco ${missingAudio.number} ainda não tem áudio. Gere os áudios antes da transcrição.`);
+          scrollToBlock(missingAudio.id);
+          return;
+        }
+        try {
+          setError(null);
+          setIsGeneratingTranscription(true);
+          setTranscriptionPhase('waiting');
+          setTranscriptionProgress({ current: 0, total: 4 });
+          const job = await apiPost<{ id: string; status: string }>(
+            `/video-versions/${selectedVersionId}/transcription`,
+            {
+              clientId: dispatchAgentIdRef.current,
+              requestId: crypto.randomUUID()
+            }
+          );
+          setTranscriptionJobId(job.id);
+          setTranscriptionPhase(job.status === 'running' ? 'running' : 'waiting');
+        } catch (err) {
+          console.error(err);
+          setError((err as Error).message ?? 'Failed to generate transcription.');
+          setIsGeneratingTranscription(false);
+          setTranscriptionJobId(null);
+          setTranscriptionPhase('idle');
+          setTranscriptionProgress(null);
+        }
+        return;
+      }
       if (action === 'generateFinalVideo') {
-        if (hasActiveTextGeneration || hasActiveAudioGeneration || hasActiveImageOrSlideGeneration) {
+        if (hasActiveTextGeneration || hasActiveAudioGeneration || hasActiveTranscriptionGeneration || hasActiveImageOrSlideGeneration) {
           setError('Wait for current block/audio/image jobs to finish before generating the final video.');
           return;
         }
@@ -3439,9 +3578,10 @@ const Editor: React.FC<EditorProps> = ({
     const activeStreams = [
       segmentJobId ? { jobId: segmentJobId, kind: 'segment' as const } : null,
       ttsJobId ? { jobId: ttsJobId, kind: 'tts' as const } : null,
+      transcriptionJobId ? { jobId: transcriptionJobId, kind: 'subtitle_transcription' as const } : null,
       assetsJobId ? { jobId: assetsJobId, kind: assetsJobMode === 'slides' ? 'render_slide' as const : 'image' as const } : null,
       finalVideoJobId ? { jobId: finalVideoJobId, kind: 'concat_video' as const } : null
-    ].filter((item): item is { jobId: string; kind: 'segment' | 'tts' | 'image' | 'render_slide' | 'concat_video' } => Boolean(item));
+    ].filter((item): item is { jobId: string; kind: 'segment' | 'tts' | 'subtitle_transcription' | 'image' | 'render_slide' | 'concat_video' } => Boolean(item));
 
     if (activeStreams.length === 0) return;
 
@@ -3515,6 +3655,11 @@ const Editor: React.FC<EditorProps> = ({
           setSlidesProgress({ current: index, total });
           return;
         }
+        if (stream.kind === 'subtitle_transcription') {
+          setTranscriptionPhase('running');
+          setTranscriptionProgress({ current: index, total });
+          return;
+        }
         if (stream.kind === 'concat_video') {
           setFinalVideoPhase('running');
           setFinalVideoProgress({ current: index, total });
@@ -3541,6 +3686,7 @@ const Editor: React.FC<EditorProps> = ({
     assetsJobMode,
     finalVideoJobId,
     segmentJobId,
+    transcriptionJobId,
     ttsJobId
   ]);
 
@@ -3650,6 +3796,14 @@ const Editor: React.FC<EditorProps> = ({
   const topSlidesProgressWidth =
     topSlidesTotal > 0 ? Math.min(100, (topSlidesCurrent / topSlidesTotal) * 100) : 0;
   const topSlidesProgressLabel = `${Math.min(topSlidesTotal, Math.max(0, topSlidesCurrent))}/${topSlidesTotal}`;
+  const showTopTranscriptionBusy = isGeneratingTranscription;
+  const topTranscriptionCurrent = transcriptionPhase === 'running'
+    ? Math.min(transcriptionProgress?.total ?? 0, Math.max(1, (transcriptionProgress?.current ?? 0) + 1))
+    : (transcriptionProgress?.current ?? 0);
+  const topTranscriptionTotal = transcriptionProgress?.total ?? 0;
+  const topTranscriptionProgressWidth =
+    topTranscriptionTotal > 0 ? Math.min(100, (topTranscriptionCurrent / topTranscriptionTotal) * 100) : 0;
+  const topTranscriptionProgressLabel = `${Math.min(topTranscriptionTotal, Math.max(0, topTranscriptionCurrent))}/${topTranscriptionTotal}`;
   const topFinalCurrent = finalVideoPhase === 'running'
     ? Math.min(finalVideoProgress?.total ?? 0, Math.max(1, (finalVideoProgress?.current ?? 0) + 1))
     : (finalVideoProgress?.current ?? 0);
@@ -3669,6 +3823,7 @@ const Editor: React.FC<EditorProps> = ({
   const topFinalLastElapsedLabel =
     finalVideoLastElapsedSeconds !== null ? formatElapsedTime(finalVideoLastElapsedSeconds) : null;
   const hasFinalVideoReady = Boolean(finalVideoUrl) && !isGeneratingFinalVideo;
+  const hasSubtitleTranscriptionReady = Boolean(subtitleFiles['subtitle_srt']);
   const finalVideoLink = finalVideoUrl ?? undefined;
   const finalVideoModalSrc = finalVideoLink ? `${finalVideoLink}&modal=1` : undefined;
   const downloadFinalVideoInChunks = async (url: string, rawTitle: string) => {
@@ -4042,15 +4197,24 @@ const Editor: React.FC<EditorProps> = ({
   const audioReviewControlsLocked = audioReviewRegenerating || isGeneratingFinalVideo;
   const hasActiveTextGeneration = showTopSegmentBusy;
   const hasActiveAudioGeneration = showTopTtsBusy;
+  const hasActiveTranscriptionGeneration = showTopTranscriptionBusy;
   const hasActiveImageOrSlideGeneration = showTopImageBusy || showTopSlidesBusy;
   const hasHardLockGeneration = hasActiveTextGeneration || isGeneratingFinalVideo;
   const isAnyGenerationRunning =
-    hasActiveTextGeneration || hasActiveAudioGeneration || hasActiveImageOrSlideGeneration || isGeneratingFinalVideo;
+    hasActiveTextGeneration ||
+    hasActiveAudioGeneration ||
+    hasActiveTranscriptionGeneration ||
+    hasActiveImageOrSlideGeneration ||
+    isGeneratingFinalVideo;
   const isGenerateBlocksDisabled = isAnyGenerationRunning;
   const isGenerateAudiosDisabled =
     hasHardLockGeneration || (ttsHealthChecked && !ttsHealthy);
   const isGenerateImagesDisabled = hasHardLockGeneration || blocks.length === 0 || missingImagePromptBlocks.length > 0;
   const isGenerateSlidesDisabled = hasHardLockGeneration || blocks.length === 0 || missingOnScreenBlocks.length > 0;
+  const isGenerateTranscriptionDisabled =
+    isAnyGenerationRunning ||
+    blocks.length === 0 ||
+    missingAudioBlocksForFinal.length > 0;
   const isGenerateFinalVideoDisabled =
     isAnyGenerationRunning ||
     blocks.length === 0 ||
@@ -4066,6 +4230,8 @@ const Editor: React.FC<EditorProps> = ({
   ];
   const mobileStatusLabel = isGeneratingFinalVideo
     ? 'Final video in progress'
+    : showTopTranscriptionBusy
+    ? `Transcription ${topTranscriptionProgressLabel}`
     : showTopImageBusy
     ? `Images ${topImageProgressLabel}`
     : showTopTtsBusy
@@ -4074,7 +4240,7 @@ const Editor: React.FC<EditorProps> = ({
     ? `Blocks ${topSegmentProgressLabel}`
     : 'No active jobs';
   const toolbarDisabledLikeAudioReview =
-    'disabled:bg-indigo-500/10 disabled:border-indigo-500/20 disabled:text-muted-foreground disabled:hover:bg-indigo-500/10 disabled:opacity-50';
+    'disabled:bg-indigo-500/10 disabled:border-indigo-500/20 disabled:text-muted-foreground disabled:hover:bg-indigo-500/10 disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed';
   const canGoPrevAudioReview = audioReviewIndex > 0;
   const canGoNextAudioReview = audioReviewIndex < Math.max(0, audioReviewQueue.length - 1);
   const canSeekBackwardAudioReview = audioReviewCurrentTime > 0.05;
@@ -5065,6 +5231,30 @@ const Editor: React.FC<EditorProps> = ({
                     </button>
                   )}
 
+                  {showTopTranscriptionBusy ? (
+                    <button
+                      disabled
+                      className="w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300"
+                    >
+                      {`Generating transcription (${topTranscriptionProgressLabel})`}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        handleGlobalAction('generateTranscription');
+                        setIsMobileActionsMenuOpen(false);
+                      }}
+                      disabled={isGenerateTranscriptionDisabled}
+                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border ${
+                        hasSubtitleTranscriptionReady
+                          ? 'border-emerald-500/25 bg-emerald-500/10 text-muted-foreground'
+                          : 'border-indigo-500/20 bg-indigo-500/10 text-muted-foreground'
+                      } ${toolbarDisabledLikeAudioReview}`}
+                    >
+                      {hasSubtitleTranscriptionReady ? 'Regenerate transcription' : 'Generate transcription'}
+                    </button>
+                  )}
+
                   {hasFinalVideoReady ? (
                     <>
                       <button
@@ -5271,6 +5461,46 @@ const Editor: React.FC<EditorProps> = ({
             >
               <ImageIcon size={14} className="text-current" />
               <span className="truncate">Generate Images</span>
+            </button>
+          )}
+
+          {showTopTranscriptionBusy ? (
+            <div className="flex items-center h-8 rounded-[6px] border border-orange-500/35 bg-orange-500/10 shadow-sm overflow-hidden">
+              <div className="relative overflow-hidden flex items-center gap-2 px-3 h-8 text-[10px] font-bold text-orange-700 dark:text-orange-300 min-w-[190px]">
+                {topTranscriptionTotal > 0 && (
+                  <div
+                    className="absolute inset-y-0 left-0 bg-orange-500/25 transition-all duration-300"
+                    style={{
+                      width: `${topTranscriptionProgressWidth}%`
+                    }}
+                  />
+                )}
+                <span className="relative z-10 flex items-center gap-2 w-full">
+                  <Captions size={14} className={transcriptionPhase === 'running' ? 'animate-pulse' : ''} />
+                  <span className="truncate">
+                    {transcriptionPhase === 'waiting' ? 'Preparing transcription...' : 'Generating transcription...'}
+                  </span>
+                  {topTranscriptionTotal > 0 && (
+                    <span className="ml-auto inline-flex items-center rounded-[4px] bg-black/35 px-1.5 py-0.5 text-[9px] leading-none text-orange-200 tabular-nums">
+                      {topTranscriptionProgressLabel}
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => handleGlobalAction('generateTranscription')}
+              disabled={isGenerateTranscriptionDisabled}
+              className={`relative overflow-hidden flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all shadow-sm ${
+                hasSubtitleTranscriptionReady
+                  ? 'bg-emerald-500/10 border border-emerald-500/25 text-muted-foreground hover:bg-emerald-500/15'
+                  : 'bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15'
+              } ${toolbarDisabledLikeAudioReview}`}
+              title={hasSubtitleTranscriptionReady ? 'Regenerate transcription/subtitles' : 'Generate transcription/subtitles'}
+            >
+              <Captions size={14} className="text-current" />
+              <span className="truncate">{hasSubtitleTranscriptionReady ? 'Regenerate Transcription' : 'Generate Transcription'}</span>
             </button>
           )}
 

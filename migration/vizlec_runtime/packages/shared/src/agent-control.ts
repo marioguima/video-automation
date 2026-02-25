@@ -12,11 +12,13 @@ export const WORKER_AGENT_COMMANDS = [
   "block_slide_get",
   "lesson_version_final_video_get",
   "lesson_version_final_video_post",
+  "lesson_version_transcription_post",
   "lesson_version_images_post",
   "lesson_version_slides_post",
   "lesson_version_assets_post",
   "lesson_version_assets_image_post",
   "lesson_version_audios_list",
+  "lesson_version_subtitles_list",
   "lesson_version_images_list",
   "lesson_version_slides_list",
   "lesson_version_job_state"
