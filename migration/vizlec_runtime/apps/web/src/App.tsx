@@ -47,7 +47,15 @@ type LegacyCourse = {
   };
 };
 type LegacyModule = { id: string; name: string; order: number; courseId: string };
-type LegacyLesson = { id: string; title: string; moduleId: string; order: number };
+type LegacyLesson = {
+  id: string;
+  title: string;
+  moduleId: string;
+  order: number;
+  thumbnail?: string | null;
+  thumbLandscape?: string | null;
+  thumbPortrait?: string | null;
+};
 type SessionUser = { id: string; name: string; email: string; role: string };
 type SessionAgent = { id: string; label: string | null; status: string; lastSeenAt: string | null };
 type LessonCreationAutoQueue = {
@@ -220,6 +228,62 @@ const randomRequestId = () => {
   return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
+type LessonThumbCacheEntry = {
+  thumbnail?: string;
+  thumbLandscape?: string;
+  thumbPortrait?: string;
+};
+
+const LESSON_THUMB_CACHE_KEY = 'vizlec.lessonThumbs.v1';
+
+const readLessonThumbCache = (): Record<string, LessonThumbCacheEntry> => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(LESSON_THUMB_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, LessonThumbCacheEntry> | null;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeLessonThumbCache = (cache: Record<string, LessonThumbCacheEntry>) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(LESSON_THUMB_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // ignore persistence failures in restricted browsers
+  }
+};
+
+const getCachedLessonThumbs = (lessonId: string): LessonThumbCacheEntry | null => {
+  const cache = readLessonThumbCache();
+  return cache[lessonId] ?? null;
+};
+
+const persistLessonThumbs = (lesson: {
+  id: string;
+  thumbnail?: string;
+  thumbLandscape?: string;
+  thumbPortrait?: string;
+}) => {
+  const cache = readLessonThumbCache();
+  cache[lesson.id] = {
+    thumbnail: lesson.thumbnail,
+    thumbLandscape: lesson.thumbLandscape,
+    thumbPortrait: lesson.thumbPortrait
+  };
+  writeLessonThumbCache(cache);
+};
+
+const removeCachedLessonThumbs = (lessonId: string) => {
+  const cache = readLessonThumbCache();
+  if (!(lessonId in cache)) return;
+  delete cache[lessonId];
+  writeLessonThumbCache(cache);
+};
+
 const App: React.FC = () => {
   // Auth State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -255,15 +319,21 @@ const App: React.FC = () => {
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
 
   const getLessonStub = (lessonId: string, title: string): LessonBlock => ({
+    ...(() => {
+      const cached = getCachedLessonThumbs(lessonId);
+      const thumbnail = cached?.thumbnail || '/lesson-placeholder.svg';
+      return {
+        thumbnail,
+        thumbLandscape: cached?.thumbLandscape || thumbnail,
+        thumbPortrait: cached?.thumbPortrait || '/lesson-placeholder-portrait.svg'
+      };
+    })(),
     id: lessonId,
     number: '',
     title,
     duration: '',
     audioDurationSeconds: null,
     status: 'Empty',
-    thumbnail: '/lesson-placeholder.svg',
-    thumbLandscape: '/lesson-placeholder.svg',
-    thumbPortrait: '/lesson-placeholder-portrait.svg',
     originalText: '',
     narratedText: '',
     onScreenText: { title: '', bullets: [] },
@@ -570,6 +640,7 @@ const App: React.FC = () => {
             const payloadLessonId = payload?.videoId ?? payload?.lessonId ?? null;
             if ((entity === 'lesson' || entity === 'video') && payloadLessonId) {
               if (action === 'deleted') {
+                removeCachedLessonThumbs(payloadLessonId);
                 setCourseModules((prev) =>
                   normalizeModuleLessonsOrder(
                     prev.map((moduleItem) => ({
@@ -711,15 +782,21 @@ const App: React.FC = () => {
 
   const loadCourseModulesByCourseId = React.useCallback(async (courseId: string) => {
     const mapLesson = (lesson: LegacyLesson, moduleOrder: number): LessonBlock => ({
+      ...(() => {
+        const cached = getCachedLessonThumbs(lesson.id);
+        const thumbnail = lesson.thumbnail || cached?.thumbnail || '/lesson-placeholder.svg';
+        return {
+          thumbnail,
+          thumbLandscape: lesson.thumbLandscape || cached?.thumbLandscape || thumbnail,
+          thumbPortrait: lesson.thumbPortrait || cached?.thumbPortrait || '/lesson-placeholder-portrait.svg'
+        };
+      })(),
       id: lesson.id,
       number: `${moduleOrder}.${lesson.order}`,
       title: lesson.title,
       duration: '',
       audioDurationSeconds: null,
       status: 'Empty',
-      thumbnail: '/lesson-placeholder.svg',
-      thumbLandscape: '/lesson-placeholder.svg',
-      thumbPortrait: '/lesson-placeholder-portrait.svg',
       originalText: '',
       narratedText: '',
       onScreenText: { title: '', bullets: [] },
@@ -1189,6 +1266,7 @@ const App: React.FC = () => {
   const handleDeleteLesson = async (lessonId: string) => {
     try {
       await apiDelete<{ ok: boolean }>(`/videos/${lessonId}`);
+      removeCachedLessonThumbs(lessonId);
       setCourseModules((prev) =>
         prev.map((moduleItem) => ({
           ...moduleItem,
@@ -1202,6 +1280,7 @@ const App: React.FC = () => {
   };
 
   const handleSaveLesson = (lessonData: LessonBlock, targetModuleId?: string | null) => {
+    persistLessonThumbs(lessonData);
     setCourseModules((prev) => {
       const existingModuleId =
         prev.find((moduleItem) => moduleItem.lessons.some((lessonItem) => lessonItem.id === lessonData.id))?.id ??

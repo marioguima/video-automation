@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { LessonBlock } from '../types';
 import AIGenerationOverlay from './AIGenerationOverlay';
+import ConfirmDialog from './ui/confirm-dialog';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
 import { WS_EVENT, readVizlecWsDetail } from '../lib/events';
 
@@ -47,11 +48,12 @@ const buildEmptyLessonDraft = (): LessonBlock => ({
 const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchAgentId, onSave, onCancel, onStartAIGen }) => {
   const isEditMode = Boolean(module?.id);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingWithoutProcessing, setIsSavingWithoutProcessing] = useState(false);
   const [isCancelingGeneration, setIsCancelingGeneration] = useState(false);
   const [segmentJobContext, setSegmentJobContext] = useState<{ jobId: string; clientId: string | null } | null>(null);
   const cancelRequestedRef = useRef(false);
-  const [generateAudio, setGenerateAudio] = useState(true);
-  const [generateImage, setGenerateImage] = useState(true);
+  const [generateAudio, setGenerateAudio] = useState(false);
+  const [generateImage, setGenerateImage] = useState(false);
   const [generationStatus, setGenerationStatus] = useState('Preparing lesson...');
   const [generationLogs, setGenerationLogs] = useState<string[]>([]);
   const [currentBlock, setCurrentBlock] = useState(0);
@@ -60,10 +62,13 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
   const portraitInputRef = useRef<HTMLInputElement | null>(null);
   const [formData, setFormData] = useState<LessonBlock>(module ?? buildEmptyLessonDraft());
   const [isLoadingStoredScript, setIsLoadingStoredScript] = useState(false);
+  const [loadedScriptText, setLoadedScriptText] = useState('');
+  const [isReprocessConfirmOpen, setIsReprocessConfirmOpen] = useState(false);
   const segmentWaitersRef = useRef<Record<string, { resolve: () => void; reject: (error: Error) => void }>>({});
 
   useEffect(() => {
     setFormData(module ?? buildEmptyLessonDraft());
+    setLoadedScriptText(module?.originalText?.trim() ?? '');
   }, [module]);
 
   useEffect(() => {
@@ -78,7 +83,11 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
       .then((versions) => {
         if (cancelled) return;
         const latestScript = versions?.[0]?.scriptText?.trim() ?? '';
-        if (!latestScript) return;
+        if (!latestScript) {
+          setLoadedScriptText(module?.originalText?.trim() ?? '');
+          return;
+        }
+        setLoadedScriptText(latestScript);
         setFormData((prev) => ({
           ...prev,
           originalText: latestScript,
@@ -225,8 +234,40 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
     }
   };
 
-  const handleStartProcess = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveWithoutProcessing = async () => {
+    if (!isEditMode || !module?.id) return;
+    const title = formData.title.trim();
+    if (!title) {
+      alert('Title is required.');
+      return;
+    }
+
+    setIsSavingWithoutProcessing(true);
+    try {
+      const lesson = await apiPatch<{ id: string; title: string }>(`/videos/${module.id}`, { title });
+      onSave(
+        {
+          ...formData,
+          id: lesson.id,
+          title: lesson.title,
+          build: formData.build ?? module.build
+        },
+        moduleId
+      );
+    } catch (err) {
+      console.error(err);
+      alert((err as Error).message ?? 'Failed to save lesson without processing.');
+    } finally {
+      setIsSavingWithoutProcessing(false);
+    }
+  };
+
+  const hasScriptChanged = isEditMode && formData.originalText.trim() !== loadedScriptText.trim();
+  const primarySubmitLabel = isEditMode
+    ? (hasScriptChanged ? 'Update & Generate Video Blocks' : 'Update')
+    : 'Create & Generate Video Blocks';
+
+  const runSaveWithProcessing = async () => {
     const title = formData.title.trim();
     const scriptText = formData.originalText.trim();
     if (!title || !scriptText) {
@@ -322,6 +363,19 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
       cancelRequestedRef.current = false;
       alert((err as Error).message ?? (isEditMode ? 'Failed to update lesson.' : 'Failed to create lesson.'));
     }
+  };
+
+  const handleStartProcess = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isEditMode && !hasScriptChanged) {
+      await handleSaveWithoutProcessing();
+      return;
+    }
+    if (isEditMode && hasScriptChanged) {
+      setIsReprocessConfirmOpen(true);
+      return;
+    }
+    await runSaveWithProcessing();
   };
 
   return (
@@ -604,22 +658,36 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
             <button 
               type="button"
               onClick={onCancel}
+              disabled={isGenerating || isSavingWithoutProcessing}
               className="px-6 text-xs font-bold text-slate-500 hover:text-slate-800 dark:text-slate-500 dark:hover:text-slate-300 transition-all uppercase tracking-widest h-9"
             >
               Discard Changes
             </button>
             <button 
               type="submit"
+              disabled={isSavingWithoutProcessing}
               className="flex items-center gap-3 bg-orange-600 hover:bg-orange-700 border border-orange-500/70 text-white px-8 rounded-[5px] font-bold transition-all shadow-xl shadow-orange-600/20 active:scale-95 group h-9"
             >
               <span className="text-sm">
-                {isEditMode ? 'Update & Generate Video Blocks' : 'Create & Generate Video Blocks'}
+                {isSavingWithoutProcessing ? 'Saving...' : primarySubmitLabel}
               </span>
               <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
         </form>
       </div>
+      <ConfirmDialog
+        open={isReprocessConfirmOpen}
+        title="Reprocess lesson blocks?"
+        description="The lesson text was changed. Saving will create a new script version, reprocess blocks, and invalidate/remove generated assets for this version (audios, images, and final video). Do you want to continue?"
+        confirmLabel="Reprocess blocks"
+        confirmClassName="bg-orange-600 hover:bg-orange-700 text-white"
+        onCancel={() => setIsReprocessConfirmOpen(false)}
+        onConfirm={() => {
+          setIsReprocessConfirmOpen(false);
+          void runSaveWithProcessing();
+        }}
+      />
     </div>
   );
 };
