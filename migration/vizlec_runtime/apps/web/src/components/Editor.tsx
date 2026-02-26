@@ -42,6 +42,7 @@ import { LessonBlock, Template, Voice } from '../types';
 import { apiGet, apiPost, apiPatch, API_BASE } from '../lib/api';
 import { JOB_STREAM_EVENT, WS_EVENT, readVizlecWsDetail } from '../lib/events';
 import VoiceSelectorModal from './VoiceSelectorModal';
+import ConfirmDialog from './ui/confirm-dialog';
 
 interface EditorProps {
   lessonId: string | null;
@@ -910,6 +911,7 @@ type JobStateEntry = {
 
 type JobStatePayload = {
   finalVideoReady?: boolean;
+  lastFinalVideoRenderSeconds?: number | null;
   segment: JobStateEntry;
   tts: JobStateEntry;
   image: JobStateEntry;
@@ -1114,6 +1116,8 @@ const Editor: React.FC<EditorProps> = ({
   const [audioReviewQueue, setAudioReviewQueue] = useState<string[]>([]);
   const [audioReviewIndex, setAudioReviewIndex] = useState(0);
   const [audioReviewMarked, setAudioReviewMarked] = useState<Record<string, boolean>>({});
+  const [audioReviewStartedByVersion, setAudioReviewStartedByVersion] = useState<Record<string, boolean>>({});
+  const [audioReviewCheckedByVersion, setAudioReviewCheckedByVersion] = useState<Record<string, Record<string, boolean>>>({});
   const [audioReviewPlaying, setAudioReviewPlaying] = useState(false);
   const [audioReviewRegenerating, setAudioReviewRegenerating] = useState(false);
   const [audioReviewPopupReady, setAudioReviewPopupReady] = useState(false);
@@ -1142,6 +1146,8 @@ const Editor: React.FC<EditorProps> = ({
   const [isSegmentCancelConfirmOpen, setIsSegmentCancelConfirmOpen] = useState(false);
   const [isSlidesBatchCancelConfirmOpen, setIsSlidesBatchCancelConfirmOpen] = useState(false);
   const [isFinalVideoCancelConfirmOpen, setIsFinalVideoCancelConfirmOpen] = useState(false);
+  const [isFinalVideoPreflightConfirmOpen, setIsFinalVideoPreflightConfirmOpen] = useState(false);
+  const [finalVideoPreflightDescription, setFinalVideoPreflightDescription] = useState('');
   const [slidesProgress, setSlidesProgress] = useState<{ current: number; total: number } | null>(null);
   const [slidesPhase, setSlidesPhase] = useState<JobPhase>('idle');
 
@@ -1836,6 +1842,9 @@ const Editor: React.FC<EditorProps> = ({
           setTranscriptionJobId(null);
           setTranscriptionPhase('idle');
           setTranscriptionProgress(null);
+        }
+        if (typeof state.lastFinalVideoRenderSeconds === 'number' && Number.isFinite(state.lastFinalVideoRenderSeconds)) {
+          setFinalVideoLastElapsedSeconds(Math.max(0, Math.floor(state.lastFinalVideoRenderSeconds)));
         }
         if (state.finalVideoReady && selectedVersionId) {
           setFinalVideoUrl((prev) => prev ?? `${API_BASE}/video-versions/${selectedVersionId}/final-video?v=${Date.now()}`);
@@ -2930,6 +2939,15 @@ const Editor: React.FC<EditorProps> = ({
     if (!(await ensureTtsReady())) return;
     invalidateFinalVideoLocal();
     invalidateSubtitleAssetsLocal();
+    if (selectedVersionId) {
+      setAudioReviewCheckedByVersion((prev) => {
+        const currentChecks = prev[selectedVersionId];
+        if (!currentChecks?.[id]) return prev;
+        const nextChecks = { ...currentChecks };
+        delete nextChecks[id];
+        return { ...prev, [selectedVersionId]: nextChecks };
+      });
+    }
     const currentText = getNarratedDraft(id, current?.narratedText);
     if (currentText && current && currentText !== current.narratedText) {
       await saveNarratedText(id, currentText);
@@ -2959,7 +2977,7 @@ const Editor: React.FC<EditorProps> = ({
       setError((err as Error).message ?? 'Failed to regenerate audio.');
       setGeneratingStates(prev => ({ ...prev, [id]: { ...prev[id], audio: false } }));
     }
-  }, [blocks, ensureTtsReady, getNarratedDraft, invalidateFinalVideoLocal, invalidateSubtitleAssetsLocal, isGeneratingFinalVideo, lessonId, lessonVoiceId, saveNarratedText]);
+  }, [blocks, ensureTtsReady, getNarratedDraft, invalidateFinalVideoLocal, invalidateSubtitleAssetsLocal, isGeneratingFinalVideo, lessonId, lessonVoiceId, saveNarratedText, selectedVersionId]);
 
   const handleGenerateSlides = async () => {
     setError('Slides are disabled in this MVP.');
@@ -3179,6 +3197,10 @@ const Editor: React.FC<EditorProps> = ({
     }
     setError(null);
     invalidateFinalVideoLocal();
+    if (selectedVersionId) {
+      setAudioReviewCheckedByVersion((prev) => ({ ...prev, [selectedVersionId]: {} }));
+    }
+    setAudioReviewMarked({});
     ttsBatchStartPendingRef.current = true;
     setIsGeneratingTts(true);
     setTtsPhase('waiting');
@@ -3294,9 +3316,13 @@ const Editor: React.FC<EditorProps> = ({
         setError('No blocks available to generate audios.');
         return;
       }
-      await startBatchTtsGeneration();
+      if (blocks.some((block) => Boolean(audioReviewMarked[block.id]))) {
+        await regenerateFlaggedAudios();
         return;
       }
+      await startBatchTtsGeneration();
+      return;
+    }
       if (action === 'generateTranscription') {
         if (hasOtherGenerationRunning) {
           setError('Wait for current block/audio/image/transcription/final video jobs to finish before generating transcription.');
@@ -3312,7 +3338,7 @@ const Editor: React.FC<EditorProps> = ({
         }
         const missingAudio = missingAudioBlocksForFinal[0];
         if (missingAudio) {
-          setError(`O bloco ${missingAudio.number} ainda não tem áudio. Gere os áudios antes da transcrição.`);
+          setError(`Block ${missingAudio.number} does not have audio yet. Generate audios before transcription.`);
           scrollToBlock(missingAudio.id);
           return;
         }
@@ -3355,41 +3381,46 @@ const Editor: React.FC<EditorProps> = ({
         }
         const missingAudio = missingAudioBlocksForFinal[0];
         if (missingAudio) {
-          setError(`O bloco ${missingAudio.number} ainda não tem áudio. Gere os áudios antes do vídeo final.`);
+          setError(`Block ${missingAudio.number} does not have audio yet. Generate audios before the final video.`);
           scrollToBlock(missingAudio.id);
           return;
         }
         const missingImageAsset = missingImageAssetsForFinal[0];
         if (missingImageAsset) {
-          setError(`O bloco ${missingImageAsset.number} ainda não tem imagem. Gere as imagens antes do vídeo final.`);
+          setError(`Block ${missingImageAsset.number} does not have an image yet. Generate images before the final video.`);
           scrollToBlock(missingImageAsset.id);
           return;
         }
-        try {
-          setError(null);
-          setFinalVideoUrl(null);
-          setFinalVideoLastElapsedSeconds(null);
-          setIsGeneratingFinalVideo(true);
-          setFinalVideoPhase('waiting');
-          setFinalVideoProgress({ current: 0, total: blocks.length });
-          const job = await apiPost<{ id: string; status: string }>(
-            `/video-versions/${selectedVersionId}/final-video`,
-            {
-              clientId: dispatchAgentIdRef.current,
-              requestId: crypto.randomUUID(),
-              templateId: selectedTemplateId || undefined
-            }
-          );
-          setFinalVideoJobId(job.id);
-          setFinalVideoPhase(job.status === 'running' ? 'running' : 'waiting');
-        } catch (err) {
-          console.error(err);
-          setError((err as Error).message ?? 'Failed to generate final video.');
-          setIsGeneratingFinalVideo(false);
-          setFinalVideoPhase('idle');
-          setFinalVideoProgress(null);
-          setFinalVideoLastElapsedSeconds(null);
+        const preflightWarnings: string[] = [];
+        const audioReviewStartedForVersion = selectedVersionId
+          ? Boolean(audioReviewStartedByVersion[selectedVersionId])
+          : false;
+        const hasFlaggedAudioPending = blocks.some((block) => Boolean(audioReviewMarked[block.id]));
+        if (hasFlaggedAudioPending) {
+          preflightWarnings.push('There are flagged audios pending regeneration.');
+        } else if (!audioReviewStartedForVersion) {
+          preflightWarnings.push('Audio review was not started for this version.');
+        } else if (audioReviewPlayableCount > 0 && !isAudioReviewComplete) {
+          preflightWarnings.push(`Audio review is incomplete (${audioReviewHeardCount}/${audioReviewPlayableCount} listened).`);
         }
+        if (hasSubtitleTranscriptionReady) {
+          preflightWarnings.push('Subtitle review is not tracked in the UI yet (generation only).');
+        }
+        if (!selectedBgmPath.trim()) {
+          preflightWarnings.push('No background music (BGM) is selected.');
+        }
+        const isMissingSubtitles = !hasSubtitleTranscriptionReady;
+        if (preflightWarnings.length > 0 || isMissingSubtitles) {
+          const intro = isMissingSubtitles
+            ? 'Transcription/subtitles were not generated. Do you want to continue without subtitles?'
+            : 'Please review these items before generating the final video. Do you still want to continue?';
+          setFinalVideoPreflightDescription(
+            `${intro} ${preflightWarnings.join(' ')}`
+          );
+          setIsFinalVideoPreflightConfirmOpen(true);
+          return;
+        }
+        await startFinalVideoGenerationJob();
       }
     };
 
@@ -3533,6 +3564,67 @@ const Editor: React.FC<EditorProps> = ({
       setError((err as Error).message ?? 'Failed to cancel final video generation.');
     }
   };
+
+  const markAudioReviewChecked = useCallback((blockId: string) => {
+    if (!selectedVersionId || !blockId) return;
+    setAudioReviewCheckedByVersion((prev) => ({
+      ...prev,
+      [selectedVersionId]: {
+        ...(prev[selectedVersionId] ?? {}),
+        [blockId]: true
+      }
+    }));
+  }, [selectedVersionId]);
+
+  const clearAudioReviewChecksForBlocks = useCallback((blockIds: string[]) => {
+    if (!selectedVersionId || blockIds.length === 0) return;
+    setAudioReviewCheckedByVersion((prev) => {
+      const current = prev[selectedVersionId];
+      if (!current) return prev;
+      let changed = false;
+      const nextCurrent = { ...current };
+      blockIds.forEach((id) => {
+        if (nextCurrent[id]) {
+          delete nextCurrent[id];
+          changed = true;
+        }
+      });
+      if (!changed) return prev;
+      return { ...prev, [selectedVersionId]: nextCurrent };
+    });
+  }, [selectedVersionId]);
+
+  const startFinalVideoGenerationJob = useCallback(async () => {
+    if (!selectedVersionId) {
+      setError('Create a video version before generating the final video.');
+      return;
+    }
+    try {
+      setError(null);
+      setFinalVideoUrl(null);
+      setFinalVideoLastElapsedSeconds(null);
+      setIsGeneratingFinalVideo(true);
+      setFinalVideoPhase('waiting');
+      setFinalVideoProgress({ current: 0, total: blocks.length });
+      const job = await apiPost<{ id: string; status: string }>(
+        `/video-versions/${selectedVersionId}/final-video`,
+        {
+          clientId: dispatchAgentIdRef.current,
+          requestId: crypto.randomUUID(),
+          templateId: selectedTemplateId || undefined
+        }
+      );
+      setFinalVideoJobId(job.id);
+      setFinalVideoPhase(job.status === 'running' ? 'running' : 'waiting');
+    } catch (err) {
+      console.error(err);
+      setError((err as Error).message ?? 'Failed to generate final video.');
+      setIsGeneratingFinalVideo(false);
+      setFinalVideoPhase('idle');
+      setFinalVideoProgress(null);
+      setFinalVideoLastElapsedSeconds(null);
+    }
+  }, [blocks.length, selectedTemplateId, selectedVersionId]);
 
   const persistAssetsJob = (payload: AssetsJobStorage) => {
     try {
@@ -4266,9 +4358,23 @@ const Editor: React.FC<EditorProps> = ({
     ...missingImagePromptBlocks.map((block) => ({
       key: `missing-prompt-${block.id}`,
       blockId: block.id,
-      message: `${block.number}: falta prompt de imagem.`
+      message: `${block.number}: missing image prompt.`
     }))
   ];
+  const flaggedAudioBlocks = blocks.filter((block) => Boolean(audioReviewMarked[block.id]));
+  const flaggedAudioCount = flaggedAudioBlocks.length;
+  const audioReviewCheckedMapForVersion =
+    selectedVersionId ? (audioReviewCheckedByVersion[selectedVersionId] ?? {}) : {};
+  const audioReviewHeardCount = blocks.reduce(
+    (count, block) => count + (audioUrls[block.id] && audioReviewCheckedMapForVersion[block.id] ? 1 : 0),
+    0
+  );
+  const isAudioReviewComplete = audioReviewPlayableCount > 0 && audioReviewHeardCount >= audioReviewPlayableCount;
+  const globalAudioActionLabel = flaggedAudioCount > 0
+    ? `Regenerate Flagged Audios (${flaggedAudioCount})`
+    : areAudiosPhaseReady
+      ? 'Regenerate Audios'
+      : 'Generate Audios';
   const mobileStatusLabel = isGeneratingFinalVideo
     ? 'Final video in progress'
     : showTopTranscriptionBusy
@@ -4309,19 +4415,32 @@ const Editor: React.FC<EditorProps> = ({
     }
     setError(null);
     setAudioReviewQueue(queue);
-    setAudioReviewMarked({});
     setAudioReviewIndex(0);
     audioReviewOpenJustStartedRef.current = true;
     setAudioReviewPopupReady(false);
     setAudioReviewModalVisible(false);
+    if (selectedVersionId) {
+      setAudioReviewStartedByVersion((prev) => ({ ...prev, [selectedVersionId]: true }));
+    }
     setAudioReviewActive(true);
     setAudioReviewPlaying(false);
-  }, [audioUrls, blocks, isAnyGenerationRunning]);
+  }, [audioUrls, blocks, isAnyGenerationRunning, selectedVersionId]);
 
   const stopAudioReview = useCallback(() => {
+    if (selectedVersionId && audioReviewQueue.length > 0) {
+      const hasAnyFlagged = audioReviewQueue.some((id) => Boolean(audioReviewMarked[id]));
+      if (!hasAnyFlagged) {
+        setAudioReviewCheckedByVersion((prev) => ({
+          ...prev,
+          [selectedVersionId]: {
+            ...(prev[selectedVersionId] ?? {}),
+            ...Object.fromEntries(audioReviewQueue.map((id) => [id, true]))
+          }
+        }));
+      }
+    }
     setAudioReviewActive(false);
     setAudioReviewQueue([]);
-    setAudioReviewMarked({});
     setAudioReviewIndex(0);
     setAudioReviewPlaying(false);
     setAudioReviewRegenerating(false);
@@ -4341,7 +4460,7 @@ const Editor: React.FC<EditorProps> = ({
       audioReviewRef.current.pause();
       audioReviewRef.current.currentTime = 0;
     }
-  }, []);
+  }, [audioReviewMarked, audioReviewQueue, selectedVersionId]);
 
   const goToPreviousAudioReview = useCallback(() => {
     setAudioReviewIndex((prev) => Math.max(0, prev - 1));
@@ -4440,6 +4559,38 @@ const Editor: React.FC<EditorProps> = ({
       await handleRegenerateAudio(blockId);
     }
   }, [audioReviewMarked, audioReviewQueue, audioReviewRegenerating, handleRegenerateAudio]);
+
+  const regenerateFlaggedAudios = useCallback(async () => {
+    const markedIds = blocks.filter((block) => Boolean(audioReviewMarked[block.id])).map((block) => block.id);
+    if (markedIds.length === 0) {
+      setError('No flagged audio to regenerate.');
+      return;
+    }
+    setError(null);
+    clearAudioReviewChecksForBlocks(markedIds);
+    setGeneratingStates((prev) => {
+      const next = { ...prev };
+      markedIds.forEach((id) => {
+        next[id] = { ...next[id], audio: true };
+      });
+      return next;
+    });
+    setAudioReviewMarked((prev) => {
+      const next = { ...prev };
+      markedIds.forEach((id) => {
+        delete next[id];
+      });
+      return next;
+    });
+    for (const blockId of markedIds) {
+      // eslint-disable-next-line no-await-in-loop
+      await handleRegenerateAudio(blockId);
+    }
+  }, [audioReviewMarked, blocks, clearAudioReviewChecksForBlocks, handleRegenerateAudio]);
+
+  useEffect(() => {
+    setAudioReviewMarked({});
+  }, [selectedVersionId]);
 
   useEffect(() => {
     setAudioReviewQueue((prev) =>
@@ -4784,6 +4935,23 @@ const Editor: React.FC<EditorProps> = ({
         </div>
       )}
 
+      <ConfirmDialog
+        open={isFinalVideoPreflightConfirmOpen}
+        title="Continue final video generation?"
+        description={finalVideoPreflightDescription}
+        confirmLabel="Continue"
+        cancelLabel="Back"
+        confirmClassName="bg-orange-600 hover:bg-orange-700 text-white"
+        onCancel={() => {
+          setIsFinalVideoPreflightConfirmOpen(false);
+          setFinalVideoPreflightDescription('');
+        }}
+        onConfirm={() => {
+          setIsFinalVideoPreflightConfirmOpen(false);
+          void startFinalVideoGenerationJob();
+        }}
+      />
+
       {audioReviewActive && (
         <div className="fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div
@@ -4842,6 +5010,7 @@ const Editor: React.FC<EditorProps> = ({
                   if (!block) return null;
                   const isCurrent = blockId === audioReviewCurrentBlockId;
                   const isMarked = Boolean(audioReviewMarked[blockId]);
+                  const isChecked = Boolean(audioReviewCheckedMapForVersion[blockId]);
                   const isBlockGenerating = audioReviewControlsLocked && Boolean(generatingStates[blockId]?.audio);
                   return (
                     <div
@@ -4858,18 +5027,27 @@ const Editor: React.FC<EditorProps> = ({
                           setAudioReviewIndex(idx);
                         }
                       }}
-                      className={`relative w-full text-left p-2 rounded-[6px] border transition-colors duration-100 cursor-pointer ${
-                        isCurrent
-                          ? 'border-orange-500/30 bg-orange-500/10'
+                        className={`relative w-full text-left p-2 rounded-[6px] border transition-colors duration-100 cursor-pointer ${
+                          isCurrent
+                            ? 'border-orange-500/30 bg-orange-500/10'
                           : isMarked
                           ? 'border-red-500/40 bg-red-500/10'
+                          : isChecked
+                          ? 'border-emerald-500/35 bg-emerald-500/10'
                           : 'border-[hsl(var(--editor-input-border))]/35 bg-[hsl(var(--editor-input))]/35 hover:bg-[hsl(var(--editor-input))]/55 hover:border-[hsl(var(--editor-input-border))]/60'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between gap-2 pl-1">
-                        <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
-                          {block.number}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+                            {block.number}
+                          </span>
+                          {isChecked && !isMarked && (
+                            <span className="px-1.5 h-4 rounded-full text-[8px] font-bold uppercase tracking-wide inline-flex items-center border border-emerald-500/35 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300">
+                              Heard
+                            </span>
+                          )}
+                        </div>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -4893,12 +5071,12 @@ const Editor: React.FC<EditorProps> = ({
                           ) : isMarked ? (
                             <>
                               <Check size={9} />
-                              Marked
+                              Flagged
                             </>
                           ) : (
                             <>
                               <Check size={9} />
-                              Mark
+                              Flag
                             </>
                           )}
                         </button>
@@ -5063,6 +5241,9 @@ const Editor: React.FC<EditorProps> = ({
                   src={audioReviewCurrentUrl}
                   onPlay={() => {
                     setAudioReviewPlaying(true);
+                    if (audioReviewCurrentBlockId) {
+                      markAudioReviewChecked(audioReviewCurrentBlockId);
+                    }
                   }}
                   onPause={() => setAudioReviewPlaying(false)}
                   onLoadedMetadata={() => {
@@ -5240,7 +5421,7 @@ const Editor: React.FC<EditorProps> = ({
                           : 'bg-indigo-500/10 border-indigo-500/20 text-muted-foreground'
                       } ${toolbarDisabledLikeAudioReview}`}
                     >
-                      {areAudiosPhaseReady ? 'Regenerate audios' : 'Generate audios'}
+                      {globalAudioActionLabel}
                     </button>
                   )}
 
@@ -5458,7 +5639,7 @@ const Editor: React.FC<EditorProps> = ({
               } ${toolbarDisabledLikeAudioReview}`}
             >
               <AudioLines size={14} className="text-current" />
-              {areAudiosPhaseReady ? 'Regenerate Audios' : 'Generate Audios'}
+              {globalAudioActionLabel}
             </button>
           )}
 
@@ -5571,6 +5752,11 @@ const Editor: React.FC<EditorProps> = ({
           {/* Primary Action */}
           {hasFinalVideoReady ? (
             <div className="flex items-center h-8 rounded-[5px] border border-emerald-500/40 bg-emerald-600 shadow-lg shadow-emerald-500/10 overflow-hidden">
+              {topFinalLastElapsedLabel && (
+                <div className="h-8 px-2.5 border-r border-emerald-500/35 bg-black/10 text-white/90 inline-flex items-center text-[10px] font-bold tracking-wider tabular-nums">
+                  {topFinalLastElapsedLabel}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -5674,7 +5860,7 @@ const Editor: React.FC<EditorProps> = ({
           {contentValidationAlerts.length > 0 && (
             <div className="max-w-[1200px] mx-auto rounded-[5px] border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-200">
               <div className="text-xs font-semibold uppercase tracking-wide mb-2">
-                Revise os blocos abaixo para continuar
+                Review the blocks below to continue
               </div>
               <div className="flex flex-wrap gap-2">
                 {contentValidationAlerts.map((alert) => (
@@ -5684,6 +5870,41 @@ const Editor: React.FC<EditorProps> = ({
                     className="inline-flex items-center rounded-[5px] border border-red-300/80 bg-red-500/10 px-2.5 py-1 text-[11px] font-medium hover:bg-red-500/15 transition-colors dark:border-red-800/70"
                   >
                     {alert.message}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {flaggedAudioBlocks.length > 0 && (
+            <div className="max-w-[1200px] mx-auto rounded-[5px] border border-amber-200 bg-amber-50 text-amber-800 text-sm px-4 py-3 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-200">
+              <div className="flex flex-wrap items-center gap-2 justify-between">
+                <div className="text-xs font-semibold uppercase tracking-wide">
+                  Flagged audios to regenerate ({flaggedAudioBlocks.length})
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => void regenerateFlaggedAudios()}
+                    disabled={isAnyGenerationRunning || isGeneratingFinalVideo}
+                    className="inline-flex items-center rounded-[5px] border border-amber-300/80 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold hover:bg-amber-500/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Regenerate flagged
+                  </button>
+                  <button
+                    onClick={() => setAudioReviewMarked({})}
+                    className="inline-flex items-center rounded-[5px] border border-amber-300/80 bg-transparent px-2.5 py-1 text-[11px] font-medium hover:bg-amber-500/10 transition-colors"
+                  >
+                    Clear flags
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {flaggedAudioBlocks.map((block) => (
+                  <button
+                    key={`flagged-audio-${block.id}`}
+                    onClick={() => scrollToBlock(block.id)}
+                    className="inline-flex items-center rounded-[5px] border border-amber-300/80 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium hover:bg-amber-500/15 transition-colors dark:border-amber-800/70"
+                  >
+                    {block.number}
                   </button>
                 ))}
               </div>
@@ -5735,9 +5956,6 @@ const Editor: React.FC<EditorProps> = ({
                 <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface-2))]/35">
                   <div className="px-2 py-1 bg-primary/10 text-primary border border-primary/20 text-[10px] font-bold rounded-[5px] shadow-sm transition-colors">
                     {block.number}
-                  </div>
-                  <div className="text-[11px] font-semibold text-foreground/80">
-                    Block {block.number}
                   </div>
                   <span
                     className={`px-2 py-1 text-[9px] font-bold uppercase tracking-widest rounded-[5px] border ${

@@ -453,7 +453,9 @@ async function renderCinematicFinalVideoWithPython(options: {
     zoom_transition_preset: "T6_inertial_ref",
     transition: "XF3b_flash_white_occluded_6f",
     transition_duration: 0.2,
-    subtitle_enabled: String(process.env.VIZLEC_SUBTITLES_ENABLED ?? "1").trim() !== "0",
+    // Final render should not implicitly generate subtitles/transcription.
+    // It only consumes subtitle assets that were generated beforehand.
+    subtitle_enabled: false,
     subtitle_template_id: "subtitle-yellow-bold-bottom-v1",
     subtitle_language: (process.env.VIZLEC_SUBTITLE_LANGUAGE ?? "pt").trim() || "pt",
     subtitle_model: (process.env.VIZLEC_SUBTITLE_WHISPER_MODEL ?? "").trim() || undefined,
@@ -2829,6 +2831,16 @@ async function handleWorkerCommandRequest(
       orderBy: { createdAt: "desc" },
       select: { path: true }
     });
+    const lastSucceededFinalVideoJob = await prisma.job.findFirst({
+      where: {
+        videoVersionId: versionId,
+        type: "concat_video",
+        blockId: null,
+        status: "succeeded"
+      },
+      orderBy: { updatedAt: "desc" },
+      select: { createdAt: true, updatedAt: true }
+    });
     const hasInvalidatingGeneration = activeJobs.some(
       (job) =>
         job.type === "segment" ||
@@ -2841,6 +2853,19 @@ async function handleWorkerCommandRequest(
     const finalVideoReady =
       finalVideoAssets.some((asset) => asset.path && fs.existsSync(asset.path)) &&
       !hasInvalidatingGeneration;
+    const lastFinalVideoRenderSeconds =
+      lastSucceededFinalVideoJob &&
+      Number.isFinite(lastSucceededFinalVideoJob.updatedAt.getTime()) &&
+      Number.isFinite(lastSucceededFinalVideoJob.createdAt.getTime())
+        ? Math.max(
+            0,
+            Math.floor(
+              (lastSucceededFinalVideoJob.updatedAt.getTime() -
+                lastSucceededFinalVideoJob.createdAt.getTime()) /
+                1000
+            )
+          )
+        : null;
 
     const toPhase = (status: string): "idle" | "waiting" | "running" =>
       status === "running" ? "running" : status === "pending" ? "waiting" : "idle";
@@ -3093,6 +3118,7 @@ async function handleWorkerCommandRequest(
       data: {
         videoVersionId: versionId,
         finalVideoReady,
+        lastFinalVideoRenderSeconds,
         segment,
         tts,
         image,
@@ -5697,7 +5723,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
   const subtitleCuesJsonPath = path.join(finalDir, "subtitles.cues.json");
   const subtitleSrtPath = path.join(finalDir, "subtitles.srt");
   const subtitleAssPath = path.join(finalDir, "subtitles.default.ass");
-  if (!usedCinematicBridge && fs.existsSync(subtitleAssPath)) {
+  if (fs.existsSync(subtitleAssPath)) {
     await notifyRunningPhase(job, "generation");
     await burnSubtitlesIntoFinalVideo({
       finalVideoPath: outputPath,
