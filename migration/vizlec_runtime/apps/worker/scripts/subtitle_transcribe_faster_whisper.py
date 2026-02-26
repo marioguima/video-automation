@@ -104,6 +104,141 @@ def _build_cues(transcript_segments: list[dict[str, Any]]) -> list[dict[str, Any
     return sanitized
 
 
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _pick_window_index(ts: float, windows: list[dict[str, Any]]) -> int | None:
+    if not windows:
+        return None
+    for i, w in enumerate(windows):
+        start = float(w.get("start", 0.0) or 0.0)
+        end = float(w.get("end", start) or start)
+        if i == len(windows) - 1:
+            if start <= ts <= end:
+                return i
+        if start <= ts < end:
+            return i
+    return None
+
+
+def _resegment_by_block_windows(
+    transcript_segments: list[dict[str, Any]],
+    block_windows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not transcript_segments or not block_windows:
+        return transcript_segments
+
+    normalized_windows: list[dict[str, Any]] = []
+    for idx, w in enumerate(block_windows):
+        start = float(w.get("start", 0.0) or 0.0)
+        end = float(w.get("end", start) or start)
+        if end <= start:
+            continue
+        normalized_windows.append(
+            {
+                "block_index": int(w.get("block_index", idx) or idx),
+                "start": start,
+                "end": end,
+            }
+        )
+    if not normalized_windows:
+        return transcript_segments
+
+    resegmented: list[dict[str, Any]] = []
+    for seg in transcript_segments:
+        seg_start = float(seg.get("start", 0.0) or 0.0)
+        seg_end = float(seg.get("end", seg_start) or seg_start)
+        raw_text = _clean_text(str(seg.get("text") or ""))
+        words = list(seg.get("words") or [])
+
+        if words:
+            buckets: dict[int, list[dict[str, Any]]] = {}
+            for w in words:
+                ws = w.get("start")
+                we = w.get("end")
+                token = _clean_text(str(w.get("word") or ""))
+                if ws is None or we is None or not token:
+                    continue
+                wsf = float(ws)
+                wef = float(we)
+                mid = (wsf + wef) / 2.0
+                win_idx = _pick_window_index(mid, normalized_windows)
+                if win_idx is None:
+                    continue
+                buckets.setdefault(win_idx, []).append(
+                    {
+                        "word": token,
+                        "start": wsf,
+                        "end": wef,
+                        "probability": float(w.get("probability", 0.0) or 0.0),
+                    }
+                )
+
+            if buckets:
+                for win_idx in sorted(buckets.keys()):
+                    bucket_words = buckets[win_idx]
+                    window = normalized_windows[win_idx]
+                    w_start = _clamp(
+                        min(float(w["start"]) for w in bucket_words),
+                        float(window["start"]),
+                        float(window["end"]),
+                    )
+                    w_end = _clamp(
+                        max(float(w["end"]) for w in bucket_words),
+                        float(window["start"]),
+                        float(window["end"]),
+                    )
+                    if w_end <= w_start:
+                        w_end = min(float(window["end"]), w_start + 0.18)
+                    text = _clean_text(" ".join(str(w["word"]) for w in bucket_words))
+                    if not text:
+                        continue
+                    seg_obj: dict[str, Any] = {
+                        "id": seg.get("id"),
+                        "start": w_start,
+                        "end": max(w_end, w_start + 0.18),
+                        "text": text,
+                        "block_index": int(window["block_index"]),
+                    }
+                    seg_obj["words"] = [
+                        {
+                            **w,
+                            "start": _clamp(float(w["start"]), float(window["start"]), float(window["end"])),
+                            "end": _clamp(float(w["end"]), float(window["start"]), float(window["end"])),
+                        }
+                        for w in bucket_words
+                    ]
+                    resegmented.append(seg_obj)
+                continue
+
+        # Fallback when word timestamps are unavailable: keep segment inside a single block window.
+        midpoint = (seg_start + seg_end) / 2.0
+        win_idx = _pick_window_index(midpoint, normalized_windows)
+        if win_idx is None:
+            continue
+        window = normalized_windows[win_idx]
+        new_start = _clamp(seg_start, float(window["start"]), float(window["end"]))
+        new_end = _clamp(seg_end, float(window["start"]), float(window["end"]))
+        if new_end <= new_start:
+            new_end = min(float(window["end"]), new_start + 0.18)
+        if not raw_text:
+            continue
+        resegmented.append(
+            {
+                **seg,
+                "start": new_start,
+                "end": max(new_end, new_start + 0.18),
+                "text": raw_text,
+                "block_index": int(window["block_index"]),
+            }
+        )
+
+    # Keep deterministic ordering after splitting.
+    resegmented.sort(key=lambda item: (float(item.get("start", 0.0) or 0.0), float(item.get("end", 0.0) or 0.0)))
+    return resegmented
+
+
 def _cue_text_len(text: str) -> int:
     return len(text.replace("\\N", " "))
 
@@ -211,42 +346,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     out_path.write_text(header + "\n".join(event_lines) + ("\n" if event_lines else ""), encoding="utf-8")
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: subtitle_transcribe_faster_whisper.py <payload.json>", file=sys.stderr)
-        return 2
-    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    audio_path = Path(payload["audio_path"]).resolve()
-    out_dir = Path(payload["out_dir"]).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    width = int(payload.get("width", 1920))
-    height = int(payload.get("height", 1080))
-    template_id = payload.get("template_id", "subtitle-yellow-bold-bottom-v1")
-    if template_id != "subtitle-yellow-bold-bottom-v1":
-        raise RuntimeError(f"unsupported subtitle template: {template_id}")
-
-    try:
-        from faster_whisper import WhisperModel  # type: ignore
-    except Exception as err:
-        print(json.dumps({"ok": False, "skipped": True, "reason": "faster_whisper_import_failed", "error": str(err)}))
-        return 0
-
-    model_name = str(payload.get("model", os.getenv("VIZLEC_SUBTITLE_WHISPER_MODEL", "small")))
-    device = str(payload.get("device", os.getenv("VIZLEC_SUBTITLE_WHISPER_DEVICE", "cpu")))
-    compute_type = str(payload.get("compute_type", os.getenv("VIZLEC_SUBTITLE_WHISPER_COMPUTE_TYPE", "int8")))
-    language = str(payload.get("language", payload.get("lang", "pt")))
-    vad_filter = bool(payload.get("vad_filter", True))
-    word_timestamps = bool(payload.get("word_timestamps", True))
-
-    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+def _extract_transcript_segments(model: Any, audio_path: str, *, language: str, vad_filter: bool, word_timestamps: bool) -> tuple[list[dict[str, Any]], Any]:
     segments_iter, info = model.transcribe(
-        str(audio_path),
+        audio_path,
         language=language,
         vad_filter=vad_filter,
         word_timestamps=word_timestamps,
         beam_size=5,
     )
-
     transcript_segments: list[dict[str, Any]] = []
     for seg in segments_iter:
         seg_obj: dict[str, Any] = {
@@ -273,6 +380,139 @@ def main() -> int:
         if words:
             seg_obj["words"] = words
         transcript_segments.append(seg_obj)
+    return transcript_segments, info
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: subtitle_transcribe_faster_whisper.py <payload.json>", file=sys.stderr)
+        return 2
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    audio_path_value = payload.get("audio_path")
+    audio_files_payload = payload.get("audio_files") or []
+    out_dir = Path(payload["out_dir"]).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    width = int(payload.get("width", 1920))
+    height = int(payload.get("height", 1080))
+    template_id = payload.get("template_id", "subtitle-yellow-bold-bottom-v1")
+    block_windows_payload = payload.get("block_windows") or []
+    if template_id != "subtitle-yellow-bold-bottom-v1":
+        raise RuntimeError(f"unsupported subtitle template: {template_id}")
+
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+    except Exception as err:
+        print(json.dumps({"ok": False, "skipped": True, "reason": "faster_whisper_import_failed", "error": str(err)}))
+        return 0
+
+    model_name = str(payload.get("model", os.getenv("VIZLEC_SUBTITLE_WHISPER_MODEL", "small")))
+    device = str(payload.get("device", os.getenv("VIZLEC_SUBTITLE_WHISPER_DEVICE", "cpu")))
+    compute_type = str(payload.get("compute_type", os.getenv("VIZLEC_SUBTITLE_WHISPER_COMPUTE_TYPE", "int8")))
+    language = str(payload.get("language", payload.get("lang", "pt")))
+    vad_filter = bool(payload.get("vad_filter", True))
+    word_timestamps = bool(payload.get("word_timestamps", True))
+
+    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+    transcript_segments: list[dict[str, Any]] = []
+    per_file_debug: list[dict[str, Any]] = []
+    info_payload: dict[str, Any] = {}
+
+    if isinstance(audio_files_payload, list) and audio_files_payload:
+        global_offset = 0.0
+        total_files = len(audio_files_payload)
+        for file_idx, item in enumerate(audio_files_payload, start=1):
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            file_path = str(Path(str(item["path"])).resolve())
+            expected_duration = 0.0
+            try:
+                expected_duration = float(item.get("duration") or 0.0)
+            except Exception:
+                expected_duration = 0.0
+            local_segments, local_info = _extract_transcript_segments(
+                model,
+                file_path,
+                language=language,
+                vad_filter=vad_filter,
+                word_timestamps=word_timestamps,
+            )
+            local_duration = 0.0
+            if local_segments:
+                local_duration = max(float(seg.get("end", 0.0) or 0.0) for seg in local_segments)
+            if getattr(local_info, "duration", None) is not None:
+                try:
+                    local_duration = max(local_duration, float(getattr(local_info, "duration", 0.0) or 0.0))
+                except Exception:
+                    pass
+            effective_duration = expected_duration if expected_duration > 0 else local_duration
+            clamped_segments: list[dict[str, Any]] = []
+            for seg in local_segments:
+                local_start = float(seg.get("start", 0.0) or 0.0)
+                local_end = float(seg.get("end", local_start) or local_start)
+                if effective_duration > 0:
+                    local_start = _clamp(local_start, 0.0, effective_duration)
+                    local_end = _clamp(local_end, 0.0, effective_duration)
+                if local_end <= local_start:
+                    local_end = local_start + 0.18
+                    if effective_duration > 0:
+                        local_end = min(effective_duration, local_end)
+                next_seg = dict(seg)
+                next_seg["start"] = global_offset + max(0.0, local_start)
+                next_seg["end"] = global_offset + max(next_seg["start"], local_end)
+                next_seg["block_index"] = int(item.get("block_index", file_idx - 1) or (file_idx - 1))
+                if isinstance(next_seg.get("words"), list):
+                    shifted_words = []
+                    for w in next_seg["words"]:
+                        ws = float(w.get("start", 0.0) or 0.0)
+                        we = float(w.get("end", ws) or ws)
+                        if effective_duration > 0:
+                            ws = _clamp(ws, 0.0, effective_duration)
+                            we = _clamp(we, 0.0, effective_duration)
+                        shifted_words.append({**w, "start": global_offset + ws, "end": global_offset + max(ws, we)})
+                    next_seg["words"] = shifted_words
+                clamped_segments.append(next_seg)
+            transcript_segments.extend(clamped_segments)
+            per_file_debug.append(
+                {
+                    "index": file_idx,
+                    "path": file_path,
+                    "block_index": int(item.get("block_index", file_idx - 1) or (file_idx - 1)),
+                    "expected_duration": expected_duration if expected_duration > 0 else None,
+                    "detected_duration": local_duration if local_duration > 0 else None,
+                    "offset_start": global_offset,
+                    "offset_end": global_offset + max(0.0, effective_duration),
+                    "segment_count": len(clamped_segments),
+                }
+            )
+            print(
+                json.dumps({"progress": "transcribe_audio_file", "current": file_idx, "total": total_files}, ensure_ascii=False),
+                flush=True,
+            )
+            global_offset += max(0.0, effective_duration)
+        info_payload = {
+            "mode": "audio_files_loop",
+            "file_count": len(per_file_debug),
+            "duration": global_offset if global_offset > 0 else None,
+        }
+    else:
+        if not audio_path_value:
+            raise RuntimeError("payload must include audio_files or audio_path")
+        audio_path = Path(str(audio_path_value)).resolve()
+        transcript_segments, info = _extract_transcript_segments(
+            model,
+            str(audio_path),
+            language=language,
+            vad_filter=vad_filter,
+            word_timestamps=word_timestamps,
+        )
+        info_payload = {
+            "mode": "single_audio",
+            "duration": getattr(info, "duration", None),
+            "language_probability": getattr(info, "language_probability", None),
+        }
+
+    if (not isinstance(audio_files_payload, list) or not audio_files_payload) and isinstance(block_windows_payload, list) and block_windows_payload:
+        transcript_segments = _resegment_by_block_windows(transcript_segments, block_windows_payload)
 
     cues = _build_cues(transcript_segments)
     raw_json_path = out_dir / "subtitles.raw.json"
@@ -289,10 +529,11 @@ def main() -> int:
                 "compute_type": compute_type,
                 "language": language,
                 "template_id": template_id,
+                "block_windows": block_windows_payload if isinstance(block_windows_payload, list) else None,
                 "info": {
-                    "duration": getattr(info, "duration", None),
-                    "language_probability": getattr(info, "language_probability", None),
+                    **info_payload,
                 },
+                "files": per_file_debug if per_file_debug else None,
                 "segments": transcript_segments,
             },
             ensure_ascii=False,
@@ -330,7 +571,8 @@ def main() -> int:
                 "cue_count": len(cues),
             },
             ensure_ascii=False,
-        )
+        ),
+        flush=True,
     )
     return 0
 

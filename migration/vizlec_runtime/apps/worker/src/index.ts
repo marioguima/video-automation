@@ -344,6 +344,8 @@ async function runProcess(
     logPrefix?: string;
     onStdoutLine?: (line: string) => void;
     onStderrLine?: (line: string) => void;
+    abortCheck?: () => Promise<void>;
+    abortCheckIntervalMs?: number;
   } = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -351,6 +353,37 @@ async function runProcess(
       stdio: ["ignore", "pipe", "pipe"],
       cwd: options.cwd
     });
+    let settled = false;
+    let abortTimer: NodeJS.Timeout | null = null;
+    let abortCheckInFlight = false;
+    const failAndStop = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (abortTimer) {
+        clearInterval(abortTimer);
+        abortTimer = null;
+      }
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // ignore kill failures
+      }
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    const runAbortCheck = () => {
+      if (!options.abortCheck || abortCheckInFlight || settled) return;
+      abortCheckInFlight = true;
+      void options.abortCheck()
+        .catch((err) => {
+          failAndStop(err);
+        })
+        .finally(() => {
+          abortCheckInFlight = false;
+        });
+    };
+    if (options.abortCheck) {
+      abortTimer = setInterval(runAbortCheck, Math.max(250, options.abortCheckIntervalMs ?? 1000));
+    }
     let stdout = "";
     let stderr = "";
     let stdoutBuffer = "";
@@ -364,12 +397,18 @@ async function runProcess(
       stdoutBuffer = lines.pop() ?? "";
       for (const line of lines) {
         if (options.onStdoutLine) {
-          options.onStdoutLine(line);
+          try {
+            options.onStdoutLine(line);
+          } catch (err) {
+            failAndStop(err);
+            return;
+          }
         }
         if (options.logPrefix && line.trim().length > 0 && !line.startsWith("__VIZLEC_RESULT__")) {
           console.log(`[${options.logPrefix}] ${line}`);
         }
       }
+      runAbortCheck();
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
@@ -378,20 +417,43 @@ async function runProcess(
       stderrBuffer = lines.pop() ?? "";
       for (const line of lines) {
         if (options.onStderrLine) {
-          options.onStderrLine(line);
+          try {
+            options.onStderrLine(line);
+          } catch (err) {
+            failAndStop(err);
+            return;
+          }
         }
         if (options.logPrefix && line.trim().length > 0 && !line.startsWith("__VIZLEC_RESULT__")) {
           console.error(`[${options.logPrefix}] ${line}`);
         }
       }
+      runAbortCheck();
     });
     child.on("error", (err) => {
+      if (abortTimer) {
+        clearInterval(abortTimer);
+        abortTimer = null;
+      }
+      if (settled) return;
+      settled = true;
       reject(err);
     });
     child.on("close", (code) => {
+      if (abortTimer) {
+        clearInterval(abortTimer);
+        abortTimer = null;
+      }
+      if (settled) return;
+      settled = true;
       if (stdoutBuffer.trim().length > 0) {
         if (options.onStdoutLine) {
-          options.onStdoutLine(stdoutBuffer);
+          try {
+            options.onStdoutLine(stdoutBuffer);
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error(String(err)));
+            return;
+          }
         }
         if (options.logPrefix && !stdoutBuffer.startsWith("__VIZLEC_RESULT__")) {
           console.log(`[${options.logPrefix}] ${stdoutBuffer}`);
@@ -399,7 +461,12 @@ async function runProcess(
       }
       if (stderrBuffer.trim().length > 0) {
         if (options.onStderrLine) {
-          options.onStderrLine(stderrBuffer);
+          try {
+            options.onStderrLine(stderrBuffer);
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error(String(err)));
+            return;
+          }
         }
         if (options.logPrefix && !stderrBuffer.startsWith("__VIZLEC_RESULT__")) {
           console.error(`[${options.logPrefix}] ${stderrBuffer}`);
@@ -552,6 +619,7 @@ function parseLastJsonLine(stdout: string): Record<string, unknown> | null {
 
 async function generateSubtitleAssetsFromAudioFiles(options: {
   audioFiles: string[];
+  blockDurationsSeconds?: number[];
   finalDir: string;
   job: JobRecord;
 }): Promise<void> {
@@ -563,37 +631,50 @@ async function generateSubtitleAssetsFromAudioFiles(options: {
     process.env.PYTHON_EXECUTABLE?.trim() ||
     "python";
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vizlec-subtitles-"));
-  const concatAudioPath = path.join(tmpDir, "audio_concat.wav");
-  const concatListPath = path.join(tmpDir, "concat.txt");
   const subtitleOutDir = path.join(tmpDir, "subtitle_out");
   const subtitlePayloadPath = path.join(tmpDir, "subtitle_payload.json");
   ensureDir(subtitleOutDir);
 
   try {
-    await fs.promises.writeFile(
-      concatListPath,
-      `${options.audioFiles.map((filePath) => toConcatFileEntry(filePath)).join("\n")}\n`,
-      "utf8"
-    );
-    await runProcess(
-      "ffmpeg",
-      [
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        concatListPath,
-        "-c:a",
-        "pcm_s16le",
-        concatAudioPath
-      ],
-      { logPrefix: "subtitle:concat" }
-    );
+    let subtitleProgressMetaBase: Record<string, unknown> = {};
+    if (typeof options.job.metaJson === "string" && options.job.metaJson.trim()) {
+      try {
+        const parsed = JSON.parse(options.job.metaJson) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object") subtitleProgressMetaBase = parsed;
+      } catch {
+        subtitleProgressMetaBase = {};
+      }
+    }
+    let lastSubtitleTranscribeCurrent = -1;
+    let lastSubtitleTranscribeTotal = -1;
+
+    const normalizedDurations =
+      Array.isArray(options.blockDurationsSeconds) && options.blockDurationsSeconds.length === options.audioFiles.length
+        ? options.blockDurationsSeconds.map((d) => (Number.isFinite(d) && d > 0 ? Number(d) : 0))
+        : [];
+    const blockWindows =
+      normalizedDurations.length === options.audioFiles.length
+        ? (() => {
+            let cursor = 0;
+            return normalizedDurations.map((durationSeconds, idx) => {
+              const start = Number(cursor.toFixed(3));
+              cursor += Math.max(0, durationSeconds);
+              const end = Number(cursor.toFixed(3));
+              return {
+                block_index: idx,
+                start,
+                end
+              };
+            });
+          })()
+        : undefined;
 
     const payload = {
-      audio_path: concatAudioPath,
+      audio_files: options.audioFiles.map((filePath, idx) => ({
+        path: filePath,
+        block_index: idx,
+        duration: normalizedDurations[idx] ?? null
+      })),
       out_dir: subtitleOutDir,
       width: 1920,
       height: 1080,
@@ -601,6 +682,7 @@ async function generateSubtitleAssetsFromAudioFiles(options: {
       template_id: "subtitle-yellow-bold-bottom-v1",
       vad_filter: String(process.env.VIZLEC_SUBTITLE_VAD_FILTER ?? "1").trim() !== "0",
       word_timestamps: String(process.env.VIZLEC_SUBTITLE_WORD_TIMESTAMPS ?? "1").trim() !== "0",
+      block_windows: blockWindows,
       model: (process.env.VIZLEC_SUBTITLE_WHISPER_MODEL ?? "").trim() || undefined,
       device: (process.env.VIZLEC_SUBTITLE_WHISPER_DEVICE ?? "").trim() || undefined,
       compute_type: (process.env.VIZLEC_SUBTITLE_WHISPER_COMPUTE_TYPE ?? "").trim() || undefined
@@ -609,6 +691,7 @@ async function generateSubtitleAssetsFromAudioFiles(options: {
 
     logJobEvent("subtitle_transcription_started", options.job, {
       audio_count: options.audioFiles.length,
+      block_window_count: blockWindows?.length ?? 0,
       subtitle_device: payload.device ?? null,
       subtitle_model: payload.model ?? null
     });
@@ -618,7 +701,40 @@ async function generateSubtitleAssetsFromAudioFiles(options: {
       [SUBTITLE_TRANSCRIBE_SCRIPT, subtitlePayloadPath],
       {
         cwd: tmpDir,
-        logPrefix: "subtitle:asr"
+        logPrefix: "subtitle:asr",
+        onStdoutLine: (line) => {
+          try {
+            const parsed = JSON.parse(line) as { progress?: unknown; current?: unknown; total?: unknown };
+            if (parsed?.progress !== "transcribe_audio_file") return;
+            const current =
+              typeof parsed.current === "number" && Number.isFinite(parsed.current) ? Math.trunc(parsed.current) : null;
+            const total =
+              typeof parsed.total === "number" && Number.isFinite(parsed.total) ? Math.trunc(parsed.total) : null;
+            if (!current || !total || total <= 0) return;
+            if (current === lastSubtitleTranscribeCurrent && total === lastSubtitleTranscribeTotal) return;
+            lastSubtitleTranscribeCurrent = current;
+            lastSubtitleTranscribeTotal = total;
+            const progressPercent = Math.max(1, Math.min(99, Math.trunc((current / total) * 100)));
+            void prisma.job.update({
+              where: { id: options.job.id },
+              data: {
+                metaJson: JSON.stringify({
+                  ...subtitleProgressMetaBase,
+                  transcriptionCurrent: current,
+                  transcriptionTotal: total,
+                  progressPercent
+                })
+              }
+            }).catch(() => null);
+            void notifyRunningProgress(options.job, progressPercent);
+          } catch {
+            // ignore non-JSON stdout lines
+          }
+        },
+        abortCheck: async () => {
+          await assertLeaseValid(options.job.id);
+        },
+        abortCheckIntervalMs: 750
       }
     );
     const parsed = parseLastJsonLine(stdout);
@@ -3049,6 +3165,15 @@ async function handleWorkerCommandRequest(
       })(),
       (async () => {
         if (!transcriptionJob) return idleState(1);
+        const transcriptionMeta = parseJobMeta(transcriptionJob.metaJson);
+        const metaCurrent =
+          typeof transcriptionMeta?.transcriptionCurrent === "number" && Number.isFinite(transcriptionMeta.transcriptionCurrent)
+            ? Math.max(0, Math.trunc(transcriptionMeta.transcriptionCurrent))
+            : null;
+        const metaTotal =
+          typeof transcriptionMeta?.transcriptionTotal === "number" && Number.isFinite(transcriptionMeta.transcriptionTotal)
+            ? Math.max(1, Math.trunc(transcriptionMeta.transcriptionTotal))
+            : null;
         const generatedCount = await prisma.asset.count({
           where: {
             kind: { in: ["subtitle_raw_json", "subtitle_cues_json", "subtitle_srt", "subtitle_ass"] },
@@ -3056,13 +3181,15 @@ async function handleWorkerCommandRequest(
             createdAt: { gte: transcriptionJob.createdAt }
           }
         });
+        const currentCount = metaCurrent ?? generatedCount;
+        const totalCount = metaTotal ?? totalBlocks;
         return {
           active: true,
           jobId: transcriptionJob.id,
           status: transcriptionJob.status,
           phase: toPhase(transcriptionJob.status),
-          current: generatedCount,
-          total: 4
+          current: Math.min(totalCount, currentCount),
+          total: totalCount
         };
       })(),
       (async () => {
@@ -3658,6 +3785,9 @@ type JobMeta = {
     voiceId?: string;
     language?: string;
   };
+  transcriptionCurrent?: number;
+  transcriptionTotal?: number;
+  progressPercent?: number;
 };
 
 function parseJobMeta(raw: string | null | undefined): JobMeta | null {
@@ -5487,6 +5617,7 @@ async function transcribeSubtitlesForVersion(options: { job: JobRecord }): Promi
     version.id
   );
   const audioFiles: string[] = [];
+  const blockDurationsSeconds: number[] = [];
   for (const block of version.blocks) {
     await assertLeaseValid(job.id);
     const audioAsset = await prisma.asset.findFirst({
@@ -5497,11 +5628,21 @@ async function transcribeSubtitlesForVersion(options: { job: JobRecord }): Promi
       throw new Error(`audio not found for block ${block.index}`);
     }
     audioFiles.push(audioAsset.path);
+    const dbDuration =
+      typeof block.audioDurationS === "number" && Number.isFinite(block.audioDurationS) && block.audioDurationS > 0
+        ? Number(block.audioDurationS)
+        : null;
+    const duration =
+      dbDuration ??
+      (await probeAudioDuration(audioAsset.path)) ??
+      0;
+    blockDurationsSeconds.push(duration);
   }
 
   await ensureMemoryForSubtitleTranscription(job);
   await generateSubtitleAssetsFromAudioFiles({
     audioFiles,
+    blockDurationsSeconds,
     finalDir,
     job
   });
@@ -5852,9 +5993,18 @@ function isLeaseValidValue(lease: Date | null): boolean {
 async function assertLeaseValid(jobId: string): Promise<void> {
   const current = await prisma.job.findUnique({
     where: { id: jobId },
-    select: { leaseExpiresAt: true }
+    select: { leaseExpiresAt: true, status: true }
   });
-  if (!current || !isLeaseValidValue(current.leaseExpiresAt)) {
+  if (!current) {
+    throw new Error("job canceled");
+  }
+  if (current.status === "canceled") {
+    throw new Error("job canceled");
+  }
+  if (current.status === "failed") {
+    throw new Error("job failed");
+  }
+  if (current.status !== "running" || !isLeaseValidValue(current.leaseExpiresAt)) {
     throw new Error("lease expired");
   }
   const leaseMs = Number(process.env.JOB_LEASE_MS ?? 30000);
@@ -6008,7 +6158,7 @@ async function markJobSuccess(job: JobRecord, durationMs: number): Promise<void>
 
 async function markJobFailure(job: JobRecord, err: unknown, durationMs: number): Promise<void> {
   const error = serializeError(err);
-  if (error === "lease expired") {
+  if (error === "lease expired" || error === "job canceled") {
     await prisma.job.update({
       where: { id: job.id },
       data: {

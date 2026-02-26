@@ -879,6 +879,29 @@ type LegacyBlock = {
   imagePromptJson?: string | null;
   status: string | null;
   segmentError?: string | null;
+  audioDurationS?: number | null;
+};
+
+type SubtitleCue = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+const formatSrtTimestamp = (seconds: number): string => {
+  const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = Math.floor(safe % 60);
+  const millis = Math.floor((safe - Math.floor(safe)) * 1000);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+};
+
+type SubtitleCuesPayload = {
+  template_id?: string;
+  width?: number;
+  height?: number;
+  cues?: SubtitleCue[];
 };
 
 type SlideTemplateOption = {
@@ -1102,6 +1125,8 @@ const Editor: React.FC<EditorProps> = ({
   const [transcriptionPhase, setTranscriptionPhase] = useState<JobPhase>('idle');
   const [subtitleFiles, setSubtitleFiles] = useState<Record<string, boolean>>({});
   const [subtitleListRevision, setSubtitleListRevision] = useState(0);
+  const [subtitleCuesData, setSubtitleCuesData] = useState<SubtitleCuesPayload | null>(null);
+  const [subtitleReviewTextByVersion, setSubtitleReviewTextByVersion] = useState<Record<string, Record<string, string>>>({});
   const [finalVideoJobId, setFinalVideoJobId] = useState<string | null>(null);
   const [isGeneratingFinalVideo, setIsGeneratingFinalVideo] = useState(false);
   const [finalVideoProgress, setFinalVideoProgress] = useState<{ current: number; total: number } | null>(null);
@@ -1145,6 +1170,7 @@ const Editor: React.FC<EditorProps> = ({
   const [isAudioBatchCancelConfirmOpen, setIsAudioBatchCancelConfirmOpen] = useState(false);
   const [isSegmentCancelConfirmOpen, setIsSegmentCancelConfirmOpen] = useState(false);
   const [isSlidesBatchCancelConfirmOpen, setIsSlidesBatchCancelConfirmOpen] = useState(false);
+  const [isTranscriptionCancelConfirmOpen, setIsTranscriptionCancelConfirmOpen] = useState(false);
   const [isFinalVideoCancelConfirmOpen, setIsFinalVideoCancelConfirmOpen] = useState(false);
   const [isFinalVideoPreflightConfirmOpen, setIsFinalVideoPreflightConfirmOpen] = useState(false);
   const [finalVideoPreflightDescription, setFinalVideoPreflightDescription] = useState('');
@@ -1575,6 +1601,7 @@ const Editor: React.FC<EditorProps> = ({
       setAudioReviewMarked({});
       setAudioReviewPlaying(false);
       setAudioReviewRegenerating(false);
+      setSubtitleCuesData(null);
       return;
     }
     setIsLoadingBlocks(true);
@@ -1591,6 +1618,10 @@ const Editor: React.FC<EditorProps> = ({
             thumbnail: '/lesson-placeholder.svg',
             thumbLandscape: '/lesson-placeholder.svg',
             thumbPortrait: '/lesson-placeholder-portrait.svg',
+            audioDurationSeconds:
+              typeof block.audioDurationS === 'number' && Number.isFinite(block.audioDurationS)
+                ? block.audioDurationS
+                : null,
             originalText: block.sourceText ?? '',
             narratedText: block.ttsText ?? block.sourceText ?? '',
             onScreenText: {
@@ -2474,7 +2505,7 @@ const Editor: React.FC<EditorProps> = ({
           setTranscriptionJobId(jobId);
           setTranscriptionPhase(toPhase(status));
           if (progressPercent !== null) {
-            const total = 4;
+            const total = Math.max(1, blocks.length);
             const estimatedCurrent = Math.max(0, Math.min(total, Math.trunc((progressPercent / 100) * total)));
             setTranscriptionProgress({ current: estimatedCurrent, total });
           }
@@ -2526,6 +2557,7 @@ const Editor: React.FC<EditorProps> = ({
   useEffect(() => {
     if (!selectedVersionId) {
       setSubtitleFiles({});
+      setSubtitleCuesData(null);
       return;
     }
     apiGet<SubtitleListPayload>(`/video-versions/${selectedVersionId}/subtitles`, {
@@ -2544,6 +2576,23 @@ const Editor: React.FC<EditorProps> = ({
       .catch((err) => {
         console.error(err);
         setSubtitleFiles({});
+      });
+  }, [selectedVersionId, subtitleListRevision]);
+
+  useEffect(() => {
+    if (!selectedVersionId) {
+      setSubtitleCuesData(null);
+      return;
+    }
+    apiGet<SubtitleCuesPayload>(`/video-versions/${selectedVersionId}/subtitles/cues`, {
+      cacheMs: 0,
+      dedupe: false
+    })
+      .then((data) => {
+        setSubtitleCuesData(data && Array.isArray(data.cues) ? data : { cues: [] });
+      })
+      .catch(() => {
+        setSubtitleCuesData(null);
       });
   }, [selectedVersionId, subtitleListRevision]);
 
@@ -3346,7 +3395,7 @@ const Editor: React.FC<EditorProps> = ({
           setError(null);
           setIsGeneratingTranscription(true);
           setTranscriptionPhase('waiting');
-          setTranscriptionProgress({ current: 0, total: 4 });
+          setTranscriptionProgress({ current: 0, total: Math.max(1, blocks.length) });
           const job = await apiPost<{ id: string; status: string }>(
             `/video-versions/${selectedVersionId}/transcription`,
             {
@@ -3565,6 +3614,22 @@ const Editor: React.FC<EditorProps> = ({
     }
   };
 
+  const handleConfirmCancelTranscription = async () => {
+    if (!isGeneratingTranscription || !transcriptionJobId) {
+      setIsTranscriptionCancelConfirmOpen(false);
+      return;
+    }
+    try {
+      await apiPost(`/jobs/${transcriptionJobId}/cancel`, {
+        clientId: dispatchAgentIdRef.current
+      });
+      setIsTranscriptionCancelConfirmOpen(false);
+    } catch (err) {
+      console.error(err);
+      setError((err as Error).message ?? 'Failed to cancel transcription generation.');
+    }
+  };
+
   const markAudioReviewChecked = useCallback((blockId: string) => {
     if (!selectedVersionId || !blockId) return;
     setAudioReviewCheckedByVersion((prev) => ({
@@ -3758,6 +3823,17 @@ const Editor: React.FC<EditorProps> = ({
         clearBrokenSlidesForBlocksRef.current([blockId]);
         setImageUrls((prev) => ({ ...prev, [blockId]: `/blocks/${blockId}/image/raw` }));
         setImageRevisions((prev) => ({ ...prev, [blockId]: (prev[blockId] ?? 0) + 1 }));
+        setGeneratingStates((prev) => {
+          const current = prev[blockId];
+          if (!current?.image) return prev;
+          return {
+            ...prev,
+            [blockId]: {
+              ...current,
+              image: false
+            }
+          };
+        });
       });
 
       es.addEventListener(JOB_STREAM_EVENT.PROGRESS, (event) => {
@@ -4315,7 +4391,72 @@ const Editor: React.FC<EditorProps> = ({
   const audioReviewCurrentBlockId = audioReviewQueue[audioReviewIndex] ?? '';
   const audioReviewCurrentBlock = audioReviewCurrentBlockId ? blocksById[audioReviewCurrentBlockId] : undefined;
   const audioReviewCurrentUrl = audioReviewCurrentBlock?.audioUrl;
+  const subtitleCues = useMemo<Array<SubtitleCue & { index: number }>>(
+    () =>
+      Array.isArray(subtitleCuesData?.cues)
+        ? subtitleCuesData.cues
+            .filter((cue) => cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && typeof cue.text === 'string')
+            .map((cue, idx) => ({ index: idx + 1, start: Number(cue.start), end: Number(cue.end), text: String(cue.text) }))
+        : [],
+    [subtitleCuesData]
+  );
+  const subtitleDataByBlock = useMemo(() => {
+    let cursor = 0;
+    const out: Record<string, { start: number; end: number; cues: Array<SubtitleCue & { index: number }> }> = {};
+    for (const block of blocks) {
+      const dur = typeof block.audioDurationSeconds === 'number' && Number.isFinite(block.audioDurationSeconds) && block.audioDurationSeconds > 0
+        ? block.audioDurationSeconds
+        : 0;
+      const start = cursor;
+      const end = cursor + dur;
+      const cues = subtitleCues
+        .filter((cue) => cue.end > start && cue.start < end)
+        .map((cue) => ({ ...cue, text: cue.text.replace(/\\N/g, '\n').trim() }))
+        .filter((cue) => cue.text);
+      out[block.id] = { start, end, cues };
+      cursor = end;
+    }
+    return out;
+  }, [blocks, subtitleCues]);
+  const subtitlePlainTextByBlock = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const block of blocks) {
+      const blockData = subtitleDataByBlock[block.id];
+      const cues = blockData?.cues ?? [];
+      out[block.id] = cues
+        .map((cue) => cue.text)
+        .join('\n\n');
+    }
+    return out;
+  }, [blocks, subtitleDataByBlock]);
+  const subtitleReviewDraftsForVersion = selectedVersionId ? (subtitleReviewTextByVersion[selectedVersionId] ?? {}) : {};
+  const audioReviewCurrentSubtitleCues = audioReviewCurrentBlockId
+    ? (subtitleDataByBlock[audioReviewCurrentBlockId]?.cues ?? [])
+    : [];
+  const audioReviewCurrentSubtitleWindow = audioReviewCurrentBlockId
+    ? subtitleDataByBlock[audioReviewCurrentBlockId]
+    : undefined;
+  const audioReviewCurrentAbsoluteTime = (audioReviewCurrentSubtitleWindow?.start ?? 0) + audioReviewCurrentTime;
+  const audioReviewCurrentSubtitleOverlayText = useMemo(() => {
+    if (!audioReviewCurrentSubtitleCues.length) return '';
+    const active = audioReviewCurrentSubtitleCues
+      .filter((cue) => cue.start <= audioReviewCurrentAbsoluteTime && cue.end > audioReviewCurrentAbsoluteTime)
+      .map((cue) => cue.text.trim())
+      .filter(Boolean);
+    if (active.length > 0) return active.join('\n');
+    if (audioReviewCurrentTime <= 0.05) {
+      return audioReviewCurrentSubtitleCues[0]?.text?.trim?.() ?? '';
+    }
+    return '';
+  }, [audioReviewCurrentAbsoluteTime, audioReviewCurrentSubtitleCues, audioReviewCurrentTime]);
+  const audioReviewCurrentSubtitleText = audioReviewCurrentBlockId
+    ? (subtitleReviewDraftsForVersion[audioReviewCurrentBlockId] ?? subtitlePlainTextByBlock[audioReviewCurrentBlockId] ?? '')
+    : '';
   const audioReviewCurrentNarratedText = audioReviewTextDraft;
+  const audioReviewCurrentImageUrl =
+    audioReviewCurrentBlock?.generatedImageUrl ??
+    audioReviewCurrentBlock?.rawImageUrl ??
+    audioReviewCurrentBlock?.slideUrl;
   const audioReviewCurrentCharCount = getNarratedCharCount(audioReviewCurrentNarratedText);
   const audioReviewCurrentOverLimit = audioReviewCurrentCharCount > AUDIO_CHAR_LIMIT;
   const audioReviewMarkedCount = audioReviewQueue.filter((id) => Boolean(audioReviewMarked[id])).length;
@@ -4405,7 +4546,7 @@ const Editor: React.FC<EditorProps> = ({
 
   const startAudioReview = useCallback(() => {
     if (isAnyGenerationRunning) {
-      setError('Wait for current jobs to finish before starting audio review.');
+      setError('Wait for current jobs to finish before starting review.');
       return;
     }
     const queue = blocks.filter((block) => Boolean(audioUrls[block.id])).map((block) => block.id);
@@ -4935,6 +5076,33 @@ const Editor: React.FC<EditorProps> = ({
         </div>
       )}
 
+      {isTranscriptionCancelConfirmOpen && (
+        <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-[8px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] shadow-2xl">
+            <div className="p-5 border-b border-[hsl(var(--editor-border))]">
+              <h3 className="text-lg font-bold">Cancel transcription generation?</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                This will cancel the current subtitle transcription job.
+              </p>
+            </div>
+            <div className="p-5 border-t border-[hsl(var(--editor-border))] flex items-center justify-end gap-3">
+              <button
+                onClick={() => setIsTranscriptionCancelConfirmOpen(false)}
+                className="px-4 h-9 rounded-[5px] border border-[hsl(var(--editor-border))] text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+              >
+                Keep Running
+              </button>
+              <button
+                onClick={handleConfirmCancelTranscription}
+                className="px-4 h-9 rounded-[5px] bg-red-600 text-white text-xs font-bold uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm"
+              >
+                Cancel Job
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ConfirmDialog
         open={isFinalVideoPreflightConfirmOpen}
         title="Continue final video generation?"
@@ -4961,7 +5129,7 @@ const Editor: React.FC<EditorProps> = ({
             <div className="px-5 h-14 border-b border-[hsl(var(--editor-border))] flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Headphones size={16} className="text-orange-600" />
-                <h3 className="text-sm font-bold uppercase tracking-widest">Audio Review</h3>
+                <h3 className="text-sm font-bold uppercase tracking-widest">Review</h3>
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
                   {audioReviewQueue.length > 0 ? audioReviewIndex + 1 : 0}/{audioReviewQueue.length}
                 </span>
@@ -5089,69 +5257,123 @@ const Editor: React.FC<EditorProps> = ({
                 })}
               </div>
 
-              <div className="flex-1 p-6 flex flex-col gap-4 min-h-0">
+              <div className="flex-1 p-6 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar">
                 {audioReviewCurrentBlock ? (
                   <>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Narrated Text
+                    <div className="space-y-4 min-h-0">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Narrated Text
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest">
+                            <span className={audioReviewCurrentOverLimit ? 'text-amber-500' : 'text-muted-foreground'}>
+                              {audioReviewCurrentCharCount}/{AUDIO_CHAR_LIMIT}
+                            </span>
+                            {audioReviewCurrentOverLimit ? (
+                              <span className="text-amber-500">Warning</span>
+                            ) : null}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest">
-                          <span className={audioReviewCurrentOverLimit ? 'text-amber-500' : 'text-muted-foreground'}>
-                            {audioReviewCurrentCharCount}/{AUDIO_CHAR_LIMIT}
-                          </span>
-                          {audioReviewCurrentOverLimit ? (
-                            <span className="text-amber-500">Warning</span>
-                          ) : null}
-                        </div>
-                      </div>
-                      {audioReviewCurrentOverLimit ? (
-                        <div className="text-[11px] text-amber-500">
-                          Text above {AUDIO_CHAR_LIMIT} characters. In Audio Review, this is only a warning.
-                        </div>
-                      ) : null}
-                      <textarea
-                        value={audioReviewCurrentNarratedText}
-                        disabled={audioReviewControlsLocked}
-                        onFocus={() => {
-                          setAudioReviewTextFocused(true);
-                        }}
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          setAudioReviewTextDraft(next);
-                          setNarratedDraft(audioReviewCurrentBlock.id, next);
-                        }}
-                        onBlur={() => {
-                          setAudioReviewTextFocused(false);
-                          if (audioReviewControlsLocked) {
-                            return;
-                          }
-                          const next = audioReviewTextDraft;
-                          if (next !== audioReviewCurrentBlock.narratedText) {
-                            void saveNarratedText(audioReviewCurrentBlock.id, next);
-                          }
-                        }}
-                        className={`w-full h-40 p-3 bg-[hsl(var(--editor-input))] border rounded-[6px] text-sm leading-relaxed text-foreground resize-none ${
-                          audioReviewCurrentOverLimit
-                            ? 'border-amber-500/50 bg-amber-500/10'
-                            : 'border-[hsl(var(--editor-input-border))]'
-                        }`}
-                      />
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="h-2 rounded-full bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] overflow-hidden">
-                        <div
-                          className="h-full bg-orange-600 transition-all duration-150"
-                          style={{ width: `${audioReviewProgressPct}%` }}
+                        {audioReviewCurrentOverLimit ? (
+                          <div className="text-[11px] text-amber-500">
+                            Text above {AUDIO_CHAR_LIMIT} characters. In Review, this is only a warning.
+                          </div>
+                        ) : null}
+                        <textarea
+                          value={audioReviewCurrentNarratedText}
+                          disabled={audioReviewControlsLocked}
+                          onFocus={() => {
+                            setAudioReviewTextFocused(true);
+                          }}
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            setAudioReviewTextDraft(next);
+                            setNarratedDraft(audioReviewCurrentBlock.id, next);
+                          }}
+                          onBlur={() => {
+                            setAudioReviewTextFocused(false);
+                            if (audioReviewControlsLocked) {
+                              return;
+                            }
+                            const next = audioReviewTextDraft;
+                            if (next !== audioReviewCurrentBlock.narratedText) {
+                              void saveNarratedText(audioReviewCurrentBlock.id, next);
+                            }
+                          }}
+                          className={`w-full h-24 p-3 bg-[hsl(var(--editor-input))] border rounded-[6px] text-sm leading-relaxed text-foreground resize-none ${
+                            audioReviewCurrentOverLimit
+                              ? 'border-amber-500/50 bg-amber-500/10'
+                              : 'border-[hsl(var(--editor-input-border))]'
+                          }`}
                         />
                       </div>
-                      <div className="flex items-center justify-between text-xs text-muted-foreground font-mono">
-                        <span>{audioReviewFormattedTime(audioReviewCurrentTime)}</span>
-                        <span>{audioReviewFormattedTime(maxAudioReviewSeek)}</span>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Subtitle (Review Draft)
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            Local draft only (MVP)
+                          </div>
+                        </div>
+                        <textarea
+                          value={audioReviewCurrentSubtitleText}
+                          disabled={audioReviewControlsLocked || !audioReviewCurrentBlockId}
+                          wrap="soft"
+                          onChange={(event) => {
+                            if (!selectedVersionId || !audioReviewCurrentBlockId) return;
+                            const next = event.target.value;
+                            setSubtitleReviewTextByVersion((prev) => ({
+                              ...prev,
+                              [selectedVersionId]: {
+                                ...(prev[selectedVersionId] ?? {}),
+                                [audioReviewCurrentBlockId]: next
+                              }
+                            }));
+                          }}
+                          className="w-full h-24 p-3 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[6px] text-[11px] leading-snug font-semibold text-foreground resize-y whitespace-pre-wrap break-words"
+                          placeholder="Subtitle text for this block (review draft)"
+                        />
                       </div>
-                      <div className="grid w-full grid-cols-6 gap-2">
+
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          Video Subtitle Preview
+                        </div>
+                        <div className="mx-auto relative w-[440px] max-w-full aspect-video rounded-[6px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] overflow-hidden">
+                          {audioReviewCurrentImageUrl ? (
+                            <img
+                              src={audioReviewCurrentImageUrl}
+                              alt=""
+                              className="absolute inset-0 w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                              No image available
+                            </div>
+                          )}
+                          <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/75 via-black/40 to-transparent">
+                            <div className="max-h-24 overflow-y-auto rounded-[4px] bg-black/45 px-2 py-1 text-[11px] leading-snug font-semibold text-white whitespace-pre-wrap break-words">
+                              {audioReviewCurrentSubtitleOverlayText || 'No subtitle at this timestamp'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="h-2 rounded-full bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] overflow-hidden">
+                          <div
+                            className="h-full bg-orange-600 transition-all duration-150"
+                            style={{ width: `${audioReviewProgressPct}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground font-mono">
+                          <span>{audioReviewFormattedTime(audioReviewCurrentTime)}</span>
+                          <span>{audioReviewFormattedTime(maxAudioReviewSeek)}</span>
+                        </div>
+                        <div className="grid w-full grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
                         <button
                           onClick={goToPreviousAudioReview}
                           disabled={!canGoPrevAudioReview}
@@ -5224,9 +5446,10 @@ const Editor: React.FC<EditorProps> = ({
                               </>
                             )}
                         </button>
-                      </div>
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                        Keys: Up Prev Audio, Down Next Audio, Left -3s, Right +3s, Space Play/Pause, M Mark
+                        </div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                          Keys: Up Prev Audio, Down Next Audio, Left -3s, Right +3s, Space Play/Pause, M Mark
+                        </div>
                       </div>
                     </div>
                   </>
@@ -5425,16 +5648,32 @@ const Editor: React.FC<EditorProps> = ({
                     </button>
                   )}
 
-                  <button
-                    onClick={() => {
-                      startAudioReview();
-                      setIsMobileActionsMenuOpen(false);
-                    }}
-                    disabled={isAudioReviewDisabled}
-                    className="w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-indigo-500/20 bg-indigo-500/10 text-muted-foreground disabled:opacity-50"
-                  >
-                    {`Audio review (${audioReviewPlayableCount})`}
-                  </button>
+                  {showTopTranscriptionBusy ? (
+                    <button
+                      onClick={() => {
+                        setIsTranscriptionCancelConfirmOpen(true);
+                        setIsMobileActionsMenuOpen(false);
+                      }}
+                      className="w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300"
+                    >
+                      {`Stop transcription (${topTranscriptionProgressLabel})`}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        handleGlobalAction('generateTranscription');
+                        setIsMobileActionsMenuOpen(false);
+                      }}
+                      disabled={isGenerateTranscriptionDisabled}
+                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border ${
+                        hasSubtitleTranscriptionReady
+                          ? 'border-emerald-500/25 bg-emerald-500/10 text-muted-foreground'
+                          : 'border-indigo-500/20 bg-indigo-500/10 text-muted-foreground'
+                      } ${toolbarDisabledLikeAudioReview}`}
+                    >
+                      {hasSubtitleTranscriptionReady ? 'Regenerate transcription' : 'Generate transcription'}
+                    </button>
+                  )}
 
                   {showTopImageBusy ? (
                     <button
@@ -5463,29 +5702,16 @@ const Editor: React.FC<EditorProps> = ({
                     </button>
                   )}
 
-                  {showTopTranscriptionBusy ? (
-                    <button
-                      disabled
-                      className="w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300"
-                    >
-                      {`Generating transcription (${topTranscriptionProgressLabel})`}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        handleGlobalAction('generateTranscription');
-                        setIsMobileActionsMenuOpen(false);
-                      }}
-                      disabled={isGenerateTranscriptionDisabled}
-                      className={`w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border ${
-                        hasSubtitleTranscriptionReady
-                          ? 'border-emerald-500/25 bg-emerald-500/10 text-muted-foreground'
-                          : 'border-indigo-500/20 bg-indigo-500/10 text-muted-foreground'
-                      } ${toolbarDisabledLikeAudioReview}`}
-                    >
-                      {hasSubtitleTranscriptionReady ? 'Regenerate transcription' : 'Generate transcription'}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => {
+                      startAudioReview();
+                      setIsMobileActionsMenuOpen(false);
+                    }}
+                    disabled={isAudioReviewDisabled}
+                    className="w-full h-8 px-3 rounded-[5px] text-left text-[11px] font-semibold border border-indigo-500/20 bg-indigo-500/10 text-muted-foreground disabled:opacity-50"
+                  >
+                    {`Review (${audioReviewPlayableCount})`}
+                  </button>
 
                   {hasFinalVideoReady ? (
                     <>
@@ -5643,14 +5869,51 @@ const Editor: React.FC<EditorProps> = ({
             </button>
           )}
 
-          <button
-            onClick={startAudioReview}
-            disabled={isAudioReviewDisabled}
-            className="flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15 shadow-sm disabled:opacity-50 disabled:hover:bg-indigo-500/10"
-          >
-            <Headphones size={14} className="text-current" />
-            {`Audio Review (${audioReviewPlayableCount})`}
-          </button>
+          {showTopTranscriptionBusy ? (
+            <div className="flex items-center h-8 rounded-[6px] border border-orange-500/35 bg-orange-500/10 shadow-sm overflow-hidden">
+              <div className="relative overflow-hidden flex items-center gap-2 px-3 h-8 text-[10px] font-bold text-orange-700 dark:text-orange-300 min-w-[190px]">
+                {topTranscriptionTotal > 0 && (
+                  <div
+                    className="absolute inset-y-0 left-0 bg-orange-500/25 transition-all duration-300"
+                    style={{
+                      width: `${topTranscriptionProgressWidth}%`
+                    }}
+                  />
+                )}
+                <span className="relative z-10 flex items-center gap-2 w-full">
+                  <Captions size={14} className={transcriptionPhase === 'running' ? 'animate-pulse' : ''} />
+                  <span className="truncate">
+                    {transcriptionPhase === 'waiting' ? 'Preparing transcription...' : 'Generating transcription...'}
+                  </span>
+                  {topTranscriptionTotal > 0 && (
+                    <span className="ml-auto inline-flex items-center rounded-[4px] bg-black/35 px-1.5 py-0.5 text-[9px] leading-none text-orange-200 tabular-nums">
+                      {topTranscriptionProgressLabel}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <button
+                onClick={() => setIsTranscriptionCancelConfirmOpen(true)}
+                className="h-8 px-2.5 text-[10px] font-bold rounded-r-[6px] border-l border-orange-500/30 bg-[rgba(239,68,68,0.08)] text-red-600 dark:text-red-100 hover:bg-[rgba(239,68,68,0.14)] hover:text-red-700 dark:hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => handleGlobalAction('generateTranscription')}
+              disabled={isGenerateTranscriptionDisabled}
+              className={`relative overflow-hidden flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all shadow-sm ${
+                hasSubtitleTranscriptionReady
+                  ? 'bg-emerald-500/10 border border-emerald-500/25 text-muted-foreground hover:bg-emerald-500/15'
+                  : 'bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15'
+              } ${toolbarDisabledLikeAudioReview}`}
+              title={hasSubtitleTranscriptionReady ? 'Regenerate transcription/subtitles' : 'Generate transcription/subtitles'}
+            >
+              <Captions size={14} className="text-current" />
+              <span className="truncate">{hasSubtitleTranscriptionReady ? 'Regenerate Transcription' : 'Generate Transcription'}</span>
+            </button>
+          )}
 
           {showTopImageBusy ? (
             <div className="flex items-center h-8 rounded-[6px] border border-orange-500/35 bg-orange-500/10 shadow-sm overflow-hidden">
@@ -5706,45 +5969,14 @@ const Editor: React.FC<EditorProps> = ({
             </button>
           )}
 
-          {showTopTranscriptionBusy ? (
-            <div className="flex items-center h-8 rounded-[6px] border border-orange-500/35 bg-orange-500/10 shadow-sm overflow-hidden">
-              <div className="relative overflow-hidden flex items-center gap-2 px-3 h-8 text-[10px] font-bold text-orange-700 dark:text-orange-300 min-w-[190px]">
-                {topTranscriptionTotal > 0 && (
-                  <div
-                    className="absolute inset-y-0 left-0 bg-orange-500/25 transition-all duration-300"
-                    style={{
-                      width: `${topTranscriptionProgressWidth}%`
-                    }}
-                  />
-                )}
-                <span className="relative z-10 flex items-center gap-2 w-full">
-                  <Captions size={14} className={transcriptionPhase === 'running' ? 'animate-pulse' : ''} />
-                  <span className="truncate">
-                    {transcriptionPhase === 'waiting' ? 'Preparing transcription...' : 'Generating transcription...'}
-                  </span>
-                  {topTranscriptionTotal > 0 && (
-                    <span className="ml-auto inline-flex items-center rounded-[4px] bg-black/35 px-1.5 py-0.5 text-[9px] leading-none text-orange-200 tabular-nums">
-                      {topTranscriptionProgressLabel}
-                    </span>
-                  )}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => handleGlobalAction('generateTranscription')}
-              disabled={isGenerateTranscriptionDisabled}
-              className={`relative overflow-hidden flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all shadow-sm ${
-                hasSubtitleTranscriptionReady
-                  ? 'bg-emerald-500/10 border border-emerald-500/25 text-muted-foreground hover:bg-emerald-500/15'
-                  : 'bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15'
-              } ${toolbarDisabledLikeAudioReview}`}
-              title={hasSubtitleTranscriptionReady ? 'Regenerate transcription/subtitles' : 'Generate transcription/subtitles'}
-            >
-              <Captions size={14} className="text-current" />
-              <span className="truncate">{hasSubtitleTranscriptionReady ? 'Regenerate Transcription' : 'Generate Transcription'}</span>
-            </button>
-          )}
+          <button
+            onClick={startAudioReview}
+            disabled={isAudioReviewDisabled}
+            className="flex items-center gap-2 px-3 h-8 rounded-[5px] text-[10px] font-bold transition-all bg-indigo-500/10 border border-indigo-500/20 text-muted-foreground hover:bg-indigo-500/15 shadow-sm disabled:opacity-50 disabled:hover:bg-indigo-500/10"
+          >
+            <Headphones size={14} className="text-current" />
+            {`Review (${audioReviewPlayableCount})`}
+          </button>
 
           {/* Right Divider */}
           <div className="h-4 w-[1px] bg-[hsl(var(--editor-border))]/60"></div>
@@ -5941,7 +6173,7 @@ const Editor: React.FC<EditorProps> = ({
 
           {audioReviewActive ? (
             <div className="max-w-[1200px] mx-auto rounded-[5px] border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] p-6 text-sm text-muted-foreground">
-              Audio Review is open. Close the modal to return to the full editor.
+              Review is open. Close the modal to return to the full editor.
             </div>
           ) : blocks.map((block) => {
               const blockMissingPrompt = !hasImagePromptText(block);

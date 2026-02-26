@@ -4260,7 +4260,7 @@ const mapJobTypeToStep = (type: string): "blocks" | "audio" | "images" | "video"
   if (type === "segment" || type === "segment_block") return "blocks";
   if (type === "tts") return "audio";
   if (type === "image" || type === "comfyui_image" || type === "render_slide") return "images";
-  if (type === "subtitle_transcription") return null;
+  if (type === "subtitle_transcription") return "video";
   if (type === "concat_video") return "video";
   return null;
 };
@@ -7692,6 +7692,96 @@ fastify.get(
 );
 
 fastify.get(
+  "/lesson-versions/:versionId/subtitles/cues",
+  {
+    schema: {
+      tags: ["Lessons"],
+      summary: "Obtém os cues de legenda de uma versão",
+      description: "Retorna o conteúdo de subtitles.cues.json da versão (quando existir)",
+      response: {
+        200: { type: "object", additionalProperties: true },
+        404: { type: "object", properties: { error: { type: "string" } } },
+        503: { type: "object", properties: { error: { type: "string" } } }
+      }
+    }
+  },
+  async (request, reply) => {
+    try {
+      const parseSrtTimeToSeconds = (value: string): number => {
+        const match = value.trim().match(/^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/);
+        if (!match) return 0;
+        const [, hh, mm, ss, ms] = match;
+        return Number(hh) * 3600 + Number(mm) * 60 + Number(ss) + Number(ms) / 1000;
+      };
+      const parseSrtToCuesPayload = (raw: string) => {
+        const blocks = raw
+          .replace(/\uFEFF/g, "")
+          .trim()
+          .split(/\r?\n\r?\n+/)
+          .map((chunk) => chunk.trim())
+          .filter(Boolean);
+        const cues = blocks
+          .map((chunk) => {
+            const lines = chunk.split(/\r?\n/).map((line) => line.replace(/\r/g, ""));
+            if (lines.length < 2) return null;
+            const timeLineIndex = lines[0].includes("-->") ? 0 : 1;
+            const timeLine = lines[timeLineIndex];
+            if (!timeLine || !timeLine.includes("-->")) return null;
+            const [startRaw, endRaw] = timeLine.split("-->").map((part) => part.trim());
+            const textLines = lines.slice(timeLineIndex + 1).filter((line) => line.length > 0);
+            const start = parseSrtTimeToSeconds(startRaw);
+            const end = parseSrtTimeToSeconds(endRaw);
+            const text = textLines.join("\n");
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || !text) return null;
+            return { start, end, text };
+          })
+          .filter((cue): cue is { start: number; end: number; text: string } => Boolean(cue));
+        return { cues };
+      };
+
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { versionId } = request.params as { versionId: string };
+      const srtAsset = await prisma.asset.findFirst({
+        where: {
+          kind: "subtitle_srt",
+          block: {
+            videoVersionId: versionId,
+            workspaceId: auth.scope.workspaceId
+          }
+        },
+        orderBy: { createdAt: "desc" },
+        select: { path: true }
+      });
+      if (srtAsset?.path && fs.existsSync(srtAsset.path)) {
+        const rawSrt = await fs.promises.readFile(srtAsset.path, "utf8");
+        return reply.code(200).send(parseSrtToCuesPayload(rawSrt));
+      }
+
+      const asset = await prisma.asset.findFirst({
+        where: {
+          kind: "subtitle_cues_json",
+          block: {
+            videoVersionId: versionId,
+            workspaceId: auth.scope.workspaceId
+          }
+        },
+        orderBy: { createdAt: "desc" },
+        select: { path: true }
+      });
+      if (!asset?.path || !fs.existsSync(asset.path)) {
+        return reply.code(404).send({ error: "subtitle cues not found" });
+      }
+      const raw = await fs.promises.readFile(asset.path, "utf8");
+      const parsed = JSON.parse(raw);
+      return reply.code(200).send(parsed);
+    } catch (err) {
+      return reply.code(503).send({ error: (err as Error).message });
+    }
+  }
+);
+
+fastify.get(
   "/lesson-versions/:versionId/job-state",
   {
     schema: {
@@ -9913,22 +10003,55 @@ fastify.get(
           }
         }
         if (current.type === "subtitle_transcription" && current.videoVersionId) {
-          if (expectedSubtitleAssets === null) {
-            expectedSubtitleAssets = 4;
-          }
-          const generated = await prisma.asset.count({
-            where: {
-              kind: { in: ["subtitle_raw_json", "subtitle_cues_json", "subtitle_srt", "subtitle_ass"] },
-              block: { videoVersionId: current.videoVersionId },
-              createdAt: { gte: current.createdAt }
+          let sentProgressFromMeta = false;
+          if (typeof current.metaJson === "string" && current.metaJson.trim()) {
+            try {
+              const meta = JSON.parse(current.metaJson) as {
+                transcriptionCurrent?: unknown;
+                transcriptionTotal?: unknown;
+              };
+              const currentVal =
+                typeof meta.transcriptionCurrent === "number" && Number.isFinite(meta.transcriptionCurrent)
+                  ? Math.trunc(meta.transcriptionCurrent)
+                  : null;
+              const totalVal =
+                typeof meta.transcriptionTotal === "number" && Number.isFinite(meta.transcriptionTotal)
+                  ? Math.trunc(meta.transcriptionTotal)
+                  : null;
+              if (currentVal !== null && totalVal !== null && totalVal > 0) {
+                const nextIndex = Math.max(0, Math.min(totalVal, currentVal));
+                if (nextIndex !== lastSubtitleAssetCount || totalVal !== (expectedSubtitleAssets ?? totalVal)) {
+                  lastSubtitleAssetCount = nextIndex;
+                  expectedSubtitleAssets = totalVal;
+                  sendEvent(JOB_STREAM_EVENT.PROGRESS, {
+                    index: nextIndex,
+                    total: totalVal
+                  });
+                }
+                sentProgressFromMeta = true;
+              }
+            } catch {
+              // ignore malformed metaJson
             }
-          });
-          if (generated !== lastSubtitleAssetCount) {
-            lastSubtitleAssetCount = generated;
-            sendEvent(JOB_STREAM_EVENT.PROGRESS, {
-              index: generated,
-              total: expectedSubtitleAssets ?? generated
+          }
+          if (!sentProgressFromMeta) {
+            if (expectedSubtitleAssets === null) {
+              expectedSubtitleAssets = 4;
+            }
+            const generated = await prisma.asset.count({
+              where: {
+                kind: { in: ["subtitle_raw_json", "subtitle_cues_json", "subtitle_srt", "subtitle_ass"] },
+                block: { videoVersionId: current.videoVersionId },
+                createdAt: { gte: current.createdAt }
+              }
             });
+            if (generated !== lastSubtitleAssetCount) {
+              lastSubtitleAssetCount = generated;
+              sendEvent(JOB_STREAM_EVENT.PROGRESS, {
+                index: generated,
+                total: expectedSubtitleAssets ?? generated
+              });
+            }
           }
         }
         if (current.status === "succeeded" || current.status === "failed" || current.status === "canceled") {
@@ -10121,6 +10244,11 @@ fastify.get("/video-versions/:versionId/images", async (request, reply) => {
 fastify.get("/video-versions/:versionId/subtitles", async (request, reply) => {
   const { versionId } = request.params as { versionId: string };
   return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/subtitles`);
+});
+
+fastify.get("/video-versions/:versionId/subtitles/cues", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/subtitles/cues`);
 });
 fastify.get("/video-versions/:versionId/job-state", async (request, reply) => {
   const { versionId } = request.params as { versionId: string };
