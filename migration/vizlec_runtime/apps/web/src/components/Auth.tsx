@@ -258,24 +258,19 @@ const Auth: React.FC<AuthProps> = ({ onLogin, isDarkMode }) => {
   const Logo = () => (
     <div className="flex items-center gap-2.5 mb-2 group cursor-default">
       <img
-        src="/branding/logo-light.png"
+        src="/branding/icon.svg"
+        alt="Video Automation"
+        className="h-10 w-auto object-contain"
+      />
+      <img
+        src="/branding/text_light.svg"
         alt="Video Automation"
         className="block dark:hidden h-8 w-auto object-contain"
       />
       <img
-        src="/branding/logo-dark.png"
+        src="/branding/text_dark.svg"
         alt="Video Automation"
         className="hidden dark:block h-8 w-auto object-contain"
-      />
-      <img
-        src="/branding/wordmark-light.png"
-        alt="Video Automation"
-        className="block dark:hidden h-5 w-auto object-contain"
-      />
-      <img
-        src="/branding/wordmark-dark.png"
-        alt="Video Automation"
-        className="hidden dark:block h-5 w-auto object-contain"
       />
     </div>
   );

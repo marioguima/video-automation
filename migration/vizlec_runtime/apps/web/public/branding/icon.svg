@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80">
+  <!-- Outer circle -->
+  <circle cx="40" cy="40" r="36" fill="#F97316" opacity="0.2"/>
+  <!-- Inner circle -->
+  <circle cx="40" cy="40" r="26" fill="#F97316"/>
+  <!-- Play triangle -->
+  <polygon points="33,29 33,51 54,40" fill="white"/>
+</svg>

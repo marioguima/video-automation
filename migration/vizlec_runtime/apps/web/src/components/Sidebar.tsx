@@ -91,26 +91,21 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
       <div className={`flex items-center gap-3 h-24 transition-all duration-300 ${isCollapsed ? 'justify-center px-0' : 'px-5'}`}>
         <div className="flex-shrink-0">
           <img
-            src="/branding/logo-light.png"
+            src="/branding/icon.svg"
             alt="Video Automation"
-            className="block dark:hidden h-14 w-auto object-contain"
-          />
-          <img
-            src="/branding/logo-dark.png"
-            alt="Video Automation"
-            className="hidden dark:block h-14 w-auto object-contain"
+            className="h-12 w-auto object-contain"
           />
         </div>
-        <div className={`flex-1 min-w-0 transition-opacity duration-200 whitespace-nowrap ${isCollapsed ? 'opacity-0 w-0 hidden' : 'hidden lg:block'}`}>
+        <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-[130px] opacity-100 hidden lg:block'}`}>
           <img
-            src="/branding/wordmark-light.png"
+            src="/branding/text_light.svg"
             alt="Video Automation"
-            className="block dark:hidden w-[140px] h-auto object-contain"
+            className="block dark:hidden h-10 w-auto object-contain"
           />
           <img
-            src="/branding/wordmark-dark.png"
+            src="/branding/text_dark.svg"
             alt="Video Automation"
-            className="hidden dark:block w-[140px] h-auto object-contain"
+            className="hidden dark:block h-10 w-auto object-contain"
           />
         </div>
       </div>

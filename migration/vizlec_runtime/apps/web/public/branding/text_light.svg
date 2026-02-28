@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 60" width="180" height="60">
+  <text x="0" y="26"
+    font-family="'Trebuchet MS', 'Segoe UI', sans-serif"
+    font-size="22" font-weight="800"
+    fill="#1a1a2e" letter-spacing="-0.5">Video</text>
+  <text x="0" y="52"
+    font-family="'Trebuchet MS', 'Segoe UI', sans-serif"
+    font-size="22" font-weight="800"
+    fill="#F97316" letter-spacing="-0.5">Automation</text>
+</svg>
