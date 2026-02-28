@@ -7692,6 +7692,48 @@ fastify.get(
 );
 
 fastify.get(
+  "/lesson-versions/:versionId/subtitles/raw",
+  {
+    schema: {
+      tags: ["Lessons"],
+      summary: "Obtém o payload bruto de legenda de uma versão",
+      description: "Retorna o conteúdo de subtitles.raw.json da versão (quando existir)",
+      response: {
+        200: { type: "object", additionalProperties: true },
+        404: { type: "object", properties: { error: { type: "string" } } },
+        503: { type: "object", properties: { error: { type: "string" } } }
+      }
+    }
+  },
+  async (request, reply) => {
+    try {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { versionId } = request.params as { versionId: string };
+      const asset = await prisma.asset.findFirst({
+        where: {
+          kind: "subtitle_raw_json",
+          block: {
+            videoVersionId: versionId,
+            workspaceId: auth.scope.workspaceId
+          }
+        },
+        orderBy: { createdAt: "desc" },
+        select: { path: true }
+      });
+      if (!asset?.path || !fs.existsSync(asset.path)) {
+        return reply.code(404).send({ error: "subtitle raw not found" });
+      }
+      const raw = await fs.promises.readFile(asset.path, "utf8");
+      const parsed = JSON.parse(raw);
+      return reply.code(200).send(parsed);
+    } catch (err) {
+      return reply.code(503).send({ error: (err as Error).message });
+    }
+  }
+);
+
+fastify.get(
   "/lesson-versions/:versionId/subtitles/cues",
   {
     schema: {
@@ -10244,6 +10286,11 @@ fastify.get("/video-versions/:versionId/images", async (request, reply) => {
 fastify.get("/video-versions/:versionId/subtitles", async (request, reply) => {
   const { versionId } = request.params as { versionId: string };
   return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/subtitles`);
+});
+
+fastify.get("/video-versions/:versionId/subtitles/raw", async (request, reply) => {
+  const { versionId } = request.params as { versionId: string };
+  return proxyLegacyAlias(request, reply, `/lesson-versions/${versionId}/subtitles/raw`);
 });
 
 fastify.get("/video-versions/:versionId/subtitles/cues", async (request, reply) => {

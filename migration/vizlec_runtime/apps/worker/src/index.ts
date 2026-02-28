@@ -5628,13 +5628,14 @@ async function transcribeSubtitlesForVersion(options: { job: JobRecord }): Promi
       throw new Error(`audio not found for block ${block.index}`);
     }
     audioFiles.push(audioAsset.path);
+    const probedDuration = await probeAudioDuration(audioAsset.path);
     const dbDuration =
       typeof block.audioDurationS === "number" && Number.isFinite(block.audioDurationS) && block.audioDurationS > 0
         ? Number(block.audioDurationS)
         : null;
     const duration =
+      probedDuration ??
       dbDuration ??
-      (await probeAudioDuration(audioAsset.path)) ??
       0;
     blockDurationsSeconds.push(duration);
   }
@@ -5697,15 +5698,6 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     version.id
   );
   ensureDir(finalDir);
-  const staleSubtitlePaths = [
-    path.join(finalDir, "subtitles.raw.json"),
-    path.join(finalDir, "subtitles.cues.json"),
-    path.join(finalDir, "subtitles.srt"),
-    path.join(finalDir, "subtitles.default.ass")
-  ];
-  for (const stalePath of staleSubtitlePaths) {
-    await fs.promises.unlink(stalePath).catch(() => null);
-  }
   const outputPath = path.join(finalDir, "final.mp4");
   const mediaFiles: string[] = [];
   const audioFiles: string[] = [];
@@ -5741,10 +5733,12 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     if (!imageAsset?.path || !fs.existsSync(imageAsset.path)) {
       throw new Error(`image not found for block ${block.index}`);
     }
+    const probedDuration = await probeAudioDuration(audioAsset.path);
     const duration =
-      typeof block.audioDurationS === "number" && Number.isFinite(block.audioDurationS) && block.audioDurationS > 0
+      probedDuration ??
+      (typeof block.audioDurationS === "number" && Number.isFinite(block.audioDurationS) && block.audioDurationS > 0
         ? block.audioDurationS
-        : 3;
+        : 3);
 
     mediaFiles.push(imageAsset.path);
     audioFiles.push(audioAsset.path);
@@ -5758,7 +5752,6 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
 
   let usedCinematicBridge = false;
   try {
-    await ensureMemoryForSubtitleTranscription(job);
     await renderCinematicFinalVideoWithPython({
       outputPath,
       mediaFiles,
@@ -5860,11 +5853,28 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     await notifyRunningProgress(job, 99);
   }
 
-  const subtitleRawJsonPath = path.join(finalDir, "subtitles.raw.json");
-  const subtitleCuesJsonPath = path.join(finalDir, "subtitles.cues.json");
-  const subtitleSrtPath = path.join(finalDir, "subtitles.srt");
-  const subtitleAssPath = path.join(finalDir, "subtitles.default.ass");
-  if (fs.existsSync(subtitleAssPath)) {
+  const existingSubtitleAssets = await prisma.asset.findMany({
+    where: {
+      kind: { in: ["subtitle_raw_json", "subtitle_cues_json", "subtitle_srt", "subtitle_ass"] },
+      block: { videoVersionId: version.id }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+  const subtitleAssetByKind = new Map<string, { path: string | null }>();
+  for (const asset of existingSubtitleAssets) {
+    if (!subtitleAssetByKind.has(asset.kind)) {
+      subtitleAssetByKind.set(asset.kind, { path: asset.path });
+    }
+  }
+  const subtitleRawJsonPath = subtitleAssetByKind.get("subtitle_raw_json")?.path ?? null;
+  const subtitleCuesJsonPath = subtitleAssetByKind.get("subtitle_cues_json")?.path ?? null;
+  const subtitleSrtPath = subtitleAssetByKind.get("subtitle_srt")?.path ?? null;
+  const subtitleAssPath = subtitleAssetByKind.get("subtitle_ass")?.path ?? null;
+  const hasSubtitleAss =
+    typeof subtitleAssPath === "string" && subtitleAssPath.length > 0 && fs.existsSync(subtitleAssPath);
+  const hasSubtitleSrt =
+    typeof subtitleSrtPath === "string" && subtitleSrtPath.length > 0 && fs.existsSync(subtitleSrtPath);
+  if (hasSubtitleAss && subtitleAssPath) {
     await notifyRunningPhase(job, "generation");
     await burnSubtitlesIntoFinalVideo({
       finalVideoPath: outputPath,
@@ -5873,7 +5883,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     });
     await notifyRunningProgress(job, 99);
   }
-  const hasSubtitleOutput = fs.existsSync(subtitleAssPath);
+  const hasSubtitleOutput = hasSubtitleAss;
 
   await prisma.asset.deleteMany({
     where: {
@@ -5896,40 +5906,10 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
         bgmPath: version.bgmPath ?? null,
         bgmVolume: bgmVolume > 0 ? bgmVolume : null,
         subtitleTemplateId: hasSubtitleOutput ? "subtitle-yellow-bold-bottom-v1" : null,
-        subtitleSrtPath: fs.existsSync(subtitleSrtPath) ? subtitleSrtPath : null
+        subtitleSrtPath: hasSubtitleSrt ? subtitleSrtPath : null
       })
     }
   });
-
-  const subtitleAssetDefs: Array<{ kind: string; path: string; format: string }> = [
-    { kind: "subtitle_raw_json", path: subtitleRawJsonPath, format: "raw_json" },
-    { kind: "subtitle_cues_json", path: subtitleCuesJsonPath, format: "cues_json" },
-    { kind: "subtitle_srt", path: subtitleSrtPath, format: "srt" },
-    { kind: "subtitle_ass", path: subtitleAssPath, format: "ass" }
-  ];
-  await prisma.asset.deleteMany({
-    where: {
-      kind: { in: subtitleAssetDefs.map((d) => d.kind) },
-      block: { videoVersionId: version.id }
-    }
-  });
-  for (const def of subtitleAssetDefs) {
-    if (!fs.existsSync(def.path)) continue;
-    await prisma.asset.create({
-      data: {
-        workspaceId: version.blocks[0].workspaceId,
-        blockId: version.blocks[0].id,
-        kind: def.kind,
-        path: def.path,
-        templateId: "subtitle-yellow-bold-bottom-v1",
-        metaJson: JSON.stringify({
-          scope: "lesson_version",
-          format: def.format,
-          templateId: "subtitle-yellow-bold-bottom-v1"
-        })
-      }
-    });
-  }
 
   const manifestPath = path.join(finalDir, "manifest.json");
   await fs.promises.writeFile(
@@ -5943,7 +5923,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
         bgmPath: version.bgmPath ?? null,
         bgmVolume: bgmVolume > 0 ? bgmVolume : null,
         subtitleTemplateId: hasSubtitleOutput ? "subtitle-yellow-bold-bottom-v1" : null,
-        subtitleSrtPath: fs.existsSync(subtitleSrtPath) ? subtitleSrtPath : null,
+        subtitleSrtPath: hasSubtitleSrt ? subtitleSrtPath : null,
         blockCount: version.blocks.length,
         clips: version.blocks.map((block, idx) => ({
           blockId: block.id,

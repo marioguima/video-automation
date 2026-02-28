@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import { buildManifest, buildManifestFromFile } from "@/lib/api";
 import { ManifestResponse } from "@/lib/types";
@@ -75,7 +76,41 @@ export default function HomePage() {
   return (
     <main className="page">
       <header className="topBar">
-        <h1>Video Automation Studio</h1>
+        <h1 className="srOnly">Video Automation Studio</h1>
+        <div className="brand">
+          <Image
+            src="/logo-light.png"
+            alt="Video Automation"
+            width={320}
+            height={358}
+            className="brandLogo brandLight"
+            priority
+          />
+          <Image
+            src="/logo-dark.png"
+            alt="Video Automation"
+            width={319}
+            height={357}
+            className="brandLogo brandDark"
+            priority
+          />
+          <Image
+            src="/wordmark-light.png"
+            alt="Video Automation Studio"
+            width={744}
+            height={358}
+            className="brandWordmark brandLight"
+            priority
+          />
+          <Image
+            src="/wordmark-dark.png"
+            alt="Video Automation Studio"
+            width={744}
+            height={357}
+            className="brandWordmark brandDark"
+            priority
+          />
+        </div>
         <p>Roteiro {"->"} blocos visuais {"->"} chunks TTS (&lt;=200) com validação.</p>
       </header>
 

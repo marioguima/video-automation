@@ -383,6 +383,16 @@ def _extract_transcript_segments(model: Any, audio_path: str, *, language: str, 
     return transcript_segments, info
 
 
+def _serialize_transcribe_info(info: Any) -> dict[str, Any]:
+    return {
+        "language": getattr(info, "language", None),
+        "language_probability": getattr(info, "language_probability", None),
+        "duration": getattr(info, "duration", None),
+        "duration_after_vad": getattr(info, "duration_after_vad", None),
+        "all_language_probs": getattr(info, "all_language_probs", None),
+    }
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: subtitle_transcribe_faster_whisper.py <payload.json>", file=sys.stderr)
@@ -415,6 +425,7 @@ def main() -> int:
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
     transcript_segments: list[dict[str, Any]] = []
     per_file_debug: list[dict[str, Any]] = []
+    per_file_results: list[dict[str, Any]] = []
     info_payload: dict[str, Any] = {}
 
     if isinstance(audio_files_payload, list) and audio_files_payload:
@@ -457,8 +468,10 @@ def main() -> int:
                     if effective_duration > 0:
                         local_end = min(effective_duration, local_end)
                 next_seg = dict(seg)
-                next_seg["start"] = global_offset + max(0.0, local_start)
-                next_seg["end"] = global_offset + max(next_seg["start"], local_end)
+                shifted_start = global_offset + max(0.0, local_start)
+                shifted_end = global_offset + max(local_start, local_end)
+                next_seg["start"] = shifted_start
+                next_seg["end"] = max(shifted_start, shifted_end)
                 next_seg["block_index"] = int(item.get("block_index", file_idx - 1) or (file_idx - 1))
                 if isinstance(next_seg.get("words"), list):
                     shifted_words = []
@@ -482,6 +495,23 @@ def main() -> int:
                     "offset_start": global_offset,
                     "offset_end": global_offset + max(0.0, effective_duration),
                     "segment_count": len(clamped_segments),
+                }
+            )
+            per_file_results.append(
+                {
+                    "index": file_idx,
+                    "path": file_path,
+                    "block_index": int(item.get("block_index", file_idx - 1) or (file_idx - 1)),
+                    "expected_duration": expected_duration if expected_duration > 0 else None,
+                    "detected_duration": local_duration if local_duration > 0 else None,
+                    "offset_start": global_offset,
+                    "offset_end": global_offset + max(0.0, effective_duration),
+                    "effective_duration": effective_duration if effective_duration > 0 else None,
+                    "transcribe_info": _serialize_transcribe_info(local_info),
+                    # Raw faster-whisper output before any offset shifting/clamping.
+                    "local_segments": local_segments,
+                    # Final per-file segments after local clamp and global offset application.
+                    "shifted_segments": clamped_segments,
                 }
             )
             print(
@@ -534,6 +564,7 @@ def main() -> int:
                     **info_payload,
                 },
                 "files": per_file_debug if per_file_debug else None,
+                "per_file_results": per_file_results if per_file_results else None,
                 "segments": transcript_segments,
             },
             ensure_ascii=False,

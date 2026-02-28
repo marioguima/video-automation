@@ -1,0 +1,13 @@
+<svg width="260" height="48" viewBox="0 0 260 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0.5" y="8.5" width="31" height="31" rx="10.5" fill="#F8FAFC" stroke="#18324B" stroke-width="2"/>
+  <path d="M12 16L23 24L12 32V16Z" fill="#F97316"/>
+  <path d="M16 4V9" stroke="#18324B" stroke-width="2" stroke-linecap="round"/>
+  <path d="M16 39V44" stroke="#18324B" stroke-width="2" stroke-linecap="round"/>
+  <path d="M4 24H0" stroke="#18324B" stroke-width="2" stroke-linecap="round"/>
+  <path d="M32 24H36" stroke="#18324B" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="16" cy="2.5" r="2" fill="#18324B"/>
+  <circle cx="16" cy="45.5" r="2" fill="#18324B"/>
+  <circle cx="38" cy="24" r="2" fill="#18324B"/>
+  <text x="52" y="30" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#18324B">Video</text>
+  <text x="113" y="30" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#F97316">Automation</text>
+</svg>

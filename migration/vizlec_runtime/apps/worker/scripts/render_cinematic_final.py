@@ -4,7 +4,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 
@@ -155,59 +154,7 @@ def main() -> int:
         concat_audio = str(tmp_dir_path / "audio_concat.wav")
         _concat_audio_ffmpeg(audio_files, concat_audio)
 
-        subtitle_enabled = bool(payload.get("subtitle_enabled", True))
-        subtitle_info = None
-        subtitle_ass_path = None
-        if subtitle_enabled:
-            print("__VIZLEC_RESULT__ subtitle_start", flush=True)
-            subtitle_out_dir = tmp_dir_path / "subtitle_out"
-            subtitle_out_dir.mkdir(parents=True, exist_ok=True)
-            subtitle_payload = {
-                "audio_path": concat_audio,
-                "out_dir": str(subtitle_out_dir),
-                "width": int(payload.get("width", 1920)),
-                "height": int(payload.get("height", 1080)),
-                "language": payload.get("subtitle_language", "pt"),
-                "template_id": payload.get("subtitle_template_id", "subtitle-yellow-bold-bottom-v1"),
-                "vad_filter": payload.get("subtitle_vad_filter", True),
-                "word_timestamps": payload.get("subtitle_word_timestamps", True),
-            }
-            if payload.get("subtitle_model"):
-                subtitle_payload["model"] = payload["subtitle_model"]
-            if payload.get("subtitle_device"):
-                subtitle_payload["device"] = payload["subtitle_device"]
-            if payload.get("subtitle_compute_type"):
-                subtitle_payload["compute_type"] = payload["subtitle_compute_type"]
-            started = time.time()
-            try:
-                subtitle_info = _run_subtitle_transcription(subtitle_payload, tmp_dir_path)
-                duration_ms = int((time.time() - started) * 1000)
-                if subtitle_info and subtitle_info.get("ok"):
-                    promoted = _promote_subtitle_outputs(subtitle_out_dir, output_path.parent)
-                    if promoted:
-                        subtitle_info.update(promoted)
-                    subtitle_ass_path = subtitle_info.get("ass_path")
-                    print(
-                        f"__VIZLEC_RESULT__ subtitle_ready {subtitle_info.get('cue_count', 0)} {duration_ms}",
-                        flush=True,
-                    )
-                elif subtitle_info and subtitle_info.get("skipped"):
-                    print(
-                        f"__VIZLEC_RESULT__ subtitle_skipped {subtitle_info.get('reason', 'unknown')}",
-                        flush=True,
-                    )
-            except Exception as subtitle_err:
-                print(
-                    json.dumps(
-                        {
-                            "warning": "subtitle_transcription_failed",
-                            "error": str(subtitle_err),
-                        }
-                    ),
-                    flush=True,
-                )
-
-        visual_output = str(output_path if not subtitle_ass_path else (tmp_dir_path / "visual_no_subs.mp4"))
+        visual_output = str(output_path)
         render_mode = (os.getenv("VIZLEC_CINEMATIC_RENDER_MODE") or "quality").strip().lower()
         fps = int(payload.get("fps", 30))
         if render_mode == "preview":
@@ -228,31 +175,6 @@ def main() -> int:
             motion_preset=payload.get("motion_preset", "D_zoom_cinematic"),
             zoom_transition_preset=payload.get("zoom_transition_preset", "T6_inertial_ref"),
         )
-        if subtitle_ass_path and Path(subtitle_ass_path).exists():
-            print("__VIZLEC_RESULT__ subtitle_burn_start", flush=True)
-            try:
-                _burn_subtitles_ffmpeg(
-                    video_in=visual_output,
-                    ass_path=subtitle_ass_path,
-                    video_out=str(output_path),
-                    work_dir=str(output_path.parent),
-                )
-            except Exception as burn_err:
-                print(
-                    json.dumps(
-                        {
-                            "warning": "subtitle_burn_failed",
-                            "error": str(burn_err),
-                            "ass_path": str(subtitle_ass_path),
-                            "video_in": str(visual_output),
-                            "video_out": str(output_path),
-                        },
-                        ensure_ascii=False,
-                    ),
-                    flush=True,
-                )
-                raise
-            print("__VIZLEC_RESULT__ subtitle_burn_done", flush=True)
 
     print(json.dumps({
         "ok": True,

@@ -41,6 +41,47 @@ body {
   font-size: clamp(26px, 3vw, 38px);
 }
 
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brandLogo,
+.brandWordmark {
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.brandLogo {
+  height: clamp(36px, 5vw, 46px);
+}
+
+.brandWordmark {
+  height: clamp(36px, 5vw, 46px);
+}
+
+.brandDark {
+  display: none;
+}
+
+.brandLight {
+  display: block;
+}
+
 .topBar p {
   margin: 6px 0 0;
   color: var(--muted);
@@ -231,5 +272,15 @@ button:disabled {
 
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .brandDark {
+    display: block;
+  }
+
+  .brandLight {
+    display: none;
   }
 }

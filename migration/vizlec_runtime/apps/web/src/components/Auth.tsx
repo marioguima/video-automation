@@ -257,15 +257,26 @@ const Auth: React.FC<AuthProps> = ({ onLogin, isDarkMode }) => {
 
   const Logo = () => (
     <div className="flex items-center gap-2.5 mb-2 group cursor-default">
-      <div className="relative w-8 h-8 flex items-center justify-center">
-        <div className="absolute inset-0 bg-orange-500 rounded-xl rotate-3 opacity-20 group-hover:rotate-6 transition-transform duration-300"></div>
-        <div className="absolute inset-0 bg-orange-600 rounded-xl flex items-center justify-center shadow-lg shadow-orange-600/20 z-10">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white" xmlns="http://www.w3.org/2000/svg">
-            <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
-          </svg>
-        </div>
-      </div>
-      <span className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">VizLec</span>
+      <img
+        src="/branding/logo-light.png"
+        alt="Video Automation"
+        className="block dark:hidden h-8 w-auto object-contain"
+      />
+      <img
+        src="/branding/logo-dark.png"
+        alt="Video Automation"
+        className="hidden dark:block h-8 w-auto object-contain"
+      />
+      <img
+        src="/branding/wordmark-light.png"
+        alt="Video Automation"
+        className="block dark:hidden h-5 w-auto object-contain"
+      />
+      <img
+        src="/branding/wordmark-dark.png"
+        alt="Video Automation"
+        className="hidden dark:block h-5 w-auto object-contain"
+      />
     </div>
   );
 

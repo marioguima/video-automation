@@ -1,0 +1,13 @@
+<svg width="280" height="56" viewBox="0 0 280 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="word-accent" x1="117" y1="18" x2="202" y2="38" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FB923C"/>
+      <stop offset="1" stop-color="#EA580C"/>
+    </linearGradient>
+  </defs>
+  <text x="0" y="35" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.02em" fill="#223A52">Video</text>
+  <text x="77" y="35" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.02em" fill="url(#word-accent)">Automation</text>
+  <path d="M80 42H205" stroke="#CBD5E1" stroke-width="2" stroke-linecap="round"/>
+  <path d="M80 42H132" stroke="#EA580C" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="214" cy="42" r="3" fill="#223A52"/>
+</svg>

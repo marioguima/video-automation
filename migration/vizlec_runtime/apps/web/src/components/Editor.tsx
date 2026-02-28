@@ -904,6 +904,19 @@ type SubtitleCuesPayload = {
   cues?: SubtitleCue[];
 };
 
+type SubtitleRawFileEntry = {
+  block_index?: number;
+  offset_start?: number;
+  offset_end?: number;
+  expected_duration?: number | null;
+  detected_duration?: number | null;
+};
+
+type SubtitleRawPayload = {
+  files?: SubtitleRawFileEntry[];
+  block_windows?: { block_index?: number; start?: number; end?: number }[];
+};
+
 type SlideTemplateOption = {
   id: string;
   label: string;
@@ -1126,6 +1139,7 @@ const Editor: React.FC<EditorProps> = ({
   const [subtitleFiles, setSubtitleFiles] = useState<Record<string, boolean>>({});
   const [subtitleListRevision, setSubtitleListRevision] = useState(0);
   const [subtitleCuesData, setSubtitleCuesData] = useState<SubtitleCuesPayload | null>(null);
+  const [subtitleRawData, setSubtitleRawData] = useState<SubtitleRawPayload | null>(null);
   const [subtitleReviewTextByVersion, setSubtitleReviewTextByVersion] = useState<Record<string, Record<string, string>>>({});
   const [finalVideoJobId, setFinalVideoJobId] = useState<string | null>(null);
   const [isGeneratingFinalVideo, setIsGeneratingFinalVideo] = useState(false);
@@ -2531,6 +2545,7 @@ const Editor: React.FC<EditorProps> = ({
           } else if (status === 'canceled') {
             setFinalVideoLastElapsedSeconds(null);
           }
+          setSubtitleListRevision((prev) => prev + 1);
           return;
         }
         if (!isTerminal(status)) {
@@ -2558,6 +2573,7 @@ const Editor: React.FC<EditorProps> = ({
     if (!selectedVersionId) {
       setSubtitleFiles({});
       setSubtitleCuesData(null);
+      setSubtitleRawData(null);
       return;
     }
     apiGet<SubtitleListPayload>(`/video-versions/${selectedVersionId}/subtitles`, {
@@ -2593,6 +2609,23 @@ const Editor: React.FC<EditorProps> = ({
       })
       .catch(() => {
         setSubtitleCuesData(null);
+      });
+  }, [selectedVersionId, subtitleListRevision]);
+
+  useEffect(() => {
+    if (!selectedVersionId) {
+      setSubtitleRawData(null);
+      return;
+    }
+    apiGet<SubtitleRawPayload>(`/video-versions/${selectedVersionId}/subtitles/raw`, {
+      cacheMs: 0,
+      dedupe: false
+    })
+      .then((data) => {
+        setSubtitleRawData(data && typeof data === 'object' ? data : null);
+      })
+      .catch(() => {
+        setSubtitleRawData(null);
       });
   }, [selectedVersionId, subtitleListRevision]);
 
@@ -3451,9 +3484,6 @@ const Editor: React.FC<EditorProps> = ({
           preflightWarnings.push('Audio review was not started for this version.');
         } else if (audioReviewPlayableCount > 0 && !isAudioReviewComplete) {
           preflightWarnings.push(`Audio review is incomplete (${audioReviewHeardCount}/${audioReviewPlayableCount} listened).`);
-        }
-        if (hasSubtitleTranscriptionReady) {
-          preflightWarnings.push('Subtitle review is not tracked in the UI yet (generation only).');
         }
         if (!selectedBgmPath.trim()) {
           preflightWarnings.push('No background music (BGM) is selected.');
@@ -4403,21 +4433,60 @@ const Editor: React.FC<EditorProps> = ({
   const subtitleDataByBlock = useMemo(() => {
     let cursor = 0;
     const out: Record<string, { start: number; end: number; cues: Array<SubtitleCue & { index: number }> }> = {};
-    for (const block of blocks) {
+    const rawFileEntries = Array.isArray(subtitleRawData?.files) ? subtitleRawData.files : [];
+    const rawBlockWindows = Array.isArray(subtitleRawData?.block_windows) ? subtitleRawData.block_windows : [];
+    const rawTimingByBlockIndex = new Map<number, { start: number; end: number }>();
+    rawFileEntries.forEach((entry, idx) => {
+      const blockIndex =
+        typeof entry?.block_index === 'number' && Number.isFinite(entry.block_index)
+          ? Math.trunc(entry.block_index)
+          : idx;
+      const start =
+        typeof entry?.offset_start === 'number' && Number.isFinite(entry.offset_start)
+          ? Number(entry.offset_start)
+          : null;
+      const end =
+        typeof entry?.offset_end === 'number' && Number.isFinite(entry.offset_end)
+          ? Number(entry.offset_end)
+          : null;
+      if (start !== null && end !== null && end > start) {
+        rawTimingByBlockIndex.set(blockIndex, { start, end });
+      }
+    });
+    rawBlockWindows.forEach((entry, idx) => {
+      const blockIndex =
+        typeof entry?.block_index === 'number' && Number.isFinite(entry.block_index)
+          ? Math.trunc(entry.block_index)
+          : idx;
+      const start =
+        typeof entry?.start === 'number' && Number.isFinite(entry.start)
+          ? Number(entry.start)
+          : null;
+      const end =
+        typeof entry?.end === 'number' && Number.isFinite(entry.end)
+          ? Number(entry.end)
+          : null;
+      if (start !== null && end !== null && end > start && !rawTimingByBlockIndex.has(blockIndex)) {
+        rawTimingByBlockIndex.set(blockIndex, { start, end });
+      }
+    });
+    blocks.forEach((block, fallbackIndex) => {
+      const blockIndex = typeof block.index === 'number' && Number.isFinite(block.index) ? block.index : fallbackIndex;
       const dur = typeof block.audioDurationSeconds === 'number' && Number.isFinite(block.audioDurationSeconds) && block.audioDurationSeconds > 0
         ? block.audioDurationSeconds
         : 0;
-      const start = cursor;
-      const end = cursor + dur;
+      const rawTiming = rawTimingByBlockIndex.get(blockIndex);
+      const start = rawTiming?.start ?? cursor;
+      const end = rawTiming?.end ?? (cursor + dur);
       const cues = subtitleCues
         .filter((cue) => cue.end > start && cue.start < end)
         .map((cue) => ({ ...cue, text: cue.text.replace(/\\N/g, '\n').trim() }))
         .filter((cue) => cue.text);
       out[block.id] = { start, end, cues };
       cursor = end;
-    }
+    });
     return out;
-  }, [blocks, subtitleCues]);
+  }, [blocks, subtitleCues, subtitleRawData]);
   const subtitlePlainTextByBlock = useMemo(() => {
     const out: Record<string, string> = {};
     for (const block of blocks) {

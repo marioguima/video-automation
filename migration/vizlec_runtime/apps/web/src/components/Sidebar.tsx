@@ -28,17 +28,6 @@ interface SidebarProps {
   onLogout?: () => void;
 }
 
-const LogoIcon = ({ className }: { className?: string }) => (
-  <svg 
-    viewBox="0 0 24 24" 
-    fill="currentColor" 
-    className={className} 
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
-  </svg>
-);
-
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, onLogout }) => {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -99,13 +88,31 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
       </Button>
 
       {/* Logo Section */}
-      <div className={`flex items-center gap-3 h-20 transition-all duration-300 ${isCollapsed ? 'justify-center px-0' : 'px-5'}`}>
-        <div className="w-10 h-10 bg-primary rounded-md flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary/20 text-white">
-          <LogoIcon className="w-7 h-7" />
+      <div className={`flex items-center gap-3 h-24 transition-all duration-300 ${isCollapsed ? 'justify-center px-0' : 'px-5'}`}>
+        <div className="flex-shrink-0">
+          <img
+            src="/branding/logo-light.png"
+            alt="Video Automation"
+            className="block dark:hidden h-14 w-auto object-contain"
+          />
+          <img
+            src="/branding/logo-dark.png"
+            alt="Video Automation"
+            className="hidden dark:block h-14 w-auto object-contain"
+          />
         </div>
-        <h1 className={`text-xl font-bold tracking-tight text-foreground transition-opacity duration-200 whitespace-nowrap ${isCollapsed ? 'opacity-0 w-0 hidden' : 'hidden lg:block'}`}>
-          VizLec
-        </h1>
+        <div className={`flex-1 min-w-0 transition-opacity duration-200 whitespace-nowrap ${isCollapsed ? 'opacity-0 w-0 hidden' : 'hidden lg:block'}`}>
+          <img
+            src="/branding/wordmark-light.png"
+            alt="Video Automation"
+            className="block dark:hidden w-[140px] h-auto object-contain"
+          />
+          <img
+            src="/branding/wordmark-dark.png"
+            alt="Video Automation"
+            className="hidden dark:block w-[140px] h-auto object-contain"
+          />
+        </div>
       </div>
 
       <nav className="flex-1 px-4 space-y-1 mt-4">
