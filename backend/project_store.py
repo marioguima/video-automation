@@ -126,6 +126,12 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             );
 
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+
             CREATE INDEX IF NOT EXISTS idx_videos_channel ON videos(channel_id);
             CREATE INDEX IF NOT EXISTS idx_blocks_video ON video_blocks(video_id);
             CREATE INDEX IF NOT EXISTS idx_assets_block ON block_assets(video_block_id);
@@ -137,6 +143,95 @@ def init_db() -> None:
         _ensure_column(conn, "video_blocks", "subtitle_json", "TEXT")
         _ensure_column(conn, "videos", "bgm_file_path", "TEXT")
         _ensure_column(conn, "videos", "bgm_volume", "REAL")
+
+
+DEFAULT_LLM_SETTINGS: dict[str, Any] = {
+    "provider": "ollama",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "model": "qwen2.5:7b",
+    "api_key": "ollama",
+    "timeout_sec": 120,
+}
+
+
+def get_system_settings() -> dict[str, Any]:
+    init_db()
+    with get_connection() as conn:
+        row = conn.execute("SELECT value_json FROM system_settings WHERE key = ?", ("app",)).fetchone()
+    if not row:
+        return {"llm": dict(DEFAULT_LLM_SETTINGS)}
+    try:
+        data = json.loads(str(row["value_json"]))
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    llm = data.get("llm") if isinstance(data.get("llm"), dict) else {}
+    return {"llm": {**DEFAULT_LLM_SETTINGS, **llm}}
+
+
+def update_system_settings(patch: dict[str, Any]) -> dict[str, Any]:
+    current = get_system_settings()
+    next_settings = dict(current)
+    if isinstance(patch.get("llm"), dict):
+        llm_patch = patch["llm"]
+        llm = {**DEFAULT_LLM_SETTINGS, **dict(current.get("llm") or {})}
+        provider = str(llm_patch.get("provider", llm.get("provider", "ollama"))).strip().lower()
+        if provider not in {"ollama", "gemini", "openai"}:
+            raise ValueError("llm.provider must be one of: ollama, gemini, openai")
+        llm["provider"] = provider
+        for incoming, stored in (
+            ("base_url", "base_url"),
+            ("baseUrl", "base_url"),
+            ("model", "model"),
+            ("api_key", "api_key"),
+            ("apiKey", "api_key"),
+        ):
+            if incoming in llm_patch and llm_patch[incoming] is not None:
+                llm[stored] = str(llm_patch[incoming]).strip()
+        if "timeout_sec" in llm_patch or "timeoutSec" in llm_patch or "timeoutMs" in llm_patch:
+            raw_timeout = llm_patch.get("timeout_sec", llm_patch.get("timeoutSec", llm_patch.get("timeoutMs")))
+            timeout = int(float(raw_timeout))
+            if timeout > 1000:
+                timeout = int(timeout / 1000)
+            if timeout <= 0:
+                raise ValueError("llm.timeout_sec must be positive")
+            llm["timeout_sec"] = timeout
+        if provider == "gemini" and not str(llm.get("api_key") or "").strip():
+            raise ValueError("Gemini API key is required when Gemini is selected")
+        if provider == "openai" and not str(llm.get("api_key") or "").strip():
+            raise ValueError("OpenAI API key is required when OpenAI is selected")
+        if provider == "gemini" and not str(llm.get("base_url") or "").strip():
+            llm["base_url"] = "https://generativelanguage.googleapis.com/v1beta"
+        if provider == "openai" and not str(llm.get("base_url") or "").strip():
+            llm["base_url"] = "https://api.openai.com/v1"
+        if provider == "ollama" and not str(llm.get("api_key") or "").strip():
+            llm["api_key"] = "ollama"
+        next_settings["llm"] = llm
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO system_settings(key, value_json, updated_at)
+            VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            ON CONFLICT(key) DO UPDATE SET
+                value_json = excluded.value_json,
+                updated_at = excluded.updated_at
+            """,
+            ("app", json.dumps(next_settings, ensure_ascii=False)),
+        )
+    return get_system_settings()
+
+
+def get_llm_settings() -> dict[str, Any]:
+    return dict(get_system_settings()["llm"])
+
+
+def has_saved_system_settings() -> bool:
+    init_db()
+    with get_connection() as conn:
+        row = conn.execute("SELECT 1 FROM system_settings WHERE key = ?", ("app",)).fetchone()
+    return row is not None
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -688,6 +783,8 @@ def run_llm_prompt_pipeline(
         }
 
     pipeline = LLMPipeline()
+    if has_saved_system_settings() and hasattr(pipeline, "router") and hasattr(pipeline.router, "apply_runtime_settings"):
+        pipeline.router.apply_runtime_settings(get_llm_settings())
     job = create_pipeline_job(video_id=video_id, stage="llm_analysis", payload={"force_reprocess": force_reprocess})
 
     try:

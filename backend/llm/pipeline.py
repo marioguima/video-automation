@@ -13,7 +13,7 @@ from .prompts import (
     build_layer_b_messages,
     build_layer_c_messages,
 )
-from .providers import OpenAICompatibleProvider
+from .providers import GeminiProvider, OpenAICompatibleProvider
 from .router import LLMRouter
 from .schemas import (
     SchemaValidationError,
@@ -230,7 +230,7 @@ class LLMPipeline:
         errors: list[str] = []
         for candidate in self.router.route(stage):
             provider_target = self.router.get_provider_target(candidate.provider_name)
-            client = OpenAICompatibleProvider(provider_target)
+            client = GeminiProvider(provider_target) if provider_target.name == "gemini" else OpenAICompatibleProvider(provider_target)
             try:
                 payload = client.complete_json(
                     model=candidate.model,
@@ -331,4 +331,3 @@ class LLMPipeline:
             "meta": {"provider": "system", "model": "default"},
             "schema_version": PIPELINE_VERSION,
         }
-

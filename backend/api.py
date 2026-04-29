@@ -13,6 +13,7 @@ try:
         ingest_video_script,
         init_db,
         get_job_state_compat,
+        get_system_settings,
         list_video_audios_compat,
         list_channels,
         list_video_blocks_compat,
@@ -22,6 +23,7 @@ try:
         list_videos,
         patch_video_block_compat,
         run_llm_prompt_pipeline,
+        update_system_settings,
     )
     from .script_pipeline import build_manifest, load_script_file, validate_manifest
 except ImportError:
@@ -32,6 +34,7 @@ except ImportError:
         ingest_video_script,
         init_db,
         get_job_state_compat,
+        get_system_settings,
         list_video_audios_compat,
         list_channels,
         list_video_blocks_compat,
@@ -41,6 +44,7 @@ except ImportError:
         list_videos,
         patch_video_block_compat,
         run_llm_prompt_pipeline,
+        update_system_settings,
     )
     from script_pipeline import build_manifest, load_script_file, validate_manifest
 
@@ -99,6 +103,22 @@ class CompatJobCreateResponse(BaseModel):
     status: str
 
 
+class LlmSettingsPatch(BaseModel):
+    provider: str | None = None
+    base_url: str | None = None
+    baseUrl: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    apiKey: str | None = None
+    timeout_sec: int | None = None
+    timeoutSec: int | None = None
+    timeoutMs: int | None = None
+
+
+class SettingsPatchRequest(BaseModel):
+    llm: LlmSettingsPatch | None = None
+
+
 _COMPAT_JOB_STORE: dict[str, dict] = {}
 
 
@@ -141,6 +161,8 @@ def root() -> dict:
             "GET /api/videos/{id}/versions",
             "GET /api/video-versions/{id}/blocks",
             "PATCH /api/blocks/{id}",
+            "GET /api/settings",
+            "PATCH /api/settings",
             "POST /api/manifest",
             "POST /api/manifest/from-file",
         ],
@@ -328,7 +350,24 @@ def slide_templates() -> list[dict]:
 
 @app.get("/api/settings")
 def settings() -> dict:
-    return {"tts": {"defaultVoiceId": None}}
+    current = get_system_settings()
+    return {
+        **current,
+        "tts": {"defaultVoiceId": None},
+    }
+
+
+@app.patch("/api/settings")
+def settings_patch(payload: SettingsPatchRequest) -> dict:
+    patch = payload.dict(exclude_unset=True)
+    try:
+        current = update_system_settings(patch)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        **current,
+        "tts": {"defaultVoiceId": None},
+    }
 
 
 @app.patch("/api/video-versions/{version_id}/preferences")

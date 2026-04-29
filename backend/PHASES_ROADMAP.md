@@ -2,6 +2,25 @@
 
 Baseado na conversa em `chat.md` e no estado atual do projeto.
 
+## Decisao atual - COPE / Content-first
+
+Status: `ACTIVE`
+
+Em 2026-04-29, a direcao do produto foi ajustada para COPE (Create Once, Publish Everywhere). O foco deixa de ser `curso` ou `canal` como entidade central e passa a ser **conteudo reutilizavel** que pode gerar variantes de video para curso, YouTube, TikTok, Instagram, Facebook ou projeto generico.
+
+Plano detalhado: `backend/COPE_EXECUTION_PLAN.md`.
+
+Decisoes:
+
+- `G:\tool\vizlec` original passa a ser a base tecnica de referencia, por estar mais atualizado.
+- `migration/vizlec_runtime` fica como snapshot historico e deve ser removido depois de confirmado que nada unico precisa ser preservado.
+- O dominio alvo e `ContentProject -> ContentPiece -> Variant -> Blocks/Scenes -> Assets/Jobs`.
+- `Section/Module` deixa de ser obrigatorio no produto: aparece para `kind=course`; para canais/perfis/paginas/projetos genericos deve ser invisivel ou inexistente.
+- A entrega rapida deve manter compatibilidade interna onde necessario, usando uma `default section` invisivel para projetos nao-curso.
+- Saida prioritaria desta etapa: video. E-book/PDF e geracao de musica ficam fora do escopo imediato.
+
+---
+
 ## Objetivo do produto
 
 1. Dividir roteiro em blocos por semelhanca (contexto narrativo).

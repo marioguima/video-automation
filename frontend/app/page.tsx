@@ -1,8 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
-import { buildManifest, buildManifestFromFile } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import {
+  buildManifest,
+  buildManifestFromFile,
+  getSystemSettings,
+  LlmProvider,
+  updateSystemSettings,
+} from "@/lib/api";
 import { ManifestResponse } from "@/lib/types";
 import { ManifestDashboard } from "@/components/ManifestDashboard";
 
@@ -20,6 +26,12 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ManifestResponse | null>(null);
+  const [llmProvider, setLlmProvider] = useState<LlmProvider>("ollama");
+  const [llmBaseUrl, setLlmBaseUrl] = useState("http://127.0.0.1:11434/v1");
+  const [llmModel, setLlmModel] = useState("qwen2.5:7b");
+  const [llmApiKey, setLlmApiKey] = useState("ollama");
+  const [llmTimeoutSec, setLlmTimeoutSec] = useState(120);
+  const [settingsStatus, setSettingsStatus] = useState("Config carregando...");
 
   const statusText = useMemo(() => {
     if (loading) return "Processando...";
@@ -29,6 +41,65 @@ export default function HomePage() {
       ? `OK: ${result.manifest.blocks.length} blocos`
       : `Falha: ${result.validation.errors.length} erros`;
   }, [loading, error, result]);
+
+  useEffect(() => {
+    void getSystemSettings()
+      .then((settings) => {
+        setLlmProvider(settings.llm.provider);
+        setLlmBaseUrl(settings.llm.base_url);
+        setLlmModel(settings.llm.model);
+        setLlmApiKey(settings.llm.api_key);
+        setLlmTimeoutSec(settings.llm.timeout_sec);
+        setSettingsStatus("Config pronta");
+      })
+      .catch((err) => setSettingsStatus(err instanceof Error ? err.message : "Falha ao carregar config"));
+  }, []);
+
+  function selectProvider(provider: LlmProvider) {
+    setLlmProvider(provider);
+    if (provider === "gemini") {
+      setLlmBaseUrl("https://generativelanguage.googleapis.com/v1beta");
+      setLlmModel((current) => (current && !current.includes(":") ? current : "gemini-2.0-flash"));
+      if (llmApiKey === "ollama") setLlmApiKey("");
+      return;
+    }
+    if (provider === "openai") {
+      setLlmBaseUrl("https://api.openai.com/v1");
+      setLlmModel((current) => (current && !current.includes(":") ? current : "gpt-4o-mini"));
+      if (llmApiKey === "ollama") setLlmApiKey("");
+      return;
+    }
+    setLlmBaseUrl("http://127.0.0.1:11434/v1");
+    setLlmModel((current) => (current.includes(":") ? current : "qwen2.5:7b"));
+    setLlmApiKey((current) => current || "ollama");
+  }
+
+  async function handleSaveSettings() {
+    if ((llmProvider === "gemini" || llmProvider === "openai") && !llmApiKey.trim()) {
+      setSettingsStatus(`${llmProvider === "gemini" ? "Gemini" : "OpenAI"} exige API key.`);
+      return;
+    }
+    setSettingsStatus("Salvando...");
+    try {
+      const settings = await updateSystemSettings({
+        llm: {
+          provider: llmProvider,
+          base_url: llmBaseUrl,
+          model: llmModel,
+          api_key: llmApiKey,
+          timeout_sec: llmTimeoutSec,
+        },
+      });
+      setLlmProvider(settings.llm.provider);
+      setLlmBaseUrl(settings.llm.base_url);
+      setLlmModel(settings.llm.model);
+      setLlmApiKey(settings.llm.api_key);
+      setLlmTimeoutSec(settings.llm.timeout_sec);
+      setSettingsStatus(`LLM ativa: ${settings.llm.provider} / ${settings.llm.model}`);
+    } catch (err) {
+      setSettingsStatus(err instanceof Error ? err.message : "Erro ao salvar config");
+    }
+  }
 
   async function handleGenerate() {
     if (!script.trim()) {
@@ -116,6 +187,56 @@ export default function HomePage() {
 
       <section className="workspace">
         <aside className="panel controls">
+          <section className="settingsBox" aria-label="System Settings">
+            <div className="settingsHeader">
+              <strong>System Settings</strong>
+              <span>{settingsStatus}</span>
+            </div>
+            <div className="providerTabs">
+              {(["ollama", "gemini", "openai"] as const).map((provider) => (
+                <button
+                  key={provider}
+                  type="button"
+                  className={llmProvider === provider ? "providerActive" : "secondary"}
+                  onClick={() => selectProvider(provider)}
+                >
+                  {provider}
+                </button>
+              ))}
+            </div>
+            <label>
+              Modelo
+              <input value={llmModel} onChange={(e) => setLlmModel(e.target.value)} />
+            </label>
+            <label>
+              Base URL
+              <input value={llmBaseUrl} onChange={(e) => setLlmBaseUrl(e.target.value)} />
+            </label>
+            {(llmProvider === "gemini" || llmProvider === "openai") ? (
+              <label>
+                API key
+                <input
+                  type="password"
+                  value={llmApiKey}
+                  onChange={(e) => setLlmApiKey(e.target.value)}
+                  placeholder={llmProvider === "gemini" ? "Google Gemini API key" : "OpenAI API key"}
+                />
+              </label>
+            ) : null}
+            <label>
+              Timeout (s)
+              <input
+                type="number"
+                min={1}
+                value={llmTimeoutSec}
+                onChange={(e) => setLlmTimeoutSec(Number(e.target.value || 120))}
+              />
+            </label>
+            <button type="button" onClick={handleSaveSettings}>
+              Salvar LLM
+            </button>
+          </section>
+
           <div className="fieldGrid">
             <label>
               Visual chars

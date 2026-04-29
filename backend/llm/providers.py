@@ -1,6 +1,7 @@
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -129,3 +130,114 @@ class OpenAICompatibleProvider:
 
         raise LLMProviderError("could not parse JSON object from model output")
 
+
+class GeminiProvider:
+    """Client for Gemini generateContent JSON responses."""
+
+    def __init__(self, target: ProviderTarget) -> None:
+        self.target = target
+
+    def complete_json(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        temperature: float = 0.2,
+        max_tokens: int = 2200,
+    ) -> dict[str, Any]:
+        api_key = self.target.api_key.strip()
+        if not api_key:
+            raise LLMProviderError("Gemini API key is required")
+
+        payload: dict[str, Any] = {
+            "contents": self._to_contents(messages),
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "responseMimeType": "application/json",
+            },
+        }
+        system_instruction = self._system_instruction(messages)
+        if system_instruction:
+            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+        raw = self._post_json(model=model, api_key=api_key, payload=payload)
+        content = self._extract_content(raw)
+        return OpenAICompatibleProvider._extract_json(content)
+
+    def _post_json(self, model: str, api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        base_url = self.target.base_url.rstrip("/") or "https://generativelanguage.googleapis.com/v1beta"
+        url = f"{base_url}/models/{urllib.parse.quote(model, safe='')}:generateContent?key={urllib.parse.quote(api_key, safe='')}"
+        req = urllib.request.Request(
+            url=url,
+            method="POST",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.target.timeout_sec) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise LLMProviderError(
+                f"provider {self.target.name} HTTP {exc.code}: {detail}",
+                status_code=exc.code,
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise LLMProviderError(f"provider {self.target.name} connection error: {exc}") from exc
+
+    @staticmethod
+    def _system_instruction(messages: list[dict[str, Any]]) -> str:
+        parts: list[str] = []
+        for message in messages:
+            if message.get("role") != "system":
+                continue
+            text = GeminiProvider._message_text(message.get("content"))
+            if text:
+                parts.append(text)
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _to_contents(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        contents: list[dict[str, Any]] = []
+        for message in messages:
+            role = message.get("role")
+            if role == "system":
+                continue
+            text = GeminiProvider._message_text(message.get("content"))
+            if not text:
+                continue
+            contents.append({
+                "role": "model" if role == "assistant" else "user",
+                "parts": [{"text": text}],
+            })
+        if not contents:
+            contents.append({"role": "user", "parts": [{"text": "Retorne um objeto JSON valido."}]})
+        return contents
+
+    @staticmethod
+    def _message_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            return "\n".join(parts)
+        return ""
+
+    @staticmethod
+    def _extract_content(response_json: dict[str, Any]) -> str:
+        prompt_feedback = response_json.get("promptFeedback") or {}
+        block_reason = prompt_feedback.get("blockReason")
+        if block_reason:
+            raise LLMProviderError(f"Gemini prompt blocked: {block_reason}")
+        candidates = response_json.get("candidates") or []
+        if not candidates:
+            raise LLMProviderError("empty Gemini response: missing candidates")
+        parts = ((candidates[0].get("content") or {}).get("parts") or [])
+        texts = [part.get("text", "") for part in parts if isinstance(part, dict)]
+        content = "".join(texts).strip()
+        if not content:
+            raise LLMProviderError("empty Gemini response: missing textual content")
+        return content

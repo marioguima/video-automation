@@ -41,3 +41,46 @@ export async function buildManifestFromFile(payload: {
   }
   return data;
 }
+
+export type LlmProvider = "ollama" | "gemini" | "openai";
+
+export type SystemSettings = {
+  llm: {
+    provider: LlmProvider;
+    base_url: string;
+    model: string;
+    api_key: string;
+    timeout_sec: number;
+  };
+};
+
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    ...init,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || data.error || `Request failed: ${path}`);
+  }
+  return data as T;
+}
+
+export async function getSystemSettings(): Promise<SystemSettings> {
+  return requestJson<SystemSettings>("/api/settings");
+}
+
+export async function updateSystemSettings(payload: {
+  llm: {
+    provider: LlmProvider;
+    base_url: string;
+    model: string;
+    api_key: string;
+    timeout_sec: number;
+  };
+}): Promise<SystemSettings> {
+  return requestJson<SystemSettings>("/api/settings", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
