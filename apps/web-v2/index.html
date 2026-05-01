@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VizLec Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+            colors: {
+              navy: {
+                950: '#0B0E14',
+                900: '#151A25',
+                800: '#1E2433',
+                700: '#2A3245',
+              },
+              // Shadcn CSS Variables simulation for Tailwind CDN
+              border: "hsl(var(--border))",
+              input: "hsl(var(--input))",
+              ring: "hsl(var(--ring))",
+              background: "hsl(var(--background))",
+              foreground: "hsl(var(--foreground))",
+              primary: {
+                DEFAULT: "hsl(var(--primary))",
+                foreground: "hsl(var(--primary-foreground))",
+              },
+              secondary: {
+                DEFAULT: "hsl(var(--secondary))",
+                foreground: "hsl(var(--secondary-foreground))",
+              },
+              destructive: {
+                DEFAULT: "hsl(var(--destructive))",
+                foreground: "hsl(var(--destructive-foreground))",
+              },
+              muted: {
+                DEFAULT: "hsl(var(--muted))",
+                foreground: "hsl(var(--muted-foreground))",
+              },
+              accent: {
+                DEFAULT: "hsl(var(--accent))",
+                foreground: "hsl(var(--accent-foreground))",
+              },
+              popover: {
+                DEFAULT: "hsl(var(--popover))",
+                foreground: "hsl(var(--popover-foreground))",
+              },
+              card: {
+                DEFAULT: "hsl(var(--card))",
+                foreground: "hsl(var(--card-foreground))",
+              },
+            },
+            borderColor: {
+              DEFAULT: "hsl(var(--border))",
+            },
+          },
+        },
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --background: 0 0% 100%;
+        --foreground: 222.2 84% 4.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 222.2 84% 4.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222.2 84% 4.9%;
+        --primary: 24.6 95% 53.1%; /* Orange 600 */
+        --primary-foreground: 210 40% 98%;
+        --secondary: 210 40% 96.1%;
+        --secondary-foreground: 222.2 47.4% 11.2%;
+        --muted: 210 40% 96.1%;
+        --muted-foreground: 215.4 16.3% 46.9%;
+        --accent: 210 40% 96.1%;
+        --accent-foreground: 222.2 47.4% 11.2%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 214.3 31.8% 91.4%;
+        --input: 214.3 31.8% 91.4%;
+        --ring: 24.6 95% 53.1%;
+        --radius: 0.5rem;
+        
+        /* Chart Colors */
+        --chart-1: 12 76% 61%;
+        --chart-2: 173 58% 39%;
+        --chart-3: 197 37% 24%;
+        --chart-4: 43 74% 66%;
+        --chart-5: 27 87% 67%;
+      }
+      .dark {
+        --background: 222.2 84% 4.9%; /* Slate 950-ish */
+        --foreground: 210 40% 98%;
+        --card: 222 47% 11%; /* Slate 900 */
+        --card-foreground: 210 40% 98%;
+        --popover: 222 47% 11%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 24.6 95% 53.1%;
+        --primary-foreground: 210 40% 98%;
+        --secondary: 217.2 32.6% 17.5%;
+        --secondary-foreground: 210 40% 98%;
+        --muted: 217.2 32.6% 17.5%;
+        --muted-foreground: 215 20.2% 65.1%;
+        --accent: 217.2 32.6% 17.5%;
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 62.8% 30.6%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 217.2 32.6% 17.5%; /* Slate 800 */
+        --input: 217.2 32.6% 17.5%;
+        --ring: 24.6 95% 53.1%;
+
+        /* Chart Colors Dark Mode */
+        --chart-1: 220 70% 50%;
+        --chart-2: 160 60% 45%;
+        --chart-3: 30 80% 55%;
+        --chart-4: 280 65% 60%;
+        --chart-5: 340 75% 55%;
+      }
+
+      /* Premium Navy Theme Overrides */
+      .dark.theme-navy {
+        --background: 225 35% 5%; /* #080A0F */
+        --foreground: 210 40% 98%;
+        --card: 224 35% 8%; /* #0E1117 */
+        --card-foreground: 210 40% 98%;
+        --popover: 224 35% 8%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 24.6 95% 53.1%; /* Orange preserved */
+        --primary-foreground: 210 40% 98%;
+        --secondary: 223 30% 12%; /* #151A25 */
+        --secondary-foreground: 210 40% 98%;
+        --muted: 223 30% 12%;
+        --muted-foreground: 217 20% 65%;
+        --accent: 223 30% 15%; /* #1E232E */
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 223 30% 15%; /* #1E232E */
+        --input: 223 30% 15%;
+        --ring: 24.6 95% 53.1%;
+
+        /* Chart Colors Optimized for Navy Background */
+        --chart-1: 24 95% 53%; /* Orange */
+        --chart-2: 191 90% 48%; /* Cyan */
+        --chart-3: 262 80% 60%; /* Purple */
+        --chart-4: 142 70% 50%; /* Green */
+        --chart-5: 330 80% 60%; /* Pink */
+      }
+      
+      /* Existing Styles */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: #e2e8f0 transparent;
+      }
+      .dark * {
+        scrollbar-color: #334155 transparent;
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #e2e8f0;
+        border-radius: 10px;
+        transition: background 0.2s ease;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #cbd5e1;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #334155;
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #475569;
+      }
+      body {
+        overflow-x: hidden;
+      }
+      .custom-scrollbar {
+        scrollbar-gutter: auto;
+      }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react/": "https://esm.sh/react@18.3.1/",
+    "react-dom": "https://esm.sh/react-dom@18.3.1?deps=react@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1",
+    "react-dom/": "https://esm.sh/react-dom@18.3.1/?deps=react@18.3.1",
+    "lucide-react": "https://esm.sh/lucide-react@0.460.0?deps=react@18.3.1",
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
+    "clsx": "https://esm.sh/clsx@2.1.1",
+    "tailwind-merge": "https://esm.sh/tailwind-merge@2.3.0",
+    "class-variance-authority": "https://esm.sh/class-variance-authority@0.7.0",
+    "@radix-ui/react-slot": "https://esm.sh/@radix-ui/react-slot@1.0.2?deps=react@18.3.1",
+    "@radix-ui/react-avatar": "https://esm.sh/@radix-ui/react-avatar@1.0.4?deps=react@18.3.1",
+    "@radix-ui/react-separator": "https://esm.sh/@radix-ui/react-separator@1.0.3?deps=react@18.3.1",
+    "recharts": "https://esm.sh/recharts@2.12.7?deps=react@18.3.1,react-dom@18.3.1"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body class="antialiased bg-background text-foreground transition-colors duration-300">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

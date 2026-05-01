@@ -1,0 +1,21 @@
+{
+  "name": "vizlec",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "pnpm --filter @vizlec/api dev",
+    "dev:worker": "pnpm --filter @vizlec/worker dev",
+    "dev:web": "pnpm --filter @vizlec/web dev",
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "verify:critical": "pnpm --filter @vizlec/api typecheck && pnpm --filter @vizlec/web typecheck && pnpm --filter @vizlec/api run test:one -- test/correlation-id-traceability.test.ts",
+    "setup:hooks": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-hooks.ps1",
+    "db:migrate": "node scripts/prisma-migrate.cjs"
+  }
+}

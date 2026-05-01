@@ -1,0 +1,39 @@
+services:
+  reverse-proxy:
+    image: traefik:v3.3
+    container_name: vizlec-lab-traefik
+    restart: unless-stopped
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./certs:/etc/certs:ro
+    depends_on:
+      - control-api
+
+  control-api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.api
+    container_name: vizlec-lab-control-api
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      API_HOST: 0.0.0.0
+      API_PORT: 4010
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      INTERNAL_JOBS_EVENT_TOKEN: ${INTERNAL_JOBS_EVENT_TOKEN}
+      AUTH_COOKIE_SECURE: "true"
+      WEB_APP_BASE_URL: ${WEB_APP_BASE_URL}
+      WORKER_PORT: 4011
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      COMFYUI_BASE_URL: ${COMFYUI_BASE_URL}
+      XTTS_API_BASE_URL: ${XTTS_API_BASE_URL}
+      XTTS_API_AUTOSTART: "false"
+    volumes:
+      - ./data:/data
+

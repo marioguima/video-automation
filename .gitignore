@@ -1,73 +1,110 @@
-# OS / editor
+# === VizLec .gitignore ===
+
+# OS / Editor
 .DS_Store
 Thumbs.db
-.idea/
+*.swp
+*.swo
+*.tmp
+*.bak
 .vscode/
+.idea/
 
-# Python
-__pycache__/
-*.py[cod]
-*.pyd
-*.pyo
-*.so
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
+# Node / TS
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+.out/
+**/.out/
+.next/
+**/.next/
+.nuxt/
+**/.nuxt/
+.svelte-kit/
+**/.svelte-kit/
+coverage/
+**/coverage/
+*.tsbuildinfo
 
-# Tooling
-.python-version
-
-# Environment secrets
+# Env files
 .env
 .env.*
 !.env.example
 
-# Build artifacts
-build/
-dist/
-*.egg-info/
+# Package manager caches
+.pnpm-store/
+.pnp.*
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
 
-# Logs
-*.log
-logs/
+# Playwright
+playwright-report/
+playwright/.cache/
+**/playwright-report/
+**/.playwright/
+**/ms-playwright/
 
-# Runtime output (generated media/manifests)
-output/
-backend/tests/manual_video/output/
-tmp/
-temp/
-*.tmp
+# Electron
+release/
+releases/
+out/
+**/out/
+*.exe
+*.dmg
+*.app
+*.msi
+*.AppImage
+*.snap
 
-# Local database/cache files
-*.db
-*.db-wal
-*.db-shm
+# Runtime data (generated assets)
+# IMPORTANT: keep generated media and DB out of git.
+data/
+**/data/
 *.sqlite
 *.sqlite3
-*.cache
+*.db
+!data/
+!data/*.json
+!data/app_settings.json
+!data/tts_settings.json
+data/courses/
+data/courses/**
 
-# Optional front-end stack (for upcoming UI work)
-node_modules/
-.pnpm-store/
-.npm/
-.yarn/
-.next/
-.nuxt/
-.svelte-kit/
-coverage/
+# Generated media assets
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.png
+*.jpg
+*.jpeg
+*.webp
 
-# Local media scratch/work dirs (keep source assets if needed)
-assets/generated/
-assets/tmp/
-migration/vizlec_runtime/data/courses/
-migration/vizlec_runtime/data/channels/
-migration/vizlec_runtime/data/bgm_library/
+# If you later decide to version some sample assets, whitelist them explicitly:
+# !assets/samples/**
+
+# Python (if used for tooling/scripts)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.venv*
+
+# Temporary helper files
+/tmp_rovodev_*
+tmp/
+_delete_later_migration_node_modules/

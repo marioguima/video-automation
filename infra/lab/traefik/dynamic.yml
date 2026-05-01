@@ -1,0 +1,41 @@
+http:
+  routers:
+    redirect-http:
+      entryPoints:
+        - web
+      rule: "Host(`control.vizlec-dev.test`)"
+      middlewares:
+        - https-redirect
+      service: noop@internal
+
+    control-api:
+      entryPoints:
+        - websecure
+      rule: "Host(`control.vizlec-dev.test`)"
+      service: control-api
+      tls: {}
+      middlewares:
+        - security-headers
+
+  middlewares:
+    https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "no-referrer"
+
+  services:
+    control-api:
+      loadBalancer:
+        servers:
+          - url: "http://control-api:4010"
+
+tls:
+  certificates:
+    - certFile: /etc/certs/control.vizlec-dev.test.pem
+      keyFile: /etc/certs/control.vizlec-dev.test-key.pem

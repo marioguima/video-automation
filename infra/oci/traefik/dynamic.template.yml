@@ -1,0 +1,37 @@
+http:
+  routers:
+    redirect-http:
+      entryPoints:
+        - web
+      rule: "Host(`__CONTROL_DOMAIN__`)"
+      middlewares:
+        - https-redirect
+      service: noop@internal
+
+    control-api:
+      entryPoints:
+        - websecure
+      rule: "Host(`__CONTROL_DOMAIN__`)"
+      service: control-api
+      middlewares:
+        - security-headers
+      tls:
+        certResolver: le
+
+  middlewares:
+    https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "no-referrer"
+
+  services:
+    control-api:
+      loadBalancer:
+        servers:
+          - url: "http://control-api:4010"
