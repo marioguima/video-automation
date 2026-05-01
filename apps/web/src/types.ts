@@ -190,4 +190,4 @@ export interface Notification {
   jobStatus?: string;
 }
 
-export type ViewType = 'dashboard' | 'course-dashboard' | 'content' | 'quick-content' | 'editor' | 'courses' | 'modules' | 'course-editor' | 'module-editor' | 'module-container-editor' | 'library' | 'team' | 'profile' | 'billing' | 'settings' | 'security' | 'help';
+export type ViewType = 'dashboard' | 'course-dashboard' | 'content' | 'quick-content' | 'editor' | 'course-video-editor' | 'courses' | 'modules' | 'course-editor' | 'module-editor' | 'module-container-editor' | 'library' | 'team' | 'profile' | 'billing' | 'settings' | 'security' | 'help';

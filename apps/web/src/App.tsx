@@ -7,6 +7,7 @@ import CourseDashboard from './components/CourseDashboard';
 import ContentProjects from './components/ContentProjects';
 import ContentQuickStart, { type ContentQuickStartDraft } from './components/ContentQuickStart';
 import Editor from './components/Editor';
+import CourseVideoEditor from './components/CourseVideoEditor';
 import Courses from './components/Courses';
 import CourseModules from './components/CourseModules';
 import CourseEditor from './components/CourseEditor';
@@ -933,7 +934,7 @@ const App: React.FC = () => {
             setSelectedLesson(getLessonStub(lesson.id, lesson.title));
             setSelectedModuleIdForLesson(lesson.moduleId ?? null);
             setPendingLessonAutoQueue(null);
-            setCurrentView('editor');
+            setCurrentView('course-video-editor');
           })
           .catch((err) => {
             console.error(err);
@@ -1082,7 +1083,7 @@ const App: React.FC = () => {
     const sourceModule = courseModules.find((module) => module.lessons.some((item) => item.id === lesson.id));
     setSelectedModuleIdForLesson(sourceModule?.id ?? null);
     setPendingLessonAutoQueue(null);
-    setCurrentView('editor');
+    setCurrentView('course-video-editor');
   };
 
   const handleAddModuleContainer = () => {
@@ -1224,7 +1225,7 @@ const App: React.FC = () => {
       generateAudio: Boolean(options?.generateAudio),
       generateImage: Boolean(options?.generateImage)
     });
-    setCurrentView('editor');
+    setCurrentView('course-video-editor');
   };
 
   const resolveLessonVersion = async (
@@ -1444,7 +1445,7 @@ const App: React.FC = () => {
             navigationTarget={modulesNavigationTarget}
           />
         );
-      case 'editor':
+      case 'course-video-editor':
         {
           const moduleFromSelectedModuleId = courseModules.find((module) => module.id === selectedModuleIdForLesson);
           const moduleFromLesson = selectedLesson
@@ -1452,7 +1453,7 @@ const App: React.FC = () => {
             : undefined;
           const resolvedModuleTitle = moduleFromSelectedModuleId?.title ?? moduleFromLesson?.title ?? '';
         return (
-          <Editor
+          <CourseVideoEditor
             lessonId={selectedLesson?.id ?? null}
             dispatchAgentId={dispatchAgentId}
             lessonTitle={selectedLesson?.title ?? ''}
@@ -1476,6 +1477,20 @@ const App: React.FC = () => {
           />
         );
         }
+      case 'editor':
+        return (
+          <Editor
+            lessonId={selectedLesson?.id ?? null}
+            dispatchAgentId={dispatchAgentId}
+            lessonTitle={selectedLesson?.title ?? ''}
+            moduleTitle=""
+            courseTitle=""
+            autoQueuePlan={pendingLessonAutoQueue}
+            onImageClick={setActiveImageUrl}
+            onGoCourse={() => setCurrentView('content')}
+            onGoModule={() => setCurrentView('content')}
+          />
+        );
       case 'module-editor':
         return (
           <ModuleEditor 

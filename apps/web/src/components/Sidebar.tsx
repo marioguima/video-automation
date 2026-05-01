@@ -52,7 +52,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
     'modules',
     'module-editor',
     'module-container-editor',
-    'editor'
+    'course-video-editor'
   ]);
 
   const navItems = [
@@ -120,7 +120,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
             key={id}
             variant="ghost"
             onClick={() => setView(id as ViewType)}
-            className={getButtonClass(id === 'courses' ? coursesSectionViews.has(currentView) : currentView === id)}
+            className={getButtonClass(
+              id === 'courses'
+                ? coursesSectionViews.has(currentView)
+                : id === 'content'
+                  ? currentView === 'content' || currentView === 'editor'
+                  : currentView === id
+            )}
           >
             <Icon 
               size={22} 

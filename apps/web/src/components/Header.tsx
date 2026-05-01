@@ -55,6 +55,8 @@ const Header: React.FC<HeaderProps> = ({
           action: onAddModule 
         };
       case 'editor':
+        return null;
+      case 'course-video-editor':
         return { 
           text: 'Create New Lesson', 
           action: onAddLesson 
