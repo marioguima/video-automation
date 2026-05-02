@@ -3342,7 +3342,17 @@ type ComfyImageInfo = {
 };
 
 type AppSettings = {
-  llm?: { provider?: string; baseUrl?: string; model?: string; apiKey?: string; timeoutMs?: number };
+  llm?: {
+    provider?: string;
+    baseUrl?: string;
+    model?: string;
+    apiKey?: string;
+    apiKeys?: {
+      gemini?: string;
+      openai?: string;
+    };
+    timeoutMs?: number;
+  };
   comfy?: {
     baseUrl?: string;
     promptTimeoutMs?: number;
@@ -5634,11 +5644,19 @@ function resolveLlmSettings(): {
       : provider === "openai"
         ? "https://api.openai.com/v1"
         : config.ollamaBaseUrl);
+  const apiKeys = llmSettings.apiKeys;
+  const legacyApiKey = llmSettings.apiKey ?? "";
+  const apiKey =
+    provider === "gemini"
+      ? (apiKeys?.gemini ?? (!apiKeys ? legacyApiKey : ""))
+      : provider === "openai"
+        ? (apiKeys?.openai ?? (!apiKeys ? legacyApiKey : ""))
+        : legacyApiKey;
   return {
     provider,
     model,
     baseUrl,
-    apiKey: llmSettings.apiKey ?? "",
+    apiKey,
     timeoutMs: llmSettings.timeoutMs ?? config.ollamaTimeoutMs
   };
 }

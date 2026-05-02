@@ -1592,6 +1592,10 @@ type AppSettings = {
     baseUrl?: string;
     model?: string;
     apiKey?: string;
+    apiKeys?: {
+      gemini?: string;
+      openai?: string;
+    };
     timeoutMs?: number;
   };
   comfy?: {
@@ -4285,6 +4289,19 @@ fastify.get(
   },
   async () => {
     const current = readAppSettings();
+    const provider = (current.llm?.provider ?? "ollama").trim().toLowerCase();
+    const apiKeys = {
+      gemini: current.llm?.apiKeys?.gemini ?? "",
+      openai: current.llm?.apiKeys?.openai ?? ""
+    };
+    if (!apiKeys.gemini && provider === "gemini" && current.llm?.apiKey) {
+      apiKeys.gemini = current.llm.apiKey;
+    }
+    if (!apiKeys.openai && provider === "openai" && current.llm?.apiKey) {
+      apiKeys.openai = current.llm.apiKey;
+    }
+    const activeApiKey =
+      provider === "gemini" ? apiKeys.gemini : provider === "openai" ? apiKeys.openai : (current.llm?.apiKey ?? "");
     const workflows = listComfyWorkflowFiles();
     const selectedWorkflow =
       current.comfy?.workflowFile && workflows.includes(current.comfy.workflowFile)
@@ -4295,10 +4312,11 @@ fastify.get(
     return {
       theme: current.theme ?? null,
       llm: {
-        provider: current.llm?.provider ?? "ollama",
+        provider: provider === "gemini" || provider === "openai" ? provider : "ollama",
         baseUrl: current.llm?.baseUrl ?? config.ollamaBaseUrl,
         model: current.llm?.model ?? config.ollamaModel,
-        apiKey: current.llm?.apiKey ?? "",
+        apiKey: activeApiKey,
+        apiKeys,
         timeoutMs: current.llm?.timeoutMs ?? config.ollamaTimeoutMs
       },
       comfy: {
@@ -4358,7 +4376,37 @@ fastify.patch(
       if (!["ollama", "gemini", "openai"].includes(provider)) {
         return reply.code(400).send({ error: "llm.provider must be one of: ollama, gemini, openai" });
       }
-      const apiKey = body.llm.apiKey !== undefined ? body.llm.apiKey.trim() : (current.llm?.apiKey ?? "");
+      const apiKeys = {
+        gemini: current.llm?.apiKeys?.gemini ?? "",
+        openai: current.llm?.apiKeys?.openai ?? ""
+      };
+      const currentProvider = (current.llm?.provider ?? "").trim().toLowerCase();
+      if (!apiKeys.gemini && currentProvider === "gemini" && current.llm?.apiKey) {
+        apiKeys.gemini = current.llm.apiKey;
+      }
+      if (!apiKeys.openai && currentProvider === "openai" && current.llm?.apiKey) {
+        apiKeys.openai = current.llm.apiKey;
+      }
+      if (body.llm.apiKeys?.gemini !== undefined) {
+        apiKeys.gemini = body.llm.apiKeys.gemini.trim();
+      }
+      if (body.llm.apiKeys?.openai !== undefined) {
+        apiKeys.openai = body.llm.apiKeys.openai.trim();
+      }
+      const apiKey =
+        body.llm.apiKey !== undefined
+          ? body.llm.apiKey.trim()
+          : provider === "gemini"
+            ? apiKeys.gemini
+            : provider === "openai"
+              ? apiKeys.openai
+              : (current.llm?.apiKey ?? "");
+      if (provider === "gemini") {
+        apiKeys.gemini = apiKey;
+      }
+      if (provider === "openai") {
+        apiKeys.openai = apiKey;
+      }
       if (provider === "gemini" && !apiKey) {
         return reply.code(400).send({ error: "Gemini API key is required when Gemini is selected" });
       }
@@ -4370,6 +4418,7 @@ fastify.patch(
         baseUrl: body.llm.baseUrl ?? current.llm?.baseUrl,
         model: body.llm.model ?? current.llm?.model,
         apiKey,
+        apiKeys,
         timeoutMs: timeout !== undefined ? Math.trunc(timeout) : current.llm?.timeoutMs
       };
     }

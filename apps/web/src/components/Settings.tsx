@@ -11,7 +11,8 @@ import {
   AlertCircle,
   Database,
   Globe,
-  Monitor
+  Monitor,
+  ExternalLink
 } from 'lucide-react';
 import { Theme } from '../types';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
@@ -39,7 +40,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
   const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434');
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
-  const [llmApiKey, setLlmApiKey] = useState('');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [openAiApiKey, setOpenAiApiKey] = useState('');
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [llmTimeout, setLlmTimeout] = useState('60'); // Seconds
@@ -135,25 +137,33 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     setLlmProvider(provider);
     if (provider === 'gemini') {
       setOllamaUrl('https://generativelanguage.googleapis.com/v1beta');
-      setSelectedLlmModel((current) => current && !current.includes(':') ? current : 'gemini-2.0-flash');
-      if (llmApiKey === 'ollama') setLlmApiKey('');
+      setSelectedLlmModel((current) =>
+        current && !current.includes(':') && !current.startsWith('gpt-') ? current : 'gemini-2.0-flash'
+      );
       return;
     }
     if (provider === 'openai') {
       setOllamaUrl('https://api.openai.com/v1');
-      setSelectedLlmModel((current) => current && !current.includes(':') ? current : 'gpt-4o-mini');
-      if (llmApiKey === 'ollama') setLlmApiKey('');
+      setSelectedLlmModel((current) =>
+        current && !current.includes(':') && !current.startsWith('gemini-') ? current : 'gpt-4o-mini'
+      );
       return;
     }
     setOllamaUrl('http://127.0.0.1:11434');
     setSelectedLlmModel((current) => current.includes(':') ? current : 'llama3.2:3b');
-    setLlmApiKey((current) => current || 'ollama');
   };
 
   useEffect(() => {
     apiGet<{
       theme?: { family?: string; mode?: string };
-      llm?: { provider?: LLMProvider; baseUrl?: string; model?: string; apiKey?: string; timeoutMs?: number };
+      llm?: {
+        provider?: LLMProvider;
+        baseUrl?: string;
+        model?: string;
+        apiKey?: string;
+        apiKeys?: { gemini?: string; openai?: string };
+        timeoutMs?: number;
+      };
       comfy?: {
         baseUrl?: string;
         promptTimeoutMs?: number;
@@ -170,7 +180,9 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
         if (data.llm?.provider) setLlmProvider(data.llm.provider);
         if (data.llm?.baseUrl) setOllamaUrl(data.llm.baseUrl);
         if (data.llm?.model) setSelectedLlmModel(data.llm.model);
-        if (data.llm?.apiKey !== undefined) setLlmApiKey(data.llm.apiKey);
+        const provider = data.llm?.provider;
+        setGeminiApiKey(data.llm?.apiKeys?.gemini ?? (provider === 'gemini' ? data.llm?.apiKey ?? '' : ''));
+        setOpenAiApiKey(data.llm?.apiKeys?.openai ?? (provider === 'openai' ? data.llm?.apiKey ?? '' : ''));
         if (data.llm?.timeoutMs) setLlmTimeout(String(Math.round(data.llm.timeoutMs / 1000)));
 
         if (data.comfy?.baseUrl) setComfyUiUrl(data.comfy.baseUrl);
@@ -233,7 +245,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       setSettingsError('LLM timeout must be a positive number.');
       return;
     }
-    if ((llmProvider === 'gemini' || llmProvider === 'openai') && !llmApiKey.trim()) {
+    const activeApiKey = llmProvider === 'gemini' ? geminiApiKey.trim() : llmProvider === 'openai' ? openAiApiKey.trim() : 'ollama';
+    if ((llmProvider === 'gemini' || llmProvider === 'openai') && !activeApiKey) {
       setIsSaving(false);
       setSettingsError(`${llmProvider === 'gemini' ? 'Gemini' : 'OpenAI'} API key is required.`);
       return;
@@ -260,7 +273,11 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
           provider: llmProvider,
           baseUrl: ollamaUrl,
           model: selectedLlmModel,
-          apiKey: llmApiKey.trim(),
+          apiKey: activeApiKey,
+          apiKeys: {
+            gemini: geminiApiKey.trim(),
+            openai: openAiApiKey.trim()
+          },
           timeoutMs: llmTimeoutMs
         },
         comfy: {
@@ -715,14 +732,40 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API Key</label>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                        {llmProvider === 'gemini' ? 'Gemini API Key' : 'OpenAI API Key'}
+                      </label>
+                      {llmProvider === 'gemini' && (
+                        <a
+                          href="https://aistudio.google.com/apikey"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] font-bold text-orange-600 hover:text-orange-500 transition-colors"
+                        >
+                          Create Gemini API key
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
+                    </div>
                     <input
                       type="password"
-                      value={llmApiKey}
-                      onChange={(e) => setLlmApiKey(e.target.value)}
+                      value={llmProvider === 'gemini' ? geminiApiKey : openAiApiKey}
+                      onChange={(e) => {
+                        if (llmProvider === 'gemini') {
+                          setGeminiApiKey(e.target.value);
+                        } else {
+                          setOpenAiApiKey(e.target.value);
+                        }
+                      }}
                       placeholder={`Enter your ${llmProvider === 'gemini' ? 'Google Gemini' : 'OpenAI'} API Key`}
                       className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
                     />
+                    {llmProvider === 'gemini' && (
+                      <p className="text-[10px] text-slate-400">
+                        Opens Google AI Studio, where Gemini API keys are created and managed.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
