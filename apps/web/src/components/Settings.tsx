@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Server, 
   Cpu, 
@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Database,
+  Film,
   Globe,
   Monitor,
   ExternalLink
@@ -19,6 +20,9 @@ import { apiGet, apiPatch, apiPost } from '../lib/api';
 import ConfirmDialog from './ui/confirm-dialog';
 
 type LLMProvider = 'ollama' | 'gemini' | 'openai';
+type TtsProvider = 'xtts' | 'chatterbox' | 'qwen' | 'elevenlabs' | 'fish_speech' | 'f5_tts' | 'gpt_sovits' | 'openai' | 'custom';
+type VisualProvider = 'comfyui' | 'veo_extension' | 'vertex_veo' | 'custom';
+type VisualModelKind = 'text_to_image' | 'image_to_image' | 'text_to_video' | 'image_to_video';
 const DEFAULT_GEMINI_MODEL = 'gemma-4-26b-a4b-it';
 type LlmProviderConfig = {
   baseUrl: string;
@@ -47,6 +51,198 @@ const DEFAULT_LLM_CONFIGS: Record<LLMProvider, LlmProviderConfig> = {
   }
 };
 
+type TtsProviderConfig = {
+  provider: TtsProvider;
+  label: string;
+  useCase: string;
+  baseUrl: string;
+  timeoutUs: string;
+  language: string;
+  languages: string;
+  defaultVoiceId: string;
+  targetChars: string;
+  maxChars: string;
+  targetSpeechSeconds: string;
+  maxSpeechSeconds: string;
+};
+
+const DEFAULT_TTS_PROVIDER_CONFIGS: Record<string, TtsProviderConfig> = {
+  xtts: {
+    provider: 'xtts',
+    label: 'XTTS',
+    useCase: 'Local voice cloning and multilingual narration.',
+    baseUrl: 'http://127.0.0.1:8020',
+    timeoutUs: '5000000',
+    language: 'pt',
+    languages: 'pt',
+    defaultVoiceId: 'cohesive-pt-santiago-22050hz',
+    targetChars: '170',
+    maxChars: '200',
+    targetSpeechSeconds: '10',
+    maxSpeechSeconds: '12'
+  },
+  chatterbox: {
+    provider: 'chatterbox',
+    label: 'Chatterbox',
+    useCase: 'Future local multilingual route.',
+    baseUrl: '',
+    timeoutUs: '5000000',
+    language: 'en',
+    languages: '',
+    defaultVoiceId: '',
+    targetChars: '170',
+    maxChars: '200',
+    targetSpeechSeconds: '10',
+    maxSpeechSeconds: '12'
+  },
+  qwen: {
+    provider: 'qwen',
+    label: 'Qwen TTS',
+    useCase: 'Future route for English/Chinese-oriented narration.',
+    baseUrl: '',
+    timeoutUs: '5000000',
+    language: 'en',
+    languages: '',
+    defaultVoiceId: 'Ryan',
+    targetChars: '170',
+    maxChars: '200',
+    targetSpeechSeconds: '10',
+    maxSpeechSeconds: '12'
+  },
+  elevenlabs: {
+    provider: 'elevenlabs',
+    label: 'ElevenLabs',
+    useCase: 'Cloud voice cloning and high-quality English/Spanish narration.',
+    baseUrl: 'https://api.elevenlabs.io',
+    timeoutUs: '5000000',
+    language: 'en',
+    languages: '',
+    defaultVoiceId: '',
+    targetChars: '4000',
+    maxChars: '5000',
+    targetSpeechSeconds: '30',
+    maxSpeechSeconds: '45'
+  },
+  fish_speech: {
+    provider: 'fish_speech',
+    label: 'Fish Speech',
+    useCase: 'Future local/open voice cloning route.',
+    baseUrl: '',
+    timeoutUs: '5000000',
+    language: 'en',
+    languages: '',
+    defaultVoiceId: '',
+    targetChars: '170',
+    maxChars: '200',
+    targetSpeechSeconds: '10',
+    maxSpeechSeconds: '12'
+  },
+  f5_tts: {
+    provider: 'f5_tts',
+    label: 'F5-TTS',
+    useCase: 'Future local zero-shot voice cloning route.',
+    baseUrl: '',
+    timeoutUs: '5000000',
+    language: 'en',
+    languages: '',
+    defaultVoiceId: '',
+    targetChars: '170',
+    maxChars: '200',
+    targetSpeechSeconds: '10',
+    maxSpeechSeconds: '12'
+  }
+};
+
+type VisualModelConfig = {
+  displayName: string;
+  kind: VisualModelKind;
+  acceptedAspectRatios: string;
+  acceptedDurationsSeconds: string;
+  maxNativeSpeechSeconds: string;
+  supportsNativeAudio: boolean;
+  supportsPromptEnhancement: boolean;
+  costTier: 'local' | 'low' | 'medium' | 'high' | 'premium';
+};
+
+type VisualProviderConfig = {
+  provider: VisualProvider;
+  label: string;
+  useCase: string;
+  baseUrl: string;
+  capabilities: string;
+  models: Record<string, VisualModelConfig>;
+};
+
+const DEFAULT_VISUAL_PROVIDER_CONFIGS: Record<string, VisualProviderConfig> = {
+  comfyui: {
+    provider: 'comfyui',
+    label: 'ComfyUI',
+    useCase: 'Local image generation through the current ComfyUI workflow.',
+    baseUrl: 'http://127.0.0.1:8188',
+    capabilities: 'text_to_image, image_to_image',
+    models: {
+      'z-image-turbo-workflow': {
+        displayName: 'Z-Image Turbo workflow',
+        kind: 'text_to_image',
+        acceptedAspectRatios: '16:9, 9:16, 1:1, 4:5, 4:3, 3:4',
+        acceptedDurationsSeconds: '',
+        maxNativeSpeechSeconds: '',
+        supportsNativeAudio: false,
+        supportsPromptEnhancement: false,
+        costTier: 'local'
+      }
+    }
+  },
+  veo_extension: {
+    provider: 'veo_extension',
+    label: 'Veo Extension',
+    useCase: 'External extension route for high-quality image/video generation.',
+    baseUrl: '',
+    capabilities: 'text_to_image, image_to_image, text_to_video, image_to_video, native_audio',
+    models: {
+      'veo-3-image': {
+        displayName: 'Veo 3 image',
+        kind: 'text_to_image',
+        acceptedAspectRatios: '16:9, 9:16, 1:1',
+        acceptedDurationsSeconds: '',
+        maxNativeSpeechSeconds: '',
+        supportsNativeAudio: false,
+        supportsPromptEnhancement: true,
+        costTier: 'premium'
+      },
+      'veo-3-video': {
+        displayName: 'Veo 3 video',
+        kind: 'image_to_video',
+        acceptedAspectRatios: '16:9, 9:16',
+        acceptedDurationsSeconds: '4, 6, 8',
+        maxNativeSpeechSeconds: '8',
+        supportsNativeAudio: true,
+        supportsPromptEnhancement: true,
+        costTier: 'premium'
+      }
+    }
+  },
+  vertex_veo: {
+    provider: 'vertex_veo',
+    label: 'Vertex Veo',
+    useCase: 'Future official API route when direct Vertex AI should be used.',
+    baseUrl: 'https://aiplatform.googleapis.com',
+    capabilities: 'text_to_video, image_to_video, native_audio',
+    models: {
+      'veo-3-video': {
+        displayName: 'Veo 3 video',
+        kind: 'image_to_video',
+        acceptedAspectRatios: '16:9, 9:16',
+        acceptedDurationsSeconds: '4, 6, 8',
+        maxNativeSpeechSeconds: '8',
+        supportsNativeAudio: true,
+        supportsPromptEnhancement: true,
+        costTier: 'premium'
+      }
+    }
+  }
+};
+
 interface SettingsProps {
   currentTheme: Theme;
   setTheme: (theme: Theme) => void;
@@ -56,7 +252,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
   // General State
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [activeSection, setActiveSection] = useState<'appearance' | 'llm' | 'comfy' | 'tts' | 'runtime'>('appearance');
+  const [activeSection, setActiveSection] = useState<'appearance' | 'llm' | 'comfy' | 'visual' | 'tts' | 'runtime'>('appearance');
   const [currentFamily, currentMode] = currentTheme.split('-') as [
     'classic' | 'premium' | 'minimal',
     'light' | 'dark'
@@ -92,10 +288,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
   // TTS State
-  const [ttsUrl, setTtsUrl] = useState('http://127.0.0.1:8020');
-  const [ttsTimeout, setTtsTimeout] = useState('5000000'); // Microseconds
-  const [ttsLanguage, setTtsLanguage] = useState('pt');
-  const [ttsDefaultVoice, setTtsDefaultVoice] = useState('cohesive-pt-santiago-22050hz');
+  const [ttsProviderConfigs, setTtsProviderConfigs] = useState<Record<string, TtsProviderConfig>>(DEFAULT_TTS_PROVIDER_CONFIGS);
+  const [visualProviderConfigs, setVisualProviderConfigs] = useState<Record<string, VisualProviderConfig>>(DEFAULT_VISUAL_PROVIDER_CONFIGS);
   const [idleUnloadMs, setIdleUnloadMs] = useState('900000');
 
   type ComfyWorkflowNode = {
@@ -171,6 +365,62 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     setLlmProvider(provider);
   };
 
+  const parseTtsLanguages = (value: string): string[] => {
+    const seen = new Set<string>();
+    const languages: string[] = [];
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((language) => {
+        const key = language.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        languages.push(language);
+      });
+    return languages;
+  };
+
+  const updateTtsProviderConfig = (providerId: string, patch: Partial<TtsProviderConfig>) => {
+    setTtsProviderConfigs((current) => ({
+      ...current,
+      [providerId]: {
+        ...(current[providerId] ?? DEFAULT_TTS_PROVIDER_CONFIGS[providerId] ?? DEFAULT_TTS_PROVIDER_CONFIGS.xtts),
+        ...patch
+      }
+    }));
+  };
+
+  const parseCommaList = (value: string): string[] => {
+    const seen = new Set<string>();
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .filter((item) => {
+        const key = item.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  };
+
+  const parseNumberList = (value: string): number[] => {
+    return parseCommaList(value)
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item) && item > 0);
+  };
+
+  const updateVisualProviderConfig = (providerId: string, patch: Partial<VisualProviderConfig>) => {
+    setVisualProviderConfigs((current) => ({
+      ...current,
+      [providerId]: {
+        ...(current[providerId] ?? DEFAULT_VISUAL_PROVIDER_CONFIGS[providerId] ?? DEFAULT_VISUAL_PROVIDER_CONFIGS.comfyui),
+        ...patch
+      }
+    }));
+  };
+
   useEffect(() => {
     apiGet<{
       theme?: { family?: string; mode?: string };
@@ -197,7 +447,49 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
         workflowFile?: string;
         availableWorkflows?: string[];
       };
-      tts?: { baseUrl?: string; timeoutUs?: number; language?: string; defaultVoiceId?: string };
+      tts?: {
+        providers?: Record<string, {
+          provider?: TtsProvider;
+          displayName?: string;
+          baseUrl?: string;
+          timeoutUs?: number;
+          language?: string;
+          languages?: string[];
+          defaultVoiceId?: string;
+          useCase?: string;
+          targetChars?: number;
+          maxChars?: number;
+          targetSpeechSeconds?: number;
+          maxSpeechSeconds?: number;
+        }>;
+        languageRoutes?: Record<string, {
+          providerId?: string;
+          voiceId?: string;
+          targetChars?: number;
+          maxChars?: number;
+          targetSpeechSeconds?: number;
+          maxSpeechSeconds?: number;
+        }>;
+      };
+      visualGeneration?: {
+        providers?: Record<string, {
+          provider?: VisualProvider;
+          displayName?: string;
+          baseUrl?: string;
+          capabilities?: string[];
+          useCase?: string;
+          models?: Record<string, {
+            displayName?: string;
+            kind?: VisualModelKind;
+            acceptedAspectRatios?: string[];
+            acceptedDurationsSeconds?: number[];
+            maxNativeSpeechSeconds?: number;
+            supportsNativeAudio?: boolean;
+            supportsPromptEnhancement?: boolean;
+            costTier?: 'local' | 'low' | 'medium' | 'high' | 'premium';
+          }>;
+        }>;
+      };
       memory?: { idleUnloadMs?: number };
     }>('/settings')
       .then((data) => {
@@ -264,10 +556,97 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
         if (data.theme?.family && data.theme?.mode) {
           setTheme(`${data.theme.family}-${data.theme.mode}` as Theme);
         }
-        if (data.tts?.baseUrl) setTtsUrl(data.tts.baseUrl);
-        if (data.tts?.timeoutUs) setTtsTimeout(String(data.tts.timeoutUs));
-        if (data.tts?.language) setTtsLanguage(data.tts.language);
-        if (data.tts?.defaultVoiceId) setTtsDefaultVoice(data.tts.defaultVoiceId);
+        const routeLanguagesByProvider = new Map<string, string[]>();
+        Object.entries(data.tts?.languageRoutes ?? {}).forEach(([language, route]) => {
+          const providerId = route?.providerId;
+          if (!providerId) return;
+          const list = routeLanguagesByProvider.get(providerId) ?? [];
+          list.push(language);
+          routeLanguagesByProvider.set(providerId, list);
+        });
+        setTtsProviderConfigs((current) => {
+          const next: Record<string, TtsProviderConfig> = { ...current };
+          const providerIds = Array.from(
+            new Set([...Object.keys(DEFAULT_TTS_PROVIDER_CONFIGS), ...Object.keys(data.tts?.providers ?? {})])
+          );
+          providerIds.forEach((providerId) => {
+            const preset = DEFAULT_TTS_PROVIDER_CONFIGS[providerId] ?? DEFAULT_TTS_PROVIDER_CONFIGS.xtts;
+            const providerSettings = data.tts?.providers?.[providerId];
+            const routeLanguages = routeLanguagesByProvider.get(providerId);
+            next[providerId] = {
+              ...preset,
+              provider: providerSettings?.provider ?? preset.provider,
+              label: providerSettings?.displayName ?? preset.label,
+              useCase: providerSettings?.useCase ?? preset.useCase,
+              baseUrl: providerSettings?.baseUrl ?? preset.baseUrl,
+              timeoutUs: providerSettings?.timeoutUs !== undefined ? String(providerSettings.timeoutUs) : preset.timeoutUs,
+              language: providerSettings?.language ?? preset.language,
+              languages: (providerSettings?.languages ?? routeLanguages ?? parseTtsLanguages(preset.languages)).join(', '),
+              defaultVoiceId: providerSettings?.defaultVoiceId ?? preset.defaultVoiceId,
+              targetChars: providerSettings?.targetChars !== undefined ? String(providerSettings.targetChars) : preset.targetChars,
+              maxChars: providerSettings?.maxChars !== undefined ? String(providerSettings.maxChars) : preset.maxChars,
+              targetSpeechSeconds:
+                providerSettings?.targetSpeechSeconds !== undefined
+                  ? String(providerSettings.targetSpeechSeconds)
+                  : preset.targetSpeechSeconds,
+              maxSpeechSeconds:
+                providerSettings?.maxSpeechSeconds !== undefined
+                  ? String(providerSettings.maxSpeechSeconds)
+                  : preset.maxSpeechSeconds
+            };
+          });
+          return next;
+        });
+        setVisualProviderConfigs((current) => {
+          const next: Record<string, VisualProviderConfig> = { ...current };
+          const providerIds = Array.from(
+            new Set([...Object.keys(DEFAULT_VISUAL_PROVIDER_CONFIGS), ...Object.keys(data.visualGeneration?.providers ?? {})])
+          );
+          providerIds.forEach((providerId) => {
+            const preset = DEFAULT_VISUAL_PROVIDER_CONFIGS[providerId] ?? DEFAULT_VISUAL_PROVIDER_CONFIGS.comfyui;
+            const providerSettings = data.visualGeneration?.providers?.[providerId];
+            const models: Record<string, VisualModelConfig> = { ...preset.models };
+            Object.entries(providerSettings?.models ?? {}).forEach(([modelId, modelSettings]) => {
+              const modelPreset = models[modelId] ?? {
+                displayName: modelId,
+                kind: 'text_to_image' as VisualModelKind,
+                acceptedAspectRatios: '',
+                acceptedDurationsSeconds: '',
+                maxNativeSpeechSeconds: '',
+                supportsNativeAudio: false,
+                supportsPromptEnhancement: false,
+                costTier: 'medium' as const
+              };
+              models[modelId] = {
+                ...modelPreset,
+                displayName: modelSettings?.displayName ?? modelPreset.displayName,
+                kind: modelSettings?.kind ?? modelPreset.kind,
+                acceptedAspectRatios:
+                  modelSettings?.acceptedAspectRatios?.join(', ') ?? modelPreset.acceptedAspectRatios,
+                acceptedDurationsSeconds:
+                  modelSettings?.acceptedDurationsSeconds?.join(', ') ?? modelPreset.acceptedDurationsSeconds,
+                maxNativeSpeechSeconds:
+                  modelSettings?.maxNativeSpeechSeconds !== undefined
+                    ? String(modelSettings.maxNativeSpeechSeconds)
+                    : modelPreset.maxNativeSpeechSeconds,
+                supportsNativeAudio: modelSettings?.supportsNativeAudio ?? modelPreset.supportsNativeAudio,
+                supportsPromptEnhancement:
+                  modelSettings?.supportsPromptEnhancement ?? modelPreset.supportsPromptEnhancement,
+                costTier: modelSettings?.costTier ?? modelPreset.costTier
+              };
+            });
+            next[providerId] = {
+              ...preset,
+              provider: providerSettings?.provider ?? preset.provider,
+              label: providerSettings?.displayName ?? preset.label,
+              useCase: providerSettings?.useCase ?? preset.useCase,
+              baseUrl: providerSettings?.baseUrl ?? preset.baseUrl,
+              capabilities: providerSettings?.capabilities?.join(', ') ?? preset.capabilities,
+              models
+            };
+          });
+          return next;
+        });
         if (data.memory?.idleUnloadMs !== undefined) setIdleUnloadMs(String(data.memory.idleUnloadMs));
       })
       .catch(() => {
@@ -282,7 +661,6 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     const generationMs = Number(comfyGenerationTimeoutMs);
     const viewMs = Number(comfyViewTimeoutMs);
     const llmTimeoutMs = Number(activeLlmConfig.timeoutSeconds) * 1000;
-    const ttsTimeoutUsValue = Number(ttsTimeout);
     const idleUnloadMsValue = Number(idleUnloadMs);
     if (!Number.isFinite(promptMs) || promptMs <= 0) {
       setIsSaving(false);
@@ -310,10 +688,173 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       setSettingsError(`${llmProvider === 'gemini' ? 'Gemini' : 'OpenAI'} API key is required.`);
       return;
     }
-    if (!Number.isFinite(ttsTimeoutUsValue) || ttsTimeoutUsValue <= 0) {
+    const ttsProvidersPayload: Record<string, {
+      provider: TtsProvider;
+      displayName: string;
+      baseUrl?: string;
+      timeoutUs: number;
+      language: string;
+      languages: string[];
+      defaultVoiceId: string;
+      useCase: string;
+      targetChars: number;
+      maxChars: number;
+      targetSpeechSeconds: number;
+      maxSpeechSeconds: number;
+    }> = {};
+    const ttsLanguageRoutesPayload: Record<string, {
+      providerId: string;
+      voiceId: string;
+      targetChars: number;
+      maxChars: number;
+      targetSpeechSeconds: number;
+      maxSpeechSeconds: number;
+    }> = {};
+    const ttsLanguageOwner = new Map<string, string>();
+    for (const [providerId, config] of Object.entries(ttsProviderConfigs)) {
+      const providerLanguages = parseTtsLanguages(config.languages);
+      const timeoutUs = Number(config.timeoutUs);
+      const targetChars = Number(config.targetChars);
+      const maxChars = Number(config.maxChars);
+      const targetSpeechSeconds = Number(config.targetSpeechSeconds);
+      const maxSpeechSeconds = Number(config.maxSpeechSeconds);
+      if (!Number.isFinite(timeoutUs) || timeoutUs <= 0) {
+        setIsSaving(false);
+        setSettingsError(`${config.label} timeout must be a positive number.`);
+        return;
+      }
+      if (!Number.isFinite(targetChars) || targetChars <= 0 || !Number.isFinite(maxChars) || maxChars <= 0) {
+        setIsSaving(false);
+        setSettingsError(`${config.label} character limits must be positive numbers.`);
+        return;
+      }
+      if (targetChars > maxChars) {
+        setIsSaving(false);
+        setSettingsError(`${config.label} target characters cannot be greater than max characters.`);
+        return;
+      }
+      if (
+        !Number.isFinite(targetSpeechSeconds) ||
+        targetSpeechSeconds <= 0 ||
+        !Number.isFinite(maxSpeechSeconds) ||
+        maxSpeechSeconds <= 0
+      ) {
+        setIsSaving(false);
+        setSettingsError(`${config.label} speech limits must be positive numbers.`);
+        return;
+      }
+      if (targetSpeechSeconds > maxSpeechSeconds) {
+        setIsSaving(false);
+        setSettingsError(`${config.label} target speech seconds cannot be greater than max speech seconds.`);
+        return;
+      }
+      if (providerLanguages.length > 0 && !config.defaultVoiceId.trim()) {
+        setIsSaving(false);
+        setSettingsError(`${config.label} default voice ID is required when languages are assigned.`);
+        return;
+      }
+      for (const language of providerLanguages) {
+        const key = language.toLowerCase();
+        const owner = ttsLanguageOwner.get(key);
+        if (owner && owner !== providerId) {
+          setIsSaving(false);
+          setSettingsError(`Language ${language} is assigned to both ${owner} and ${providerId}.`);
+          return;
+        }
+        ttsLanguageOwner.set(key, providerId);
+        ttsLanguageRoutesPayload[language] = {
+          providerId,
+          voiceId: config.defaultVoiceId.trim(),
+          targetChars: Math.trunc(targetChars),
+          maxChars: Math.trunc(maxChars),
+          targetSpeechSeconds,
+          maxSpeechSeconds
+        };
+      }
+      ttsProvidersPayload[providerId] = {
+        provider: config.provider,
+        displayName: config.label,
+        baseUrl: config.baseUrl.trim() || undefined,
+        timeoutUs: Math.trunc(timeoutUs),
+        language: providerLanguages[0] ?? config.language.trim(),
+        languages: providerLanguages,
+        defaultVoiceId: config.defaultVoiceId.trim(),
+        useCase: config.useCase,
+        targetChars: Math.trunc(targetChars),
+        maxChars: Math.trunc(maxChars),
+        targetSpeechSeconds,
+        maxSpeechSeconds
+      };
+    }
+    if (duplicateTtsLanguages.length > 0) {
       setIsSaving(false);
-      setSettingsError('TTS timeout must be a positive number.');
+      setSettingsError(`Each language can only be assigned to one TTS route. Duplicates: ${duplicateTtsLanguages.join(', ')}.`);
       return;
+    }
+    if (ttsLanguageOwner.size === 0) {
+      setIsSaving(false);
+      setSettingsError('At least one TTS language route is required.');
+      return;
+    }
+    const visualProvidersPayload: Record<string, {
+      provider: VisualProvider;
+      displayName: string;
+      baseUrl?: string;
+      capabilities: string[];
+      useCase: string;
+      models: Record<string, {
+        displayName: string;
+        kind: VisualModelKind;
+        acceptedAspectRatios: string[];
+        acceptedDurationsSeconds?: number[];
+        maxNativeSpeechSeconds?: number;
+        supportsNativeAudio: boolean;
+        supportsPromptEnhancement: boolean;
+        costTier: 'local' | 'low' | 'medium' | 'high' | 'premium';
+      }>;
+    }> = {};
+    for (const [providerId, config] of Object.entries(visualProviderConfigs)) {
+      const models: Record<string, {
+        displayName: string;
+        kind: VisualModelKind;
+        acceptedAspectRatios: string[];
+        acceptedDurationsSeconds?: number[];
+        maxNativeSpeechSeconds?: number;
+        supportsNativeAudio: boolean;
+        supportsPromptEnhancement: boolean;
+        costTier: 'local' | 'low' | 'medium' | 'high' | 'premium';
+      }> = {};
+      for (const [modelId, model] of Object.entries(config.models)) {
+        const maxNativeSpeechSeconds = model.maxNativeSpeechSeconds.trim()
+          ? Number(model.maxNativeSpeechSeconds)
+          : undefined;
+        if (
+          maxNativeSpeechSeconds !== undefined &&
+          (!Number.isFinite(maxNativeSpeechSeconds) || maxNativeSpeechSeconds <= 0)
+        ) {
+          setIsSaving(false);
+          setSettingsError(`${config.label} ${model.displayName} native speech limit must be a positive number.`);
+          return;
+        }
+        models[modelId] = {
+          displayName: model.displayName,
+          kind: model.kind,
+          acceptedAspectRatios: parseCommaList(model.acceptedAspectRatios),
+          acceptedDurationsSeconds: parseNumberList(model.acceptedDurationsSeconds),
+          maxNativeSpeechSeconds,
+          supportsNativeAudio: model.supportsNativeAudio,
+          supportsPromptEnhancement: model.supportsPromptEnhancement,
+          costTier: model.costTier
+        };
+      }
+      visualProvidersPayload[providerId] = {
+        provider: config.provider,
+        displayName: config.label,
+        baseUrl: config.baseUrl.trim() || undefined,
+        capabilities: parseCommaList(config.capabilities),
+        useCase: config.useCase,
+        models
+      };
     }
     if (!Number.isFinite(idleUnloadMsValue) || idleUnloadMsValue < 0) {
       setIsSaving(false);
@@ -358,11 +899,12 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
           masterPrompt: comfyMasterPrompt,
           workflowFile: comfyWorkflowFile
         },
+        visualGeneration: {
+          providers: visualProvidersPayload
+        },
         tts: {
-          baseUrl: ttsUrl,
-          timeoutUs: ttsTimeoutUsValue,
-          language: ttsLanguage,
-          defaultVoiceId: ttsDefaultVoice
+          providers: ttsProvidersPayload,
+          languageRoutes: ttsLanguageRoutesPayload
         },
         memory: {
           idleUnloadMs: Math.trunc(idleUnloadMsValue)
@@ -489,9 +1031,27 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     { id: 'appearance' as const, label: 'Appearance', hint: 'Themes & mode', icon: Monitor },
     { id: 'llm' as const, label: 'LLM', hint: 'Providers & models', icon: Cpu },
     { id: 'comfy' as const, label: 'ComfyUI', hint: 'Image generation', icon: Server },
+    { id: 'visual' as const, label: 'Visual', hint: 'Image & video models', icon: Film },
     { id: 'tts' as const, label: 'TTS', hint: 'Voices & language', icon: Mic },
     { id: 'runtime' as const, label: 'Runtime', hint: 'Memory behavior', icon: SettingsIcon }
   ];
+
+  const duplicateTtsLanguages = useMemo(() => {
+    const owners = new Map<string, string>();
+    const duplicates = new Set<string>();
+    Object.entries(ttsProviderConfigs).forEach(([providerId, config]) => {
+      parseTtsLanguages(config.languages).forEach((language) => {
+        const key = language.toLowerCase();
+        const owner = owners.get(key);
+        if (owner && owner !== providerId) {
+          duplicates.add(language);
+          return;
+        }
+        owners.set(key, providerId);
+      });
+    });
+    return Array.from(duplicates);
+  }, [ttsProviderConfigs]);
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar bg-background">
@@ -987,7 +1547,89 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
           </div>
           )}
 
-          {/* 4. TTS Configuration */}
+          {/* 4. Visual Generation Configuration */}
+          {activeSection === 'visual' && (
+          <div className="bg-card border border-border rounded-[5px] shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3 bg-[hsl(var(--secondary))]/60">
+              <div className="p-2 bg-cyan-100 dark:bg-cyan-500/10 rounded-[5px] text-cyan-600 dark:text-cyan-400">
+                <Film size={18} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 dark:text-white">Visual Generation</h2>
+                <p className="text-xs text-muted-foreground">Catalog of image and video providers/models available to projects.</p>
+              </div>
+            </div>
+
+            <div className="p-8 space-y-6">
+              <div className="rounded-[5px] border border-border/70 bg-[hsl(var(--secondary))]/40 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Project Scoped</p>
+                  <p className="text-sm font-semibold text-foreground mt-1">Projects choose image and optional video models</p>
+                </div>
+                <p className="text-xs text-muted-foreground max-w-2xl">
+                  Keep provider/model capabilities here. Each project decides whether it uses ComfyUI, the Veo extension, Vertex Veo, or another route.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {Object.entries(visualProviderConfigs).map(([providerId, config]) => {
+                  return (
+                    <div key={providerId} className="border border-border rounded-[5px] bg-[hsl(var(--secondary))]/25 p-4 space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-bold text-foreground">{config.label}</h3>
+                          <p className="text-xs text-muted-foreground mt-1">{config.useCase}</p>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground font-mono">{providerId}</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API URL</label>
+                          <input
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                            value={config.baseUrl}
+                            onChange={(e) => updateVisualProviderConfig(providerId, { baseUrl: e.target.value })}
+                            placeholder={providerId === 'veo_extension' ? 'Extension API URL' : 'Provider API URL'}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Capabilities</label>
+                          <input
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                            value={config.capabilities}
+                            onChange={(e) => updateVisualProviderConfig(providerId, { capabilities: e.target.value })}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {Object.entries(config.models).map(([modelId, model]) => (
+                          <div key={modelId} className="rounded-[5px] border border-border/70 bg-background/40 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-foreground">{model.displayName}</p>
+                                <p className="text-[10px] text-muted-foreground font-mono">{modelId}</p>
+                              </div>
+                              <span className="text-[10px] font-bold uppercase text-muted-foreground">{model.kind}</span>
+                            </div>
+                            <div className="mt-2 text-[11px] text-muted-foreground">
+                              {model.acceptedAspectRatios && <p>Ratios: {model.acceptedAspectRatios}</p>}
+                              {model.acceptedDurationsSeconds && <p>Durations: {model.acceptedDurationsSeconds}s</p>}
+                              {model.maxNativeSpeechSeconds && <p>Native speech: {model.maxNativeSpeechSeconds}s max</p>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          )}
+
+          {/* 5. TTS Configuration */}
           {activeSection === 'tts' && (
           <div className="bg-card border border-border rounded-[5px] shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3 bg-[hsl(var(--secondary))]/60">
@@ -996,52 +1638,131 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
               </div>
               <div>
                 <h2 className="text-lg font-bold text-slate-800 dark:text-white">Text-to-Speech (TTS)</h2>
-                <p className="text-xs text-muted-foreground">Endpoints, defaults, and language.</p>
+                <p className="text-xs text-muted-foreground">Provider endpoints, supported languages, voices, and speech budgets.</p>
               </div>
             </div>
 
             <div className="p-8 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API URL</label>
-                  <input 
-                    className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                    value={ttsUrl}
-                    onChange={(e) => setTtsUrl(e.target.value)}
-                  />
-                  <p className="text-[10px] text-slate-400">Default: http://127.0.0.1:8020</p>
+              <div className="rounded-[5px] border border-border/70 bg-[hsl(var(--secondary))]/40 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Routing Rule</p>
+                  <p className="text-sm font-semibold text-foreground mt-1">One available TTS route per language</p>
                 </div>
+                <p className="text-xs text-muted-foreground max-w-2xl">
+                  Configure which providers can serve each language. Projects choose one of these routes when they are created or edited.
+                </p>
+              </div>
+              {duplicateTtsLanguages.length > 0 && (
+                <div className="rounded-[5px] border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-500">
+                  Duplicate TTS language routes: {duplicateTtsLanguages.join(', ')}.
+                </div>
+              )}
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Timeout (Microseconds)</label>
-                  <input 
-                    type="number"
-                    className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
-                    value={ttsTimeout}
-                    onChange={(e) => setTtsTimeout(e.target.value)}
-                  />
-                </div>
+              <div className="space-y-4">
+                {Object.entries(ttsProviderConfigs).map(([providerId, config]) => (
+                  <div key={providerId} className="border border-border rounded-[5px] bg-[hsl(var(--secondary))]/25 p-4 space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-foreground">{config.label}</h3>
+                        <p className="text-xs text-muted-foreground mt-1">{config.useCase}</p>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground font-mono">{providerId}</p>
+                    </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Globe size={12} /> Default Language
-                  </label>
-                  <input 
-                    className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
-                    value={ttsLanguage}
-                    onChange={(e) => setTtsLanguage(e.target.value)}
-                    placeholder="e.g. pt"
-                  />
-                </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                          <Globe size={12} /> Supported Languages
+                        </label>
+                        <input
+                          className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                          value={config.languages}
+                          onChange={(e) => updateTtsProviderConfig(providerId, { languages: e.target.value })}
+                          placeholder="pt-BR, en-US, es-ES"
+                        />
+                        <p className="text-[10px] text-slate-400">Comma-separated. A language can appear in only one provider.</p>
+                      </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Default Voice ID</label>
-                  <input 
-                    className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
-                    value={ttsDefaultVoice}
-                    onChange={(e) => setTtsDefaultVoice(e.target.value)}
-                  />
-                </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Voice ID</label>
+                        <input
+                          className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                          value={config.defaultVoiceId}
+                          onChange={(e) => updateTtsProviderConfig(providerId, { defaultVoiceId: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API URL</label>
+                        <input
+                          className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                          value={config.baseUrl}
+                          onChange={(e) => updateTtsProviderConfig(providerId, { baseUrl: e.target.value })}
+                          placeholder={providerId === 'xtts' ? 'http://127.0.0.1:8020' : 'Optional until provider is implemented'}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Timeout (Microseconds)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                          value={config.timeoutUs}
+                          onChange={(e) => updateTtsProviderConfig(providerId, { timeoutUs: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Target Chars</label>
+                          <input
+                            type="number"
+                            min="1"
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                            value={config.targetChars}
+                            onChange={(e) => updateTtsProviderConfig(providerId, { targetChars: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Max Chars</label>
+                          <input
+                            type="number"
+                            min="1"
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                            value={config.maxChars}
+                            onChange={(e) => updateTtsProviderConfig(providerId, { maxChars: e.target.value })}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Target Speech (s)</label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="0.1"
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                            value={config.targetSpeechSeconds}
+                            onChange={(e) => updateTtsProviderConfig(providerId, { targetSpeechSeconds: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Max Speech (s)</label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="0.1"
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                            value={config.maxSpeechSeconds}
+                            onChange={(e) => updateTtsProviderConfig(providerId, { maxSpeechSeconds: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -1077,7 +1798,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                   Defines how long the worker stays idle before unloading generation models from memory.
                 </p>
                 <p className="mt-2">
-                  This setting is global: it applies to both image and TTS pipelines (when unload is supported by the active provider).
+                  This setting is global: it applies to project-selected image, video, and TTS routes when the provider supports unload.
                 </p>
                 <p className="mt-2">
                   Use <strong>0</strong> to disable idle-based unload.

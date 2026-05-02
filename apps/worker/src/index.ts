@@ -3861,6 +3861,15 @@ function normalizeTtsRequestText(text: string): string {
     .replace(new RegExp(ellipsisToken, "g"), "...");
 }
 
+function resolveXttsApiBaseUrl(): string {
+  const settings = readAppSettings();
+  return (
+    settings.tts?.providers?.xtts?.baseUrl?.trim() ||
+    settings.tts?.baseUrl?.trim() ||
+    config.xttsApiBaseUrl
+  );
+}
+
 async function isXttsApiAvailable(baseUrl: string): Promise<boolean> {
   try {
     await requestJson(`${normalizeBaseUrl(baseUrl)}/speakers_list`, {
@@ -3911,7 +3920,7 @@ let xttsApiProcess: ReturnType<typeof spawn> | null = null;
 let xttsApiStartPromise: Promise<void> | null = null;
 
 async function startXttsApiServer(): Promise<void> {
-  const baseUrl = normalizeBaseUrl(config.xttsApiBaseUrl);
+  const baseUrl = normalizeBaseUrl(resolveXttsApiBaseUrl());
   const parsed = new URL(baseUrl);
   const host = parsed.hostname;
   const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
@@ -3965,7 +3974,7 @@ async function startXttsApiServer(): Promise<void> {
 }
 
 async function ensureXttsApiServer(): Promise<void> {
-  const baseUrl = normalizeBaseUrl(config.xttsApiBaseUrl);
+  const baseUrl = normalizeBaseUrl(resolveXttsApiBaseUrl());
   if (await isXttsApiAvailable(baseUrl)) {
     return;
   }
@@ -4001,7 +4010,7 @@ async function releaseXttsResources(options: {
     if (!releaseMemory) return;
   }
 
-  const baseUrl = normalizeBaseUrl(config.xttsApiBaseUrl);
+  const baseUrl = normalizeBaseUrl(resolveXttsApiBaseUrl());
   const timeoutMs =
     config.xttsApiRequestTimeoutMs && config.xttsApiRequestTimeoutMs > 0
       ? config.xttsApiRequestTimeoutMs
@@ -4433,7 +4442,7 @@ async function runXttsApiTtsBatch(options: {
   beforeItem?: () => void | Promise<void>;
 }): Promise<XttsApiResult[]> {
   await ensureXttsApiServer();
-  const baseUrl = normalizeBaseUrl(config.xttsApiBaseUrl);
+  const baseUrl = normalizeBaseUrl(resolveXttsApiBaseUrl());
   const results: XttsApiResult[] = [];
   for (const item of options.items) {
     if (options.beforeItem) {
@@ -6461,7 +6470,7 @@ async function generateXttsAudioForBlocks(options: {
 
   logJobEvent("tts_started", job, {
     provider: "xtts",
-    base_url: config.xttsApiBaseUrl,
+    base_url: resolveXttsApiBaseUrl(),
     voice_id: voiceId,
     language: languageId,
     block_count: items.length
@@ -6505,7 +6514,7 @@ async function generateXttsAudioForBlocks(options: {
         path: result.output_path,
         metaJson: JSON.stringify({
           provider: "xtts",
-          base_url: config.xttsApiBaseUrl,
+          base_url: resolveXttsApiBaseUrl(),
           voice_id: voiceId,
           language: languageId,
           duration_s: duration

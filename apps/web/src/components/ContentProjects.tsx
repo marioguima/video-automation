@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   List,
   ListChecks,
+  Mic,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -54,6 +55,38 @@ type ProjectOutput = {
   aspectRatio: AspectRatio;
 };
 
+type ProjectTtsConfig = {
+  mode?: 'external_tts';
+  providerId?: string;
+  provider?: string;
+  language?: string;
+  voiceId?: string | null;
+  targetChars?: number | null;
+  maxChars?: number | null;
+  targetSpeechSeconds?: number | null;
+  maxSpeechSeconds?: number | null;
+};
+
+type ProjectVisualModelConfig = {
+  providerId?: string;
+  provider?: string;
+  providerLabel?: string;
+  modelId?: string;
+  modelLabel?: string;
+  kind?: 'text_to_image' | 'image_to_image' | 'text_to_video' | 'image_to_video';
+  acceptedAspectRatios?: string[] | null;
+  acceptedDurationsSeconds?: number[] | null;
+  maxNativeSpeechSeconds?: number | null;
+  supportsNativeAudio?: boolean;
+  supportsPromptEnhancement?: boolean;
+  costTier?: string | null;
+};
+
+type ProjectVisualGenerationConfig = {
+  image?: ProjectVisualModelConfig | null;
+  video?: ProjectVisualModelConfig | null;
+};
+
 type Project = {
   id: string;
   name: string;
@@ -67,7 +100,74 @@ type Project = {
     defaultDestinations?: Destination[];
     defaultAspectRatios?: AspectRatio[];
     defaultOutputs?: ProjectOutput[];
+    tts?: ProjectTtsConfig;
+    visualGeneration?: ProjectVisualGenerationConfig;
   } | null;
+};
+
+type AppTtsProviderSettings = {
+  provider?: string;
+  displayName?: string;
+  defaultVoiceId?: string | null;
+  targetChars?: number;
+  maxChars?: number;
+  targetSpeechSeconds?: number;
+  maxSpeechSeconds?: number;
+};
+
+type AppTtsLanguageRouteSettings = {
+  providerId?: string;
+  voiceId?: string | null;
+  targetChars?: number;
+  maxChars?: number;
+  targetSpeechSeconds?: number;
+  maxSpeechSeconds?: number;
+};
+
+type TtsRouteOption = {
+  key: string;
+  providerId: string;
+  provider?: string;
+  providerLabel: string;
+  language: string;
+  voiceId?: string | null;
+  targetChars?: number | null;
+  maxChars?: number | null;
+  targetSpeechSeconds?: number | null;
+  maxSpeechSeconds?: number | null;
+};
+
+type AppVisualProviderSettings = {
+  provider?: string;
+  displayName?: string;
+  models?: Record<string, AppVisualModelSettings | undefined>;
+};
+
+type AppVisualModelSettings = {
+  displayName?: string;
+  kind?: 'text_to_image' | 'image_to_image' | 'text_to_video' | 'image_to_video';
+  acceptedAspectRatios?: string[];
+  acceptedDurationsSeconds?: number[];
+  maxNativeSpeechSeconds?: number;
+  supportsNativeAudio?: boolean;
+  supportsPromptEnhancement?: boolean;
+  costTier?: string;
+};
+
+type VisualModelOption = {
+  key: string;
+  providerId: string;
+  provider?: string;
+  providerLabel: string;
+  modelId: string;
+  modelLabel: string;
+  kind: 'text_to_image' | 'image_to_image' | 'text_to_video' | 'image_to_video';
+  acceptedAspectRatios?: string[];
+  acceptedDurationsSeconds?: number[];
+  maxNativeSpeechSeconds?: number | null;
+  supportsNativeAudio?: boolean;
+  supportsPromptEnhancement?: boolean;
+  costTier?: string;
 };
 
 type ContentItem = {
@@ -378,6 +478,64 @@ function uniqueValues<T extends string>(values: T[]): T[] {
   return Array.from(new Set(values));
 }
 
+function makeTtsRouteKey(providerId: string, language: string): string {
+  return `${providerId}::${language}`;
+}
+
+function getProjectTtsRouteKey(project: Project): string {
+  const providerId = project.metadata?.tts?.providerId;
+  const language = project.metadata?.tts?.language ?? project.language;
+  return providerId && language ? makeTtsRouteKey(providerId, language) : '';
+}
+
+function formatTtsRouteOption(option: TtsRouteOption): string {
+  return `${option.providerLabel} - ${option.language}`;
+}
+
+function buildProjectTtsConfig(option: TtsRouteOption): ProjectTtsConfig {
+  return {
+    mode: 'external_tts',
+    providerId: option.providerId,
+    provider: option.provider,
+    language: option.language,
+    voiceId: option.voiceId ?? null,
+    targetChars: option.targetChars ?? null,
+    maxChars: option.maxChars ?? null,
+    targetSpeechSeconds: option.targetSpeechSeconds ?? null,
+    maxSpeechSeconds: option.maxSpeechSeconds ?? null
+  };
+}
+
+function makeVisualModelKey(providerId: string, modelId: string): string {
+  return `${providerId}::${modelId}`;
+}
+
+function getProjectVisualModelKey(project: Project, kind: 'image' | 'video'): string {
+  const config = kind === 'image' ? project.metadata?.visualGeneration?.image : project.metadata?.visualGeneration?.video;
+  return config?.providerId && config?.modelId ? makeVisualModelKey(config.providerId, config.modelId) : '';
+}
+
+function formatVisualModelOption(option: VisualModelOption): string {
+  return `${option.providerLabel} - ${option.modelLabel}`;
+}
+
+function buildProjectVisualModelConfig(option: VisualModelOption): ProjectVisualModelConfig {
+  return {
+    providerId: option.providerId,
+    provider: option.provider,
+    providerLabel: option.providerLabel,
+    modelId: option.modelId,
+    modelLabel: option.modelLabel,
+    kind: option.kind,
+    acceptedAspectRatios: option.acceptedAspectRatios ?? null,
+    acceptedDurationsSeconds: option.acceptedDurationsSeconds ?? null,
+    maxNativeSpeechSeconds: option.maxNativeSpeechSeconds ?? null,
+    supportsNativeAudio: option.supportsNativeAudio ?? false,
+    supportsPromptEnhancement: option.supportsPromptEnhancement ?? false,
+    costTier: option.costTier ?? null
+  };
+}
+
 function getOutputFormatsByIds(outputIds: string[]): OutputFormat[] {
   const selectedIds = new Set(outputIds);
   return OUTPUT_FORMATS.filter((format) => selectedIds.has(format.id));
@@ -522,6 +680,12 @@ export default function ContentProjects({
   const [projectName, setProjectName] = useState('Novo projeto');
   const [projectDescription, setProjectDescription] = useState('');
   const [selectedOutputIds, setSelectedOutputIds] = useState<string[]>(DEFAULT_PROJECT_OUTPUT_IDS);
+  const [ttsRouteOptions, setTtsRouteOptions] = useState<TtsRouteOption[]>([]);
+  const [imageModelOptions, setImageModelOptions] = useState<VisualModelOption[]>([]);
+  const [videoModelOptions, setVideoModelOptions] = useState<VisualModelOption[]>([]);
+  const [selectedTtsRouteKey, setSelectedTtsRouteKey] = useState('');
+  const [selectedImageModelKey, setSelectedImageModelKey] = useState('');
+  const [selectedVideoModelKey, setSelectedVideoModelKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState('');
@@ -542,6 +706,21 @@ export default function ContentProjects({
   const selectedOutputFormats = useMemo(
     () => getOutputFormatsByIds(selectedOutputIds),
     [selectedOutputIds]
+  );
+
+  const selectedTtsRoute = useMemo(
+    () => ttsRouteOptions.find((option) => option.key === selectedTtsRouteKey) ?? null,
+    [selectedTtsRouteKey, ttsRouteOptions]
+  );
+
+  const selectedImageModel = useMemo(
+    () => imageModelOptions.find((option) => option.key === selectedImageModelKey) ?? null,
+    [imageModelOptions, selectedImageModelKey]
+  );
+
+  const selectedVideoModel = useMemo(
+    () => videoModelOptions.find((option) => option.key === selectedVideoModelKey) ?? null,
+    [selectedVideoModelKey, videoModelOptions]
   );
 
   const selectedChannelCount = useMemo(
@@ -636,6 +815,71 @@ export default function ContentProjects({
     setProjects(data);
   };
 
+  const loadGenerationSettings = async () => {
+    const data = await apiGet<{
+      tts?: {
+        providers?: Record<string, AppTtsProviderSettings | undefined>;
+        languageRoutes?: Record<string, AppTtsLanguageRouteSettings | undefined>;
+      };
+      visualGeneration?: {
+        providers?: Record<string, AppVisualProviderSettings | undefined>;
+      };
+    }>('/settings', { cacheMs: 0, dedupe: false });
+
+    const nextTtsRoutes: TtsRouteOption[] = [];
+    Object.entries(data.tts?.languageRoutes ?? {}).forEach(([language, route]) => {
+      if (!route?.providerId) return;
+      const provider = data.tts?.providers?.[route.providerId];
+      nextTtsRoutes.push({
+        key: makeTtsRouteKey(route.providerId, language),
+        providerId: route.providerId,
+        provider: provider?.provider,
+        providerLabel: provider?.displayName ?? route.providerId,
+        language,
+        voiceId: route.voiceId ?? provider?.defaultVoiceId ?? null,
+        targetChars: route.targetChars ?? provider?.targetChars ?? null,
+        maxChars: route.maxChars ?? provider?.maxChars ?? null,
+        targetSpeechSeconds: route.targetSpeechSeconds ?? provider?.targetSpeechSeconds ?? null,
+        maxSpeechSeconds: route.maxSpeechSeconds ?? provider?.maxSpeechSeconds ?? null
+      });
+    });
+
+    const nextImageModels: VisualModelOption[] = [];
+    const nextVideoModels: VisualModelOption[] = [];
+    Object.entries(data.visualGeneration?.providers ?? {}).forEach(([providerId, provider]) => {
+      if (!provider) return;
+      Object.entries(provider.models ?? {}).forEach(([modelId, model]) => {
+        if (!model?.kind) return;
+        const option: VisualModelOption = {
+          key: makeVisualModelKey(providerId, modelId),
+          providerId,
+          provider: provider.provider,
+          providerLabel: provider.displayName ?? providerId,
+          modelId,
+          modelLabel: model.displayName ?? modelId,
+          kind: model.kind,
+          acceptedAspectRatios: model.acceptedAspectRatios,
+          acceptedDurationsSeconds: model.acceptedDurationsSeconds,
+          maxNativeSpeechSeconds: model.maxNativeSpeechSeconds ?? null,
+          supportsNativeAudio: model.supportsNativeAudio,
+          supportsPromptEnhancement: model.supportsPromptEnhancement,
+          costTier: model.costTier
+        };
+        if (model.kind === 'text_to_image' || model.kind === 'image_to_image') {
+          nextImageModels.push(option);
+        } else {
+          nextVideoModels.push(option);
+        }
+      });
+    });
+
+    setTtsRouteOptions(nextTtsRoutes);
+    setImageModelOptions(nextImageModels);
+    setVideoModelOptions(nextVideoModels);
+    setSelectedTtsRouteKey((current) => current || nextTtsRoutes[0]?.key || '');
+    setSelectedImageModelKey((current) => current || nextImageModels[0]?.key || '');
+  };
+
   const loadItems = async (projectId: string) => {
     const data = await apiGet<ContentItem[]>(`/content-projects/${projectId}/items`, { cacheMs: 0, dedupe: false });
     setItems(data);
@@ -643,6 +887,7 @@ export default function ContentProjects({
 
   useEffect(() => {
     loadProjects().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    loadGenerationSettings().catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
   useEffect(() => {
@@ -692,6 +937,9 @@ export default function ContentProjects({
     setProjectName('Novo projeto');
     setProjectDescription('');
     setSelectedOutputIds(DEFAULT_PROJECT_OUTPUT_IDS);
+    setSelectedTtsRouteKey(ttsRouteOptions[0]?.key ?? '');
+    setSelectedImageModelKey(imageModelOptions[0]?.key ?? '');
+    setSelectedVideoModelKey('');
     setScreen('create');
   };
 
@@ -701,11 +949,22 @@ export default function ContentProjects({
     setProjectName(project.name);
     setProjectDescription(project.description ?? '');
     setSelectedOutputIds(getProjectOutputIds(project));
+    setSelectedTtsRouteKey(getProjectTtsRouteKey(project) || ttsRouteOptions[0]?.key || '');
+    setSelectedImageModelKey(getProjectVisualModelKey(project, 'image') || imageModelOptions[0]?.key || '');
+    setSelectedVideoModelKey(getProjectVisualModelKey(project, 'video'));
     setScreen('create');
   };
 
   const saveProject = async () => {
     if (!projectName.trim()) return;
+    if (!selectedTtsRoute) {
+      setError('Select a TTS route for this project.');
+      return;
+    }
+    if (!selectedImageModel) {
+      setError('Select an image generation model for this project.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -719,6 +978,11 @@ export default function ContentProjects({
           defaultDestinations: uniqueValues(outputFormats.map((format) => format.destination)),
           defaultAspectRatios: uniqueValues(outputFormats.map((format) => format.aspectRatio)),
           defaultOutputs: outputFormats.map(toProjectOutput),
+          tts: buildProjectTtsConfig(selectedTtsRoute),
+          visualGeneration: {
+            image: buildProjectVisualModelConfig(selectedImageModel),
+            video: selectedVideoModel ? buildProjectVisualModelConfig(selectedVideoModel) : null
+          },
           product: 'flowshopy'
         }
       };
@@ -1321,6 +1585,69 @@ export default function ContentProjects({
             />
 
             <div className="border border-border rounded-md bg-background p-4 space-y-4">
+              <div>
+                <h3 className="font-bold">Generation routes</h3>
+                <p className="text-sm text-muted-foreground">Project-level choices for voice, image generation, and optional video generation.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <label className="space-y-2">
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+                    <Mic size={13} /> TTS route
+                  </span>
+                  <select
+                    value={selectedTtsRouteKey}
+                    onChange={(event) => setSelectedTtsRouteKey(event.target.value)}
+                    className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
+                  >
+                    {ttsRouteOptions.length === 0 && <option value="">No TTS routes configured</option>}
+                    {ttsRouteOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {formatTtsRouteOption(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+                    <Image size={13} /> Image model
+                  </span>
+                  <select
+                    value={selectedImageModelKey}
+                    onChange={(event) => setSelectedImageModelKey(event.target.value)}
+                    className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
+                  >
+                    {imageModelOptions.length === 0 && <option value="">No image models configured</option>}
+                    {imageModelOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {formatVisualModelOption(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+                    <Video size={13} /> Video model
+                  </span>
+                  <select
+                    value={selectedVideoModelKey}
+                    onChange={(event) => setSelectedVideoModelKey(event.target.value)}
+                    className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
+                  >
+                    <option value="">No video generation</option>
+                    {videoModelOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {formatVisualModelOption(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="border border-border rounded-md bg-background p-4 space-y-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h3 className="font-bold">Default outputs</h3>
@@ -1404,7 +1731,7 @@ export default function ContentProjects({
               >
                 Cancel
               </Button>
-              <Button onClick={saveProject} disabled={busy || !projectName.trim()} className="gap-2">
+              <Button onClick={saveProject} disabled={busy || !projectName.trim() || !selectedTtsRoute || !selectedImageModel} className="gap-2">
                 <Plus size={16} /> {editingProjectId ? 'Save Changes' : 'Save Project'}
               </Button>
             </div>
@@ -1510,6 +1837,21 @@ export default function ContentProjects({
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-1.5">
+                    {selectedProject.metadata?.tts?.providerId && selectedProject.metadata?.tts?.language && (
+                      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+                        TTS {selectedProject.metadata.tts.providerId} / {selectedProject.metadata.tts.language}
+                      </Badge>
+                    )}
+                    {selectedProject.metadata?.visualGeneration?.image?.providerId && selectedProject.metadata?.visualGeneration?.image?.modelId && (
+                      <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+                        Image {selectedProject.metadata.visualGeneration.image.providerId} / {selectedProject.metadata.visualGeneration.image.modelId}
+                      </Badge>
+                    )}
+                    {selectedProject.metadata?.visualGeneration?.video?.providerId && selectedProject.metadata?.visualGeneration?.video?.modelId && (
+                      <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
+                        Video {selectedProject.metadata.visualGeneration.video.providerId} / {selectedProject.metadata.visualGeneration.video.modelId}
+                      </Badge>
+                    )}
                     {selectedProjectVideoFormats > 0 && (
                       <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
                         Video formats {selectedProjectVideoFormats}

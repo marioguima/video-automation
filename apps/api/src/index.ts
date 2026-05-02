@@ -31,7 +31,8 @@ import {
   loadVoiceIndex,
   findVoiceById,
   blockSlideDir,
-  type AppSettings
+  type AppSettings,
+  type VisualGenerationCapability
 } from "@vizlec/shared";
 import { createPrismaClient } from "@vizlec/db";
 import { buildEndpointPurposeExplanation } from "./openapi-endpoint-explanations.js";
@@ -4248,11 +4249,10 @@ fastify.get(
         availableWorkflows: workflows
       },
       tts: {
-        baseUrl: current.tts?.baseUrl ?? config.xttsApiBaseUrl,
-        timeoutUs: current.tts?.timeoutUs ?? Number(process.env.TTS_TIMEOUT_US ?? 5000000),
-        language: current.tts?.language ?? null,
-        defaultVoiceId: current.tts?.defaultVoiceId ?? null
+        providers: current.tts?.providers ?? {},
+        languageRoutes: current.tts?.languageRoutes ?? {}
       },
+      visualGeneration: current.visualGeneration ?? { providers: {} },
       memory: {
         idleUnloadMs: current.memory?.idleUnloadMs ?? 15 * 60 * 1000
       },
@@ -4362,16 +4362,276 @@ fastify.patch(
       };
     }
     if (body.tts) {
+      const validatePositive = (value: number | undefined, field: string) => {
+        if (value === undefined) return;
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error(`${field} must be a positive number`);
+        }
+      };
+      const normalizePositiveInteger = (value: number | undefined): number | undefined =>
+        value !== undefined ? Math.trunc(value) : undefined;
+      const normalizeLanguageList = (value: unknown, field: string): string[] => {
+        if (value === undefined) return [];
+        if (!Array.isArray(value)) {
+          throw new Error(`${field} must be an array of language codes`);
+        }
+        const seen = new Set<string>();
+        const languages: string[] = [];
+        for (const item of value) {
+          if (typeof item !== "string") {
+            throw new Error(`${field} must contain only strings`);
+          }
+          const language = item.trim();
+          if (!language) continue;
+          const key = language.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          languages.push(language);
+        }
+        return languages;
+      };
       const timeoutUs = body.tts.timeoutUs;
       if (timeoutUs !== undefined && (!Number.isFinite(timeoutUs) || timeoutUs <= 0)) {
         return reply.code(400).send({ error: "tts.timeoutUs must be a positive number" });
       }
+      try {
+        validatePositive(body.tts.targetChars, "tts.targetChars");
+        validatePositive(body.tts.maxChars, "tts.maxChars");
+        validatePositive(body.tts.targetSpeechSeconds, "tts.targetSpeechSeconds");
+        validatePositive(body.tts.maxSpeechSeconds, "tts.maxSpeechSeconds");
+        for (const [providerId, providerSettings] of Object.entries(body.tts.providers ?? {})) {
+          if (!providerSettings) continue;
+          normalizeLanguageList(providerSettings.languages, `tts.providers.${providerId}.languages`);
+          validatePositive(providerSettings.timeoutUs, `tts.providers.${providerId}.timeoutUs`);
+          validatePositive(providerSettings.targetChars, `tts.providers.${providerId}.targetChars`);
+          validatePositive(providerSettings.maxChars, `tts.providers.${providerId}.maxChars`);
+          validatePositive(providerSettings.targetSpeechSeconds, `tts.providers.${providerId}.targetSpeechSeconds`);
+          validatePositive(providerSettings.maxSpeechSeconds, `tts.providers.${providerId}.maxSpeechSeconds`);
+        }
+        for (const [language, routeSettings] of Object.entries(body.tts.languageRoutes ?? {})) {
+          if (!routeSettings) continue;
+          if (!language.trim()) {
+            throw new Error("tts.languageRoutes keys must be non-empty language codes");
+          }
+          validatePositive(routeSettings.targetChars, `tts.languageRoutes.${language}.targetChars`);
+          validatePositive(routeSettings.maxChars, `tts.languageRoutes.${language}.maxChars`);
+          validatePositive(routeSettings.targetSpeechSeconds, `tts.languageRoutes.${language}.targetSpeechSeconds`);
+          validatePositive(routeSettings.maxSpeechSeconds, `tts.languageRoutes.${language}.maxSpeechSeconds`);
+        }
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message });
+      }
+
+      const providers = { ...(current.tts?.providers ?? {}) };
+      for (const [providerId, providerSettings] of Object.entries(body.tts.providers ?? {})) {
+        if (!providerSettings) continue;
+        providers[providerId] = {
+          ...(providers[providerId] ?? {}),
+          provider: providerSettings.provider ?? providers[providerId]?.provider,
+          displayName: providerSettings.displayName ?? providers[providerId]?.displayName,
+          baseUrl: providerSettings.baseUrl ?? providers[providerId]?.baseUrl,
+          timeoutUs: normalizePositiveInteger(providerSettings.timeoutUs) ?? providers[providerId]?.timeoutUs,
+          language: providerSettings.language ?? providers[providerId]?.language,
+          languages:
+            providerSettings.languages !== undefined
+              ? normalizeLanguageList(providerSettings.languages, `tts.providers.${providerId}.languages`)
+              : providers[providerId]?.languages,
+          defaultVoiceId: providerSettings.defaultVoiceId ?? providers[providerId]?.defaultVoiceId,
+          useCase: providerSettings.useCase ?? providers[providerId]?.useCase,
+          targetChars: normalizePositiveInteger(providerSettings.targetChars) ?? providers[providerId]?.targetChars,
+          maxChars: normalizePositiveInteger(providerSettings.maxChars) ?? providers[providerId]?.maxChars,
+          targetSpeechSeconds:
+            providerSettings.targetSpeechSeconds !== undefined
+              ? providerSettings.targetSpeechSeconds
+              : providers[providerId]?.targetSpeechSeconds,
+          maxSpeechSeconds:
+            providerSettings.maxSpeechSeconds !== undefined
+              ? providerSettings.maxSpeechSeconds
+              : providers[providerId]?.maxSpeechSeconds
+        };
+      }
+
+      const languageRoutes =
+        body.tts.languageRoutes !== undefined
+          ? {}
+          : { ...(current.tts?.languageRoutes ?? {}) };
+      for (const [language, routeSettings] of Object.entries(body.tts.languageRoutes ?? {})) {
+        if (!routeSettings) continue;
+        languageRoutes[language] = {
+          ...(languageRoutes[language] ?? {}),
+          providerId: routeSettings.providerId ?? languageRoutes[language]?.providerId,
+          voiceId: routeSettings.voiceId ?? languageRoutes[language]?.voiceId,
+          targetChars: normalizePositiveInteger(routeSettings.targetChars) ?? languageRoutes[language]?.targetChars,
+          maxChars: normalizePositiveInteger(routeSettings.maxChars) ?? languageRoutes[language]?.maxChars,
+          targetSpeechSeconds:
+            routeSettings.targetSpeechSeconds !== undefined
+              ? routeSettings.targetSpeechSeconds
+              : languageRoutes[language]?.targetSpeechSeconds,
+          maxSpeechSeconds:
+            routeSettings.maxSpeechSeconds !== undefined
+              ? routeSettings.maxSpeechSeconds
+              : languageRoutes[language]?.maxSpeechSeconds
+        };
+      }
+
+      const languageOwners = new Map<string, string>();
+      for (const [providerId, providerSettings] of Object.entries(providers)) {
+        if (!providerSettings) continue;
+        for (const language of providerSettings.languages ?? []) {
+          const key = language.trim().toLowerCase();
+          if (!key) continue;
+          const existingProviderId = languageOwners.get(key);
+          if (existingProviderId && existingProviderId !== providerId) {
+            return reply.code(400).send({
+              error: `TTS language '${language}' is assigned to both '${existingProviderId}' and '${providerId}'`
+            });
+          }
+          languageOwners.set(key, providerId);
+          if (languageRoutes[language]?.providerId && languageRoutes[language]?.providerId !== providerId) {
+            return reply.code(400).send({
+              error: `tts.languageRoutes.${language}.providerId must match the TTS provider that owns the language`
+            });
+          }
+          const providerVoiceId =
+            typeof providerSettings.defaultVoiceId === "string" ? providerSettings.defaultVoiceId.trim() : "";
+          const routeVoiceId =
+            typeof languageRoutes[language]?.voiceId === "string" ? languageRoutes[language]?.voiceId.trim() : "";
+          if (!providerVoiceId && !routeVoiceId) {
+            return reply.code(400).send({
+              error: `tts.providers.${providerId}.defaultVoiceId is required when language '${language}' is assigned`
+            });
+          }
+          if (!languageRoutes[language]) {
+            languageRoutes[language] = {
+              providerId,
+              voiceId: providerSettings.defaultVoiceId ?? null,
+              targetChars: providerSettings.targetChars,
+              maxChars: providerSettings.maxChars,
+              targetSpeechSeconds: providerSettings.targetSpeechSeconds,
+              maxSpeechSeconds: providerSettings.maxSpeechSeconds
+            };
+          } else if (!languageRoutes[language]?.voiceId && providerSettings.defaultVoiceId) {
+            languageRoutes[language] = {
+              ...languageRoutes[language],
+              voiceId: providerSettings.defaultVoiceId
+            };
+          }
+        }
+      }
+      for (const [language, routeSettings] of Object.entries(languageRoutes)) {
+        if (!routeSettings?.providerId) continue;
+        if (!providers[routeSettings.providerId]) {
+          return reply.code(400).send({
+            error: `tts.languageRoutes.${language}.providerId must reference a configured TTS provider`
+          });
+        }
+      }
+
       next.tts = {
-        baseUrl: body.tts.baseUrl ?? current.tts?.baseUrl,
-        timeoutUs: timeoutUs !== undefined ? Math.trunc(timeoutUs) : current.tts?.timeoutUs,
-        language: body.tts.language ?? current.tts?.language,
-        defaultVoiceId: body.tts.defaultVoiceId ?? current.tts?.defaultVoiceId
+        providers,
+        languageRoutes
       };
+    }
+    if (body.visualGeneration) {
+      const normalizeStringList = (value: unknown, field: string): string[] | undefined => {
+        if (value === undefined) return undefined;
+        if (!Array.isArray(value)) {
+          throw new Error(`${field} must be an array`);
+        }
+        const seen = new Set<string>();
+        const result: string[] = [];
+        for (const item of value) {
+          if (typeof item !== "string") {
+            throw new Error(`${field} must contain only strings`);
+          }
+          const normalized = item.trim();
+          if (!normalized) continue;
+          const key = normalized.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          result.push(normalized);
+        }
+        return result;
+      };
+      const normalizeNumberList = (value: unknown, field: string): number[] | undefined => {
+        if (value === undefined) return undefined;
+        if (!Array.isArray(value)) {
+          throw new Error(`${field} must be an array`);
+        }
+        const result: number[] = [];
+        for (const item of value) {
+          if (typeof item !== "number" || !Number.isFinite(item) || item <= 0) {
+            throw new Error(`${field} must contain only positive numbers`);
+          }
+          result.push(item);
+        }
+        return result;
+      };
+      const providers = { ...(current.visualGeneration?.providers ?? {}) };
+      try {
+        for (const [providerId, providerSettings] of Object.entries(body.visualGeneration.providers ?? {})) {
+          if (!providerSettings) continue;
+          const existingProvider = providers[providerId] ?? {};
+          const models = { ...(existingProvider.models ?? {}) };
+          for (const [modelId, modelSettings] of Object.entries(providerSettings.models ?? {})) {
+            if (!modelSettings) continue;
+            const existingModel = models[modelId] ?? {};
+            const acceptedDurationsSeconds = normalizeNumberList(
+              modelSettings.acceptedDurationsSeconds,
+              `visualGeneration.providers.${providerId}.models.${modelId}.acceptedDurationsSeconds`
+            );
+            const maxNativeSpeechSeconds = modelSettings.maxNativeSpeechSeconds;
+            if (
+              maxNativeSpeechSeconds !== undefined &&
+              (!Number.isFinite(maxNativeSpeechSeconds) || maxNativeSpeechSeconds <= 0)
+            ) {
+              throw new Error(
+                `visualGeneration.providers.${providerId}.models.${modelId}.maxNativeSpeechSeconds must be a positive number`
+              );
+            }
+            models[modelId] = {
+              ...existingModel,
+              displayName: modelSettings.displayName ?? existingModel.displayName,
+              kind: modelSettings.kind ?? existingModel.kind,
+              acceptedAspectRatios:
+                normalizeStringList(
+                  modelSettings.acceptedAspectRatios,
+                  `visualGeneration.providers.${providerId}.models.${modelId}.acceptedAspectRatios`
+                ) ?? existingModel.acceptedAspectRatios,
+              acceptedDurationsSeconds: acceptedDurationsSeconds ?? existingModel.acceptedDurationsSeconds,
+              maxNativeSpeechSeconds:
+                maxNativeSpeechSeconds !== undefined ? maxNativeSpeechSeconds : existingModel.maxNativeSpeechSeconds,
+              supportsNativeAudio:
+                modelSettings.supportsNativeAudio !== undefined
+                  ? modelSettings.supportsNativeAudio
+                  : existingModel.supportsNativeAudio,
+              supportsPromptEnhancement:
+                modelSettings.supportsPromptEnhancement !== undefined
+                  ? modelSettings.supportsPromptEnhancement
+                  : existingModel.supportsPromptEnhancement,
+              costTier: modelSettings.costTier ?? existingModel.costTier,
+              notes: modelSettings.notes ?? existingModel.notes
+            };
+          }
+          providers[providerId] = {
+            ...existingProvider,
+            provider: providerSettings.provider ?? existingProvider.provider,
+            displayName: providerSettings.displayName ?? existingProvider.displayName,
+            baseUrl: providerSettings.baseUrl ?? existingProvider.baseUrl,
+            capabilities:
+              (normalizeStringList(
+                providerSettings.capabilities,
+                `visualGeneration.providers.${providerId}.capabilities`
+              ) as VisualGenerationCapability[] | undefined) ??
+              existingProvider.capabilities as VisualGenerationCapability[] | undefined,
+            useCase: providerSettings.useCase ?? existingProvider.useCase,
+            models
+          };
+        }
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message });
+      }
+      next.visualGeneration = { providers };
     }
     if (body.memory) {
       const idleUnloadMs = body.memory.idleUnloadMs;
@@ -5235,6 +5495,135 @@ function parseJsonRecord(value: string | null | undefined): Record<string, unkno
   }
 }
 
+function normalizeProjectTtsMetadata(value: unknown): { value?: Record<string, unknown>; error?: string } {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: "metadata.tts must be an object" };
+  }
+  const raw = value as Record<string, unknown>;
+  const providerId = normalizeOptionalText(raw.providerId);
+  const languageInput = normalizeOptionalText(raw.language);
+  if (!providerId) return { error: "metadata.tts.providerId is required" };
+  if (!languageInput) return { error: "metadata.tts.language is required" };
+
+  const settings = readAppSettings();
+  const provider = settings.tts?.providers?.[providerId];
+  if (!provider) {
+    return { error: `metadata.tts.providerId '${providerId}' is not configured` };
+  }
+
+  const routeEntry = Object.entries(settings.tts?.languageRoutes ?? {}).find(
+    ([language, route]) => language.toLowerCase() === languageInput.toLowerCase() && route?.providerId === providerId
+  );
+  if (!routeEntry) {
+    return { error: `metadata.tts language '${languageInput}' is not assigned to provider '${providerId}'` };
+  }
+  const [language, route] = routeEntry;
+  return {
+    value: {
+      mode: "external_tts",
+      providerId,
+      provider: provider.provider ?? providerId,
+      language,
+      voiceId: route?.voiceId ?? provider.defaultVoiceId ?? null,
+      targetChars: route?.targetChars ?? provider.targetChars ?? null,
+      maxChars: route?.maxChars ?? provider.maxChars ?? null,
+      targetSpeechSeconds: route?.targetSpeechSeconds ?? provider.targetSpeechSeconds ?? null,
+      maxSpeechSeconds: route?.maxSpeechSeconds ?? provider.maxSpeechSeconds ?? null
+    }
+  };
+}
+
+function normalizeProjectVisualModelMetadata(
+  value: unknown,
+  field: "image" | "video",
+  required: boolean
+): { value?: Record<string, unknown> | null; error?: string } {
+  if (value === undefined || value === null) {
+    return required ? { error: `metadata.visualGeneration.${field} is required` } : { value: null };
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: `metadata.visualGeneration.${field} must be an object` };
+  }
+  const raw = value as Record<string, unknown>;
+  const providerId = normalizeOptionalText(raw.providerId);
+  const modelId = normalizeOptionalText(raw.modelId);
+  if (!providerId) return { error: `metadata.visualGeneration.${field}.providerId is required` };
+  if (!modelId) return { error: `metadata.visualGeneration.${field}.modelId is required` };
+
+  const settings = readAppSettings();
+  const provider = settings.visualGeneration?.providers?.[providerId];
+  if (!provider) {
+    return { error: `metadata.visualGeneration.${field}.providerId '${providerId}' is not configured` };
+  }
+  const model = provider.models?.[modelId];
+  if (!model) {
+    return { error: `metadata.visualGeneration.${field}.modelId '${modelId}' is not configured for '${providerId}'` };
+  }
+  const kind = model.kind ?? (field === "image" ? "text_to_image" : "image_to_video");
+  const imageKinds = new Set(["text_to_image", "image_to_image"]);
+  const videoKinds = new Set(["text_to_video", "image_to_video"]);
+  if (field === "image" && !imageKinds.has(kind)) {
+    return { error: `metadata.visualGeneration.image.modelId '${modelId}' is not an image generation model` };
+  }
+  if (field === "video" && !videoKinds.has(kind)) {
+    return { error: `metadata.visualGeneration.video.modelId '${modelId}' is not a video generation model` };
+  }
+  return {
+    value: {
+      providerId,
+      provider: provider.provider ?? providerId,
+      providerLabel: provider.displayName ?? providerId,
+      modelId,
+      modelLabel: model.displayName ?? modelId,
+      kind,
+      acceptedAspectRatios: model.acceptedAspectRatios ?? null,
+      acceptedDurationsSeconds: model.acceptedDurationsSeconds ?? null,
+      maxNativeSpeechSeconds: model.maxNativeSpeechSeconds ?? null,
+      supportsNativeAudio: model.supportsNativeAudio ?? false,
+      supportsPromptEnhancement: model.supportsPromptEnhancement ?? false,
+      costTier: model.costTier ?? null
+    }
+  };
+}
+
+function normalizeProjectVisualGenerationMetadata(value: unknown): { value?: Record<string, unknown>; error?: string } {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: "metadata.visualGeneration must be an object" };
+  }
+  const raw = value as Record<string, unknown>;
+  const image = normalizeProjectVisualModelMetadata(raw.image, "image", true);
+  if (image.error) return { error: image.error };
+  const video = normalizeProjectVisualModelMetadata(raw.video, "video", false);
+  if (video.error) return { error: video.error };
+  return {
+    value: {
+      image: image.value,
+      video: video.value ?? null
+    }
+  };
+}
+
+function normalizeContentProjectMetadata(value: unknown): { metadataJson?: string; error?: string } {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: "metadata must be an object" };
+  }
+  const metadata = { ...(value as Record<string, unknown>) };
+  const tts = normalizeProjectTtsMetadata(metadata.tts);
+  if (tts.error) return { error: tts.error };
+  if (tts.value) {
+    metadata.tts = tts.value;
+  }
+  const visualGeneration = normalizeProjectVisualGenerationMetadata(metadata.visualGeneration);
+  if (visualGeneration.error) return { error: visualGeneration.error };
+  if (visualGeneration.value) {
+    metadata.visualGeneration = visualGeneration.value;
+  }
+  return { metadataJson: JSON.stringify(metadata) };
+}
+
 function normalizeContentProjectInput(body: unknown):
   | {
       name: string;
@@ -5251,12 +5640,14 @@ function normalizeContentProjectInput(body: unknown):
   const name = normalizeOptionalText(payload.name);
   if (!name) return { error: "name is required" };
   const status = normalizeOptionalText(payload.status) ?? "draft";
+  const metadata = normalizeContentProjectMetadata(payload.metadata);
+  if (metadata.error) return { error: metadata.error };
   return {
     name,
     description: normalizeOptionalText(payload.description),
     language: normalizeOptionalText(payload.language),
     status,
-    metadataJson: normalizeJsonRecord(payload.metadata)
+    metadataJson: metadata.metadataJson
   };
 }
 
@@ -5625,10 +6016,10 @@ fastify.patch(
     if (payload.metadata !== undefined) {
       if (payload.metadata === null) {
         data.metadataJson = null;
-      } else if (typeof payload.metadata === "object" && !Array.isArray(payload.metadata)) {
-        data.metadataJson = JSON.stringify(payload.metadata);
       } else {
-        return reply.code(400).send({ error: "metadata must be an object" });
+        const metadata = normalizeContentProjectMetadata(payload.metadata);
+        if (metadata.error) return reply.code(400).send({ error: metadata.error });
+        data.metadataJson = metadata.metadataJson;
       }
     }
 

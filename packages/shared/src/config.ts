@@ -165,7 +165,7 @@ export function getConfig(): AppConfig {
     appSettingsPath,
     appSettingsTemplatePath,
     qwenTtsBaseUrl: process.env.QWEN_TTS_BASE_URL ?? "http://127.0.0.1:9000",
-    ttsProvider: process.env.TTS_PROVIDER ?? "qwen",
+    ttsProvider: process.env.TTS_PROVIDER ?? "xtts",
     ttsVoicesDir,
     ttsVoicesIndex,
     ttsSettingsPath,

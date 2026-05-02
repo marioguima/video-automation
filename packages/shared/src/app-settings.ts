@@ -8,6 +8,106 @@ export type LlmProviderSettings = {
   timeoutMs?: number;
 };
 
+export type TtsProviderKind =
+  | "xtts"
+  | "chatterbox"
+  | "qwen"
+  | "elevenlabs"
+  | "fish_speech"
+  | "f5_tts"
+  | "gpt_sovits"
+  | "openai"
+  | "custom";
+
+export type TtsProviderSettings = {
+  provider?: TtsProviderKind;
+  displayName?: string;
+  baseUrl?: string;
+  timeoutUs?: number;
+  defaultVoiceId?: string | null;
+  language?: string | null;
+  languages?: string[];
+  useCase?: string;
+  targetChars?: number;
+  maxChars?: number;
+  targetSpeechSeconds?: number;
+  maxSpeechSeconds?: number;
+};
+
+export type TtsLanguageRouteSettings = {
+  providerId?: string;
+  voiceId?: string | null;
+  targetChars?: number;
+  maxChars?: number;
+  targetSpeechSeconds?: number;
+  maxSpeechSeconds?: number;
+};
+
+export type VisualGenerationProviderKind = "comfyui" | "veo_extension" | "vertex_veo" | "custom";
+
+export type VisualGenerationCapability =
+  | "text_to_image"
+  | "image_to_image"
+  | "text_to_video"
+  | "image_to_video"
+  | "native_audio";
+
+export type VisualGenerationModelKind =
+  | "text_to_image"
+  | "image_to_image"
+  | "text_to_video"
+  | "image_to_video";
+
+export type VisualGenerationModelSettings = {
+  displayName?: string;
+  kind?: VisualGenerationModelKind;
+  acceptedAspectRatios?: string[];
+  acceptedDurationsSeconds?: number[];
+  maxNativeSpeechSeconds?: number;
+  supportsNativeAudio?: boolean;
+  supportsPromptEnhancement?: boolean;
+  costTier?: "local" | "low" | "medium" | "high" | "premium";
+  notes?: string;
+};
+
+export type VisualGenerationProviderSettings = {
+  provider?: VisualGenerationProviderKind;
+  displayName?: string;
+  baseUrl?: string;
+  capabilities?: VisualGenerationCapability[];
+  useCase?: string;
+  models?: Record<string, VisualGenerationModelSettings | undefined>;
+};
+
+const TTS_PROVIDER_KINDS = [
+  "xtts",
+  "chatterbox",
+  "qwen",
+  "elevenlabs",
+  "fish_speech",
+  "f5_tts",
+  "gpt_sovits",
+  "openai",
+  "custom"
+] as const satisfies readonly TtsProviderKind[];
+
+const VISUAL_PROVIDER_KINDS = ["comfyui", "veo_extension", "vertex_veo", "custom"] as const satisfies readonly VisualGenerationProviderKind[];
+
+const VISUAL_CAPABILITIES = [
+  "text_to_image",
+  "image_to_image",
+  "text_to_video",
+  "image_to_video",
+  "native_audio"
+] as const satisfies readonly VisualGenerationCapability[];
+
+const VISUAL_MODEL_KINDS = [
+  "text_to_image",
+  "image_to_image",
+  "text_to_video",
+  "image_to_video"
+] as const satisfies readonly VisualGenerationModelKind[];
+
 export type AppSettings = {
   theme?: { family?: string; mode?: string };
   llm?: {
@@ -31,10 +131,22 @@ export type AppSettings = {
     workflowFile?: string;
   };
   tts?: {
+    provider?: TtsProviderKind;
+    defaultProviderId?: string;
+    defaultLanguage?: string | null;
+    providers?: Record<string, TtsProviderSettings | undefined>;
+    languageRoutes?: Record<string, TtsLanguageRouteSettings | undefined>;
     baseUrl?: string;
     timeoutUs?: number;
     language?: string | null;
     defaultVoiceId?: string | null;
+    targetChars?: number;
+    maxChars?: number;
+    targetSpeechSeconds?: number;
+    maxSpeechSeconds?: number;
+  };
+  visualGeneration?: {
+    providers?: Record<string, VisualGenerationProviderSettings | undefined>;
   };
   memory?: { idleUnloadMs?: number };
   auth?: { loginBackground?: string | null };
@@ -89,11 +201,142 @@ const FALLBACK_TEMPLATE: AppSettings = {
     masterPrompt: "",
     workflowFile: "vantage-z-image-turbo-api.json"
   },
+  visualGeneration: {
+    providers: {
+      comfyui: {
+        provider: "comfyui",
+        displayName: "ComfyUI",
+        baseUrl: "http://127.0.0.1:8188",
+        capabilities: ["text_to_image", "image_to_image"],
+        useCase: "Local image generation through the current ComfyUI workflow",
+        models: {
+          "z-image-turbo-workflow": {
+            displayName: "Z-Image Turbo workflow",
+            kind: "text_to_image",
+            acceptedAspectRatios: ["16:9", "9:16", "1:1", "4:5", "4:3", "3:4"],
+            costTier: "local"
+          }
+        }
+      },
+      veo_extension: {
+        provider: "veo_extension",
+        displayName: "Veo Extension",
+        baseUrl: "",
+        capabilities: ["text_to_image", "image_to_image", "text_to_video", "image_to_video", "native_audio"],
+        useCase: "External extension route for high-quality image/video generation",
+        models: {
+          "veo-3-image": {
+            displayName: "Veo 3 image",
+            kind: "text_to_image",
+            acceptedAspectRatios: ["16:9", "9:16", "1:1"],
+            supportsPromptEnhancement: true,
+            costTier: "premium"
+          },
+          "veo-3-video": {
+            displayName: "Veo 3 video",
+            kind: "image_to_video",
+            acceptedAspectRatios: ["16:9", "9:16"],
+            acceptedDurationsSeconds: [4, 6, 8],
+            maxNativeSpeechSeconds: 8,
+            supportsNativeAudio: true,
+            supportsPromptEnhancement: true,
+            costTier: "premium"
+          }
+        }
+      },
+      vertex_veo: {
+        provider: "vertex_veo",
+        displayName: "Vertex Veo",
+        baseUrl: "https://aiplatform.googleapis.com",
+        capabilities: ["text_to_video", "image_to_video", "native_audio"],
+        useCase: "Future official API route when the project should use direct Vertex AI",
+        models: {
+          "veo-3-video": {
+            displayName: "Veo 3 video",
+            kind: "image_to_video",
+            acceptedAspectRatios: ["16:9", "9:16"],
+            acceptedDurationsSeconds: [4, 6, 8],
+            maxNativeSpeechSeconds: 8,
+            supportsNativeAudio: true,
+            supportsPromptEnhancement: true,
+            costTier: "premium"
+          }
+        }
+      }
+    }
+  },
   tts: {
-    baseUrl: "http://127.0.0.1:8020",
-    timeoutUs: 5000000,
-    language: "pt",
-    defaultVoiceId: "cohesive-pt-santiago-22050hz"
+    providers: {
+      xtts: {
+        provider: "xtts",
+        displayName: "XTTS",
+        baseUrl: "http://127.0.0.1:8020",
+        timeoutUs: 5000000,
+        language: "pt",
+        languages: ["pt"],
+        defaultVoiceId: "cohesive-pt-santiago-22050hz",
+        useCase: "Local voice cloning and multilingual narration",
+        targetChars: 170,
+        maxChars: 200,
+        targetSpeechSeconds: 10,
+        maxSpeechSeconds: 12
+      },
+      chatterbox: {
+        provider: "chatterbox",
+        displayName: "Chatterbox",
+        timeoutUs: 5000000,
+        language: "en",
+        languages: [],
+        defaultVoiceId: "",
+        useCase: "Future local multilingual TTS route"
+      },
+      qwen: {
+        provider: "qwen",
+        displayName: "Qwen TTS",
+        timeoutUs: 5000000,
+        language: "en",
+        languages: [],
+        defaultVoiceId: "Ryan",
+        useCase: "Future route for English/Chinese-oriented narration"
+      },
+      elevenlabs: {
+        provider: "elevenlabs",
+        displayName: "ElevenLabs",
+        timeoutUs: 5000000,
+        language: "en",
+        languages: [],
+        defaultVoiceId: "",
+        useCase: "Cloud voice cloning and high-quality English/Spanish narration"
+      },
+      fish_speech: {
+        provider: "fish_speech",
+        displayName: "Fish Speech",
+        timeoutUs: 5000000,
+        language: "en",
+        languages: [],
+        defaultVoiceId: "",
+        useCase: "Future local/open voice cloning route"
+      },
+      f5_tts: {
+        provider: "f5_tts",
+        displayName: "F5-TTS",
+        timeoutUs: 5000000,
+        language: "en",
+        languages: [],
+        defaultVoiceId: "",
+        useCase: "Future local zero-shot voice cloning route"
+      }
+    },
+    languageRoutes: {
+      pt: {
+        providerId: "xtts",
+        voiceId: "cohesive-pt-santiago-22050hz",
+        targetChars: 170,
+        maxChars: 200,
+        targetSpeechSeconds: 10,
+        maxSpeechSeconds: 12
+      }
+    }
   },
   memory: { idleUnloadMs: 900000 },
   auth: { loginBackground: null }
@@ -185,6 +428,297 @@ export function resolveLlmProviderSettings(
   return resolveLlmProviders(settings, template)[provider] ?? {};
 }
 
+export function normalizeTtsProvider(raw: string | undefined): TtsProviderKind {
+  const provider = (raw ?? "xtts").trim().toLowerCase();
+  if ((TTS_PROVIDER_KINDS as readonly string[]).includes(provider)) {
+    return provider as TtsProviderKind;
+  }
+  return "xtts";
+}
+
+function normalizeTtsProviderForId(providerId: string, raw: string | undefined): TtsProviderKind {
+  const providerFromId = providerId.trim().toLowerCase();
+  if ((TTS_PROVIDER_KINDS as readonly string[]).includes(providerFromId)) {
+    return providerFromId as TtsProviderKind;
+  }
+  return normalizeTtsProvider(raw);
+}
+
+export function normalizeVisualGenerationProvider(raw: string | undefined): VisualGenerationProviderKind {
+  const provider = (raw ?? "custom").trim().toLowerCase();
+  if ((VISUAL_PROVIDER_KINDS as readonly string[]).includes(provider)) {
+    return provider as VisualGenerationProviderKind;
+  }
+  return "custom";
+}
+
+function normalizeVisualGenerationProviderForId(
+  providerId: string,
+  raw: string | undefined
+): VisualGenerationProviderKind {
+  const providerFromId = providerId.trim().toLowerCase();
+  if ((VISUAL_PROVIDER_KINDS as readonly string[]).includes(providerFromId)) {
+    return providerFromId as VisualGenerationProviderKind;
+  }
+  return normalizeVisualGenerationProvider(raw);
+}
+
+function normalizeVisualCapabilities(values: string[] | undefined): VisualGenerationCapability[] {
+  const seen = new Set<string>();
+  const result: VisualGenerationCapability[] = [];
+  for (const value of values ?? []) {
+    const capability = value.trim().toLowerCase();
+    if (!(VISUAL_CAPABILITIES as readonly string[]).includes(capability) || seen.has(capability)) continue;
+    seen.add(capability);
+    result.push(capability as VisualGenerationCapability);
+  }
+  return result;
+}
+
+function normalizeVisualModelKind(value: string | undefined): VisualGenerationModelKind | undefined {
+  const kind = value?.trim().toLowerCase();
+  if (kind && (VISUAL_MODEL_KINDS as readonly string[]).includes(kind)) {
+    return kind as VisualGenerationModelKind;
+  }
+  return undefined;
+}
+
+function normalizeOptionalPositiveNumber(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function normalizeOptionalPositiveNumbers(values: number[] | undefined): number[] | undefined {
+  if (!Array.isArray(values)) return undefined;
+  const seen = new Set<number>();
+  const result: number[] = [];
+  for (const value of values) {
+    if (!Number.isFinite(value) || value <= 0 || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+function normalizeLanguageCode(value: string): string | null {
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeLanguageCodes(values: string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values ?? []) {
+    const language = normalizeLanguageCode(value);
+    if (!language) continue;
+    const key = language.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(language);
+  }
+  return result;
+}
+
+export function normalizeTtsSettings(
+  settings: AppSettings["tts"] | undefined,
+  template: AppSettings["tts"] | undefined = FALLBACK_TEMPLATE.tts
+): NonNullable<AppSettings["tts"]> {
+  const provider = normalizeTtsProvider(settings?.provider ?? template?.provider);
+  const defaultProviderId = (settings?.defaultProviderId ?? template?.defaultProviderId ?? provider).trim() || provider;
+  const providers: Record<string, TtsProviderSettings> = {};
+
+  for (const [providerId, providerSettings] of Object.entries(template?.providers ?? {})) {
+    if (!providerSettings) continue;
+    const { status: _status, ...providerValues } = providerSettings as TtsProviderSettings & { status?: unknown };
+    providers[providerId] = {
+      ...providerValues,
+      provider: normalizeTtsProviderForId(providerId, providerSettings.provider),
+      languages: normalizeLanguageCodes(providerSettings.languages)
+    };
+  }
+  for (const [providerId, providerSettings] of Object.entries(settings?.providers ?? {})) {
+    if (!providerSettings) continue;
+    const { status: _status, ...providerValues } = providerSettings as TtsProviderSettings & { status?: unknown };
+    providers[providerId] = {
+      ...(providers[providerId] ?? {}),
+      ...providerValues,
+      provider: normalizeTtsProviderForId(providerId, providerSettings.provider ?? providers[providerId]?.provider),
+      languages: normalizeLanguageCodes(providerSettings.languages ?? providers[providerId]?.languages)
+    };
+  }
+
+  providers[defaultProviderId] = {
+    ...(providers[defaultProviderId] ?? {}),
+    provider,
+    displayName: settings?.providers?.[defaultProviderId]?.displayName ?? providers[defaultProviderId]?.displayName,
+    baseUrl: settings?.baseUrl ?? providers[defaultProviderId]?.baseUrl ?? template?.baseUrl,
+    timeoutUs: settings?.timeoutUs ?? providers[defaultProviderId]?.timeoutUs ?? template?.timeoutUs,
+    language: settings?.language ?? providers[defaultProviderId]?.language ?? template?.language,
+    defaultVoiceId:
+      settings?.defaultVoiceId ?? providers[defaultProviderId]?.defaultVoiceId ?? template?.defaultVoiceId,
+    targetChars:
+      normalizeOptionalPositiveNumber(settings?.targetChars) ??
+      normalizeOptionalPositiveNumber(providers[defaultProviderId]?.targetChars) ??
+      normalizeOptionalPositiveNumber(template?.targetChars),
+    maxChars:
+      normalizeOptionalPositiveNumber(settings?.maxChars) ??
+      normalizeOptionalPositiveNumber(providers[defaultProviderId]?.maxChars) ??
+      normalizeOptionalPositiveNumber(template?.maxChars),
+    targetSpeechSeconds:
+      normalizeOptionalPositiveNumber(settings?.targetSpeechSeconds) ??
+      normalizeOptionalPositiveNumber(providers[defaultProviderId]?.targetSpeechSeconds) ??
+      normalizeOptionalPositiveNumber(template?.targetSpeechSeconds),
+    maxSpeechSeconds:
+      normalizeOptionalPositiveNumber(settings?.maxSpeechSeconds) ??
+      normalizeOptionalPositiveNumber(providers[defaultProviderId]?.maxSpeechSeconds) ??
+      normalizeOptionalPositiveNumber(template?.maxSpeechSeconds)
+  };
+
+  const language = (settings?.defaultLanguage ?? settings?.language ?? template?.defaultLanguage ?? template?.language)?.trim();
+  const languageRoutes: Record<string, TtsLanguageRouteSettings> = {};
+  for (const [routeLanguage, routeSettings] of Object.entries(template?.languageRoutes ?? {})) {
+    if (!routeSettings) continue;
+    languageRoutes[routeLanguage] = { ...routeSettings };
+  }
+  for (const [routeLanguage, routeSettings] of Object.entries(settings?.languageRoutes ?? {})) {
+    if (!routeSettings) continue;
+    languageRoutes[routeLanguage] = {
+      ...(languageRoutes[routeLanguage] ?? {}),
+      ...routeSettings
+    };
+  }
+
+  for (const [providerId, providerSettings] of Object.entries(providers)) {
+    for (const routeLanguage of normalizeLanguageCodes(providerSettings.languages)) {
+      if (languageRoutes[routeLanguage]) continue;
+      languageRoutes[routeLanguage] = {
+        providerId,
+        voiceId: providerSettings.defaultVoiceId ?? null,
+        targetChars: providerSettings.targetChars,
+        maxChars: providerSettings.maxChars,
+        targetSpeechSeconds: providerSettings.targetSpeechSeconds,
+        maxSpeechSeconds: providerSettings.maxSpeechSeconds
+      };
+    }
+  }
+  if (language) {
+    const defaultProvider = providers[defaultProviderId] ?? {};
+    languageRoutes[language] = {
+      ...(languageRoutes[language] ?? {}),
+      providerId: languageRoutes[language]?.providerId ?? defaultProviderId,
+      voiceId: languageRoutes[language]?.voiceId ?? defaultProvider.defaultVoiceId ?? settings?.defaultVoiceId ?? null,
+      targetChars:
+        normalizeOptionalPositiveNumber(languageRoutes[language]?.targetChars) ??
+        normalizeOptionalPositiveNumber(defaultProvider.targetChars),
+      maxChars:
+        normalizeOptionalPositiveNumber(languageRoutes[language]?.maxChars) ??
+        normalizeOptionalPositiveNumber(defaultProvider.maxChars),
+      targetSpeechSeconds:
+        normalizeOptionalPositiveNumber(languageRoutes[language]?.targetSpeechSeconds) ??
+        normalizeOptionalPositiveNumber(defaultProvider.targetSpeechSeconds),
+      maxSpeechSeconds:
+        normalizeOptionalPositiveNumber(languageRoutes[language]?.maxSpeechSeconds) ??
+        normalizeOptionalPositiveNumber(defaultProvider.maxSpeechSeconds)
+    };
+  }
+
+  return {
+    providers,
+    languageRoutes
+  };
+}
+
+export function resolveTtsProviderSettings(
+  providerId: string | undefined,
+  settings: AppSettings["tts"] | undefined,
+  template: AppSettings = FALLBACK_TEMPLATE
+): TtsProviderSettings {
+  const normalized = normalizeTtsSettings(settings, template.tts);
+  const resolvedProviderId = providerId?.trim() || "xtts";
+  return normalized.providers?.[resolvedProviderId] ?? {};
+}
+
+export function resolveTtsLanguageRouteSettings(
+  language: string | undefined,
+  settings: AppSettings["tts"] | undefined,
+  template: AppSettings = FALLBACK_TEMPLATE
+): (TtsLanguageRouteSettings & { language: string; providerId: string; provider: TtsProviderSettings }) | null {
+  const normalized = normalizeTtsSettings(settings, template.tts);
+  const resolvedLanguage = language?.trim() || "";
+  if (!resolvedLanguage) return null;
+  const route = normalized.languageRoutes?.[resolvedLanguage];
+  if (!route?.providerId) return null;
+  const provider = normalized.providers?.[route.providerId];
+  if (!provider) return null;
+  return {
+    ...route,
+    language: resolvedLanguage,
+    providerId: route.providerId,
+    provider
+  };
+}
+
+export function normalizeVisualGenerationSettings(
+  settings: AppSettings["visualGeneration"] | undefined,
+  template: AppSettings["visualGeneration"] | undefined = FALLBACK_TEMPLATE.visualGeneration
+): NonNullable<AppSettings["visualGeneration"]> {
+  const providers: Record<string, VisualGenerationProviderSettings> = {};
+  const mergeProvider = (providerId: string, providerSettings: VisualGenerationProviderSettings | undefined) => {
+    if (!providerSettings) return;
+    const current = providers[providerId] ?? {};
+    const models: Record<string, VisualGenerationModelSettings> = {};
+    for (const [modelId, modelSettings] of Object.entries(current.models ?? {})) {
+      if (!modelSettings) continue;
+      const { status: _status, ...modelValues } = modelSettings as VisualGenerationModelSettings & { status?: unknown };
+      models[modelId] = { ...modelValues };
+    }
+    for (const [modelId, modelSettings] of Object.entries(providerSettings.models ?? {})) {
+      if (!modelSettings) continue;
+      const currentModel = models[modelId] ?? {};
+      const { status: _status, ...modelValues } = modelSettings as VisualGenerationModelSettings & { status?: unknown };
+      models[modelId] = {
+        ...currentModel,
+        ...modelValues,
+        kind: normalizeVisualModelKind(modelSettings.kind ?? currentModel.kind),
+        acceptedAspectRatios: normalizeLanguageCodes(
+          modelSettings.acceptedAspectRatios ?? currentModel.acceptedAspectRatios
+        ),
+        acceptedDurationsSeconds:
+          normalizeOptionalPositiveNumbers(modelSettings.acceptedDurationsSeconds) ??
+          normalizeOptionalPositiveNumbers(currentModel.acceptedDurationsSeconds),
+        maxNativeSpeechSeconds:
+          normalizeOptionalPositiveNumber(modelSettings.maxNativeSpeechSeconds) ??
+          normalizeOptionalPositiveNumber(currentModel.maxNativeSpeechSeconds)
+      };
+    }
+    const {
+      status: _status,
+      defaultImageModelId: _defaultImageModelId,
+      defaultVideoModelId: _defaultVideoModelId,
+      ...providerValues
+    } = providerSettings as VisualGenerationProviderSettings & {
+      status?: unknown;
+      defaultImageModelId?: unknown;
+      defaultVideoModelId?: unknown;
+    };
+    providers[providerId] = {
+      ...current,
+      ...providerValues,
+      provider: normalizeVisualGenerationProviderForId(providerId, providerSettings.provider ?? current.provider),
+      capabilities: normalizeVisualCapabilities(providerSettings.capabilities ?? current.capabilities),
+      models
+    };
+  };
+
+  for (const [providerId, providerSettings] of Object.entries(template?.providers ?? {})) {
+    mergeProvider(providerId, providerSettings);
+  }
+  for (const [providerId, providerSettings] of Object.entries(settings?.providers ?? {})) {
+    mergeProvider(providerId, providerSettings);
+  }
+
+  return { providers };
+}
+
 function normalizeAppSettings(settings: AppSettings, template: AppSettings): AppSettings {
   const merged = deepMerge(template, settings);
   const provider = normalizeLlmProvider(merged.llm?.provider ?? template.llm?.provider);
@@ -193,7 +727,9 @@ function normalizeAppSettings(settings: AppSettings, template: AppSettings): App
     llm: {
       provider,
       providers: resolveLlmProviders(merged.llm, template)
-    }
+    },
+    tts: normalizeTtsSettings(merged.tts, template.tts),
+    visualGeneration: normalizeVisualGenerationSettings(merged.visualGeneration, template.visualGeneration)
   };
 }
 

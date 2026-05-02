@@ -1,6 +1,6 @@
 # FlowShopy Roadmap, Status and Handoff
 
-Ultima atualizacao: 2026-05-01
+Ultima atualizacao: 2026-05-02
 
 ## Estado real atual
 
@@ -47,9 +47,27 @@ Implementado:
 - `directionNotesJson` persistido/editavel em `Block`;
 - `soundEffectPromptJson` persistido/editavel em `Block` como reserva para geracao futura;
 - invalidador basico de assets no `PATCH /blocks/:blockId` para texto, prompts e sound effect.
+- decisao: XTTS e o provider TTS ja integrado no worker; Chatterbox, Qwen, ElevenLabs, Fish Speech, F5-TTS, GPT-SoVITS e outros ficam como sugestoes/rotas futuras;
+- decisao: limites de fala devem ser configurados antes da segmentacao, por idioma/provider, para evitar blocos que degradam a qualidade do TTS.
+- Settings TTS agora salva providers, linguas atendidas por provider, rota por lingua e orcamento inicial de fala (`targetChars`, `maxChars`, `targetSpeechSeconds`, `maxSpeechSeconds`).
+- decisao: nao existe TTS ativo global; projeto escolhe a rota TTS que vai usar.
+- decisao: nao existe provider ativo global para imagem/video; projeto escolhe modelo de imagem e modelo de video opcional.
+- decisao: uma lingua so pode aparecer em uma rota TTS do catalogo para evitar ambiguidade na geracao de fala.
+- decisao: troca de voz por amostra entra no roadmap como pos-processamento de videos com fala nativa ou vozes inconsistentes.
+- decisao: segmentacao deve receber um `SpeechBudget`; quando a fala vier do TTS, usar limites da rota TTS; quando vier do motor de video com audio nativo, usar limites do provider/modelo de video.
+- decisao: geracao de imagem/video deve evoluir para providers configuraveis por capacidade; ComfyUI e o provider de imagem atual, e a extensao Veo deve entrar como provider `veo_extension`.
+- Settings Visual agora cataloga providers/modelos de imagem e video; projeto escolhe modelo de imagem e modelo de video opcional.
 
 Nao implementado ainda:
 
+- segmentacao LLM efetiva usando `buildSegmentationPrompt`;
+- orcamento de fala consumido pelo segmentador;
+- validacao de projeto/variant com TTS exigido e lingua sem rota TTS configurada;
+- worker ainda nao consome a escolha visual do projeto em `metadata.visualGeneration`;
+- adaptador da extensao Veo para pedir imagem/video, acompanhar status e importar resultado;
+- render de cena animada usando provider configurado;
+- troca de voz por amostra (`voice_replacement`);
+- separacao/alinhamento de audio para substituir voz preservando fundo;
 - Variant como entidade dedicada;
 - Variant render plan, CTA por canal e render por blocos/cache;
 - versionamento de ContentItem usado em entregaveis;
@@ -150,7 +168,7 @@ Observacao: Fase 1 esta implementada como MVP funcional usando `ContentItem.meta
 
 ### Fase 2 - Scene completa
 
-Objetivo: enriquecer blocos/cenas.
+Objetivo: enriquecer blocos/cenas e fazer a segmentacao respeitar orcamento de fala.
 
 Itens:
 
@@ -159,6 +177,11 @@ Itens:
 - [x] editar prompt de animacao;
 - [x] reservar sound effect;
 - [x] invalidacao granular basica.
+- [ ] `SpeechBudget` resolvido antes da segmentacao;
+- [ ] segmentacao deterministica usando `maxChars` configurado;
+- [ ] segmentacao LLM usando `buildSegmentationPrompt` com `SpeechBudget`;
+- [ ] validacao deterministicamente bloqueando blocos acima do limite de fala;
+- [ ] aviso/bloqueio quando a lingua do projeto/variant nao tiver rota TTS e o modo exigir TTS.
 
 Aceite parcial concluido:
 
@@ -200,12 +223,21 @@ Itens:
 
 ### Fase 5 - Animacao e efeitos
 
-Objetivo: imagem estatica virar cena animada.
+Objetivo: imagem estatica virar cena animada e habilitar provider de video configuravel.
 
 Itens:
 
+- settings `visualGeneration` para imagem/video;
+- selecao de provider/modelo visual por projeto;
+- provider `veo_extension` para comunicacao com a extensao externa;
+- provider `comfyui` como motor local/futuro para video quando houver workflow adequado;
+- provider `vertex_veo` opcional/futuro para API oficial;
+- `SpeechBudget` para fala nativa de video, separado do TTS;
 - job `image_animation`;
 - provider imagem-para-video;
+- provider texto-para-video;
+- substituicao de voz por amostra para videos ja gerados;
+- source separation/alinhamento para preservar musica/efeitos ao trocar voz;
 - efeitos/transicoes;
 - sound effects.
 
@@ -225,17 +257,25 @@ Itens:
 
 ## Proxima tarefa recomendada
 
-Antes de continuar implementacao pesada de render/publicacao, revisar o modelo de produto `Content` + `Project` com a decisao mais recente.
+Antes de continuar implementacao pesada de render/publicacao, fechar o contrato de TTS por lingua e fazer a segmentacao respeitar limites de fala.
 
 Prioridade:
 
-1. testar Content -> produzir roteiro -> associar projeto -> salvar, sem gerar cenas;
-2. testar Projects -> abrir projeto com conteudo associado -> gerar cenas -> editor;
-3. conectar bloco de prompt IA ao provider LLM selecionado;
-4. modelar biblioteca de conteudos reutilizaveis e associacao muitos-para-muitos conteudo-projeto;
-5. modelar canais de entrega e formatos permitidos como contrato dedicado no projeto/variant;
-6. modelar PromotionTarget e ShortLink como entidades futuras;
-7. manter fluxo/telas de cursos intactos ate decisao explicita de migracao.
+1. criar helper `SpeechBudget` e resolver budget atual via settings TTS/idioma;
+2. fazer `buildDeterministicBlocks`/segmentacao usar limite configurado em vez de `200` fixo;
+3. ligar `buildSegmentationPrompt` ao fluxo real, passando orcamento de fala e validando retorno;
+4. bloquear/avisar quando projeto/variant exige TTS e a lingua nao possui rota TTS configurada;
+5. fazer worker consumir `metadata.visualGeneration.image` na geracao de imagem;
+6. tratar limite separado para fala nativa de provider de video, como duracoes aceitas pelo modelo;
+7. adicionar adaptador `veo_extension` para imagem/video como objetivo central do pipeline;
+8. modelar troca de voz por amostra como pipeline separado de pos-processamento;
+9. testar Content -> produzir roteiro -> associar projeto -> salvar, sem gerar cenas;
+10. testar Projects -> abrir projeto com conteudo associado -> gerar cenas -> editor;
+11. conectar bloco de prompt IA ao provider LLM selecionado;
+12. modelar biblioteca de conteudos reutilizaveis e associacao muitos-para-muitos conteudo-projeto;
+13. modelar canais de entrega e formatos permitidos como contrato dedicado no projeto/variant;
+14. modelar PromotionTarget e ShortLink como entidades futuras;
+15. manter fluxo/telas de cursos intactos ate decisao explicita de migracao.
 
 ## Checklist antes de finalizar proxima tarefa
 

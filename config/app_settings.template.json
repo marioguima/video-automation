@@ -33,11 +33,142 @@
     "masterPrompt": "",
     "workflowFile": "vantage-z-image-turbo-api.json"
   },
+  "visualGeneration": {
+    "providers": {
+      "comfyui": {
+        "provider": "comfyui",
+        "displayName": "ComfyUI",
+        "baseUrl": "http://127.0.0.1:8188",
+        "capabilities": ["text_to_image", "image_to_image"],
+        "useCase": "Local image generation through the current ComfyUI workflow",
+        "models": {
+          "z-image-turbo-workflow": {
+            "displayName": "Z-Image Turbo workflow",
+            "kind": "text_to_image",
+            "acceptedAspectRatios": ["16:9", "9:16", "1:1", "4:5", "4:3", "3:4"],
+            "costTier": "local"
+          }
+        }
+      },
+      "veo_extension": {
+        "provider": "veo_extension",
+        "displayName": "Veo Extension",
+        "baseUrl": "",
+        "capabilities": ["text_to_image", "image_to_image", "text_to_video", "image_to_video", "native_audio"],
+        "useCase": "External extension route for high-quality image/video generation",
+        "models": {
+          "veo-3-image": {
+            "displayName": "Veo 3 image",
+            "kind": "text_to_image",
+            "acceptedAspectRatios": ["16:9", "9:16", "1:1"],
+            "supportsPromptEnhancement": true,
+            "costTier": "premium"
+          },
+          "veo-3-video": {
+            "displayName": "Veo 3 video",
+            "kind": "image_to_video",
+            "acceptedAspectRatios": ["16:9", "9:16"],
+            "acceptedDurationsSeconds": [4, 6, 8],
+            "maxNativeSpeechSeconds": 8,
+            "supportsNativeAudio": true,
+            "supportsPromptEnhancement": true,
+            "costTier": "premium"
+          }
+        }
+      },
+      "vertex_veo": {
+        "provider": "vertex_veo",
+        "displayName": "Vertex Veo",
+        "baseUrl": "https://aiplatform.googleapis.com",
+        "capabilities": ["text_to_video", "image_to_video", "native_audio"],
+        "useCase": "Future official API route when the project should use direct Vertex AI",
+        "models": {
+          "veo-3-video": {
+            "displayName": "Veo 3 video",
+            "kind": "image_to_video",
+            "acceptedAspectRatios": ["16:9", "9:16"],
+            "acceptedDurationsSeconds": [4, 6, 8],
+            "maxNativeSpeechSeconds": 8,
+            "supportsNativeAudio": true,
+            "supportsPromptEnhancement": true,
+            "costTier": "premium"
+          }
+        }
+      }
+    }
+  },
   "tts": {
-    "baseUrl": "http://127.0.0.1:8020",
-    "timeoutUs": 5000000,
-    "language": "pt",
-    "defaultVoiceId": "cohesive-pt-santiago-22050hz"
+    "providers": {
+      "xtts": {
+        "provider": "xtts",
+        "displayName": "XTTS",
+        "baseUrl": "http://127.0.0.1:8020",
+        "timeoutUs": 5000000,
+        "language": "pt",
+        "languages": ["pt"],
+        "defaultVoiceId": "cohesive-pt-santiago-22050hz",
+        "useCase": "Local voice cloning and multilingual narration",
+        "targetChars": 170,
+        "maxChars": 200,
+        "targetSpeechSeconds": 10,
+        "maxSpeechSeconds": 12
+      },
+      "chatterbox": {
+        "provider": "chatterbox",
+        "displayName": "Chatterbox",
+        "timeoutUs": 5000000,
+        "language": "en",
+        "languages": [],
+        "defaultVoiceId": "",
+        "useCase": "Future local multilingual TTS route"
+      },
+      "qwen": {
+        "provider": "qwen",
+        "displayName": "Qwen TTS",
+        "timeoutUs": 5000000,
+        "language": "en",
+        "languages": [],
+        "defaultVoiceId": "Ryan",
+        "useCase": "Future route for English/Chinese-oriented narration"
+      },
+      "elevenlabs": {
+        "provider": "elevenlabs",
+        "displayName": "ElevenLabs",
+        "timeoutUs": 5000000,
+        "language": "en",
+        "languages": [],
+        "defaultVoiceId": "",
+        "useCase": "Cloud voice cloning and high-quality English/Spanish narration"
+      },
+      "fish_speech": {
+        "provider": "fish_speech",
+        "displayName": "Fish Speech",
+        "timeoutUs": 5000000,
+        "language": "en",
+        "languages": [],
+        "defaultVoiceId": "",
+        "useCase": "Future local/open voice cloning route"
+      },
+      "f5_tts": {
+        "provider": "f5_tts",
+        "displayName": "F5-TTS",
+        "timeoutUs": 5000000,
+        "language": "en",
+        "languages": [],
+        "defaultVoiceId": "",
+        "useCase": "Future local zero-shot voice cloning route"
+      }
+    },
+    "languageRoutes": {
+      "pt": {
+        "providerId": "xtts",
+        "voiceId": "cohesive-pt-santiago-22050hz",
+        "targetChars": 170,
+        "maxChars": 200,
+        "targetSpeechSeconds": 10,
+        "maxSpeechSeconds": 12
+      }
+    }
   },
   "memory": {
     "idleUnloadMs": 900000

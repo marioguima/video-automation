@@ -15,8 +15,9 @@ Monorepo:
 - Playwright para render HTML/CSS -> PNG;
 - ffmpeg/ffprobe para video/audio;
 - Ollama/Gemini para LLM;
-- ComfyUI para imagem;
-- provedores TTS: XTTS, Chatterbox, Qwen.
+- ComfyUI para imagem atual;
+- XTTS para TTS atual;
+- providers futuros de imagem/video por configuracao, incluindo extensao Veo e motores locais.
 
 ## Estrutura do repositorio
 
@@ -166,6 +167,10 @@ Settings:
 - configuracoes em arquivo JSON sob `DATA_DIR`;
 - LLM selecionada salva em System Settings;
 - Gemini exige API key.
+- TTS em Settings e catalogo de providers/rotas; o provider usado e escolhido pelo projeto;
+- cada lingua deve estar em no maximo uma rota TTS do catalogo;
+- geracao visual em Settings e catalogo de providers/modelos por capacidade, em vez de ComfyUI fixo;
+- projeto escolhe modelo de imagem e, quando necessario, modelo de video.
 
 ## Worker
 
@@ -212,6 +217,9 @@ Tipos futuros:
 
 - `image_animation`
 - `sound_effect`
+- `voice_replacement`
+- `audio_source_separation`
+- `forced_audio_alignment`
 - `publish_schedule`
 - `source_video_analysis`
 - `script_from_idea`
@@ -232,6 +240,9 @@ Necessario evoluir:
 - `thumbnail`
 - `animated_scene_mp4`
 - `sound_effect_audio`
+- `voice_sample_audio`
+- `voice_replacement_audio`
+- `voice_replaced_video_mp4`
 - `platform_publish_payload`
 
 ## Frontend
@@ -320,21 +331,122 @@ Uso:
 Fluxo esperado:
 
 1. `ContentItem.sourceText/scriptText` fica associado a um projeto.
-2. Projeto define canais, formatos e variantes.
-3. Uma `Variant` de video inicia a segmentacao.
-4. Segmentacao cria `Block[]` com `role` e `variantScope`.
-5. criacao de `onScreenJson`
-6. criacao de `ttsText`
-7. criacao de `imagePromptJson`
-8. criacao de `animationPromptJson`
-9. criacao/reserva de `directionNotesJson`
-10. criacao/reserva opcional de `soundEffectPromptJson`
-11. TTS gera audio
-12. ffprobe mede duracao
-13. ComfyUI gera imagem
-14. Playwright renderiza slide PNG
-15. ffmpeg renderiza clip MP4
-16. ffmpeg concatena/compoe video final da Variant
+2. Projeto define canais, formatos, rota TTS, modelo de imagem e modelo de video opcional.
+3. Uma `Variant` de video escolhe modo de fala: sem fala, TTS externo ou audio nativo do motor de video.
+4. O sistema resolve `SpeechBudget` a partir da rota TTS por lingua ou do provider/modelo de video.
+5. Uma `Variant` de video inicia a segmentacao com limites de fala/duracao ja resolvidos.
+6. Segmentacao cria `Block[]` com `role` e `variantScope`.
+7. criacao de `onScreenJson`
+8. criacao de `ttsText` quando a fala for externa;
+9. criacao de `imagePromptJson`
+10. criacao de `animationPromptJson`
+11. criacao/reserva de `directionNotesJson`
+12. criacao/reserva opcional de `soundEffectPromptJson`
+13. TTS gera audio quando o modo for `external_tts`
+14. ffprobe mede duracao quando existir audio externo
+15. provider visual gera imagem ou video de cena conforme capacidade escolhida
+16. Playwright renderiza slide PNG quando o fluxo for slide/imagem estatica
+17. ffmpeg renderiza clip MP4 quando necessario
+18. ffmpeg concatena/compoe video final da Variant
+
+## Orcamento de fala e segmentacao
+
+Objetivo:
+
+- evitar blocos que falham ou degradam na etapa de fala;
+- fazer a segmentacao respeitar o motor real que vai narrar a cena;
+- manter o conceito independente do provider atual.
+
+Contrato conceitual:
+
+```text
+SpeechBudget
+- mode: external_tts | video_native_audio | none
+- language
+- sourceProviderId
+- targetChars
+- maxChars
+- targetSpeechSeconds
+- maxSpeechSeconds
+- acceptedDurationsSeconds
+```
+
+Resolucao:
+
+- `external_tts`: usar a rota TTS escolhida pelo projeto e seus limites de provider/voz;
+- nao existe TTS global ativo para producao;
+- `video_native_audio`: usar settings do provider/modelo de video escolhido para a Variant;
+- `none`: segmentacao pode priorizar ritmo visual, sem limite de fala;
+- se `mode` exigir fala e nao houver configuracao, bloquear antes de gerar blocos.
+
+Uso pelo segmentador:
+
+- `buildSegmentationPrompt` deve receber `SpeechBudget`;
+- o prompt deve pedir blocos dentro de `targetChars` e nunca acima de `maxChars` quando houver TTS;
+- para fala nativa de video, o prompt deve pedir blocos que caibam na duracao maxima aceita pelo provider/modelo;
+- a resposta do LLM deve ser validada deterministicamente antes de persistir blocos.
+
+## Providers visuais
+
+Estado atual:
+
+- ComfyUI e o provider de imagem implementado;
+- animacao/video ainda esta como contrato futuro (`animationPromptJson`, `image_animation`, `render_animated_scene`).
+
+Direcao alvo:
+
+- settings deve ter uma camada `visualGeneration` com providers e modelos;
+- cada provider declara capacidades: `text_to_image`, `image_to_image`, `text_to_video`, `image_to_video`, `native_audio`;
+- projeto/variant escolhe provider/modelo de imagem e provider/modelo de video conforme formato, qualidade e custo;
+- video e opcional por projeto: um projeto pode usar apenas ComfyUI para imagem, outro pode usar Veo Extension para imagem e video;
+- o worker deve tratar cada provider por adaptador, como hoje faz com ComfyUI.
+
+Extensao Veo:
+
+- objetivo principal do FlowShopy e usar uma extensao externa para gerar imagem/video com Veo e recuperar resultados para continuar o pipeline;
+- a extensao deve ser modelada como provider `veo_extension`;
+- o contrato deve ser parecido com ComfyUI: enviar prompt/parametros/assets, acompanhar status, baixar resultado, salvar `Asset` e metadados;
+- a integracao direta com API oficial (`vertex_veo`) pode coexistir como outro provider, mas nao deve ser requisito para o fluxo principal.
+
+## Substituicao de voz
+
+Objetivo:
+
+- permitir trocar a voz final de um video ja gerado usando uma amostra fornecida pelo usuario;
+- cobrir videos gerados com fala nativa do provider visual quando a voz original vier inconsistente;
+- evitar nova geracao visual cara quando apenas a voz precisa mudar.
+
+Fluxo tecnico:
+
+1. registrar `voice_sample_audio` com consentimento/metadados;
+2. extrair audio do video fonte;
+3. opcionalmente separar voz, musica e efeitos;
+4. resolver texto da cena pelo roteiro existente ou por transcricao;
+5. gerar nova fala pelo provider TTS/clonagem configurado para a lingua;
+6. alinhar a nova fala ao timing original;
+7. mixar voz, fundo e efeitos;
+8. salvar `voice_replaced_video_mp4` como novo asset derivado.
+
+Contrato conceitual:
+
+```text
+voiceReplacement
+- sourceVideoAssetId
+- sourceVoiceSampleAssetId
+- targetVoiceId
+- language
+- providerId
+- preserveBackgroundAudio
+- alignmentMode
+- maxDriftMs
+```
+
+Dependencias futuras:
+
+- source separation para preservar musica/ambiencia quando necessario;
+- forced alignment/time stretching para manter sincronismo;
+- politica de direitos/consentimento para amostras de voz;
+- invalidacao de assets quando a amostra, voz alvo, roteiro ou video fonte mudar.
 
 ## Variants, CTA e render por blocos
 
