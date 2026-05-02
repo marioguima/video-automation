@@ -57,6 +57,8 @@ Implementado:
 - decisao: segmentacao deve receber um `SpeechBudget`; quando a fala vier do TTS, usar limites da rota TTS; quando vier do motor de video com audio nativo, usar limites do provider/modelo de video.
 - decisao: geracao de imagem/video deve evoluir para providers configuraveis por capacidade; ComfyUI e o provider de imagem atual, e a extensao Veo deve entrar como provider `veo_extension`.
 - Settings Visual agora cataloga providers/modelos de imagem e video; projeto escolhe modelo de imagem e modelo de video opcional.
+- decisao: projeto passa a declarar um Pipeline de Producao em `metadata.pipeline`; Settings continua sendo catalogo, e o projeto liga/desliga etapas como TTS, musica, imagem, movimento de editor e video IA.
+- decisao: React Flow fica fora do beta; a configuracao inicial sera por cards/toggles de etapas para reduzir complexidade para o usuario.
 
 Nao implementado ainda:
 
@@ -229,6 +231,7 @@ Itens:
 
 - settings `visualGeneration` para imagem/video;
 - selecao de provider/modelo visual por projeto;
+- Pipeline de Producao por projeto com modos `tts`, `music`, `editor_motion`, `text_to_video`, `image_to_video` e `looped_clips`;
 - provider `veo_extension` para comunicacao com a extensao externa;
 - provider `comfyui` como motor local/futuro para video quando houver workflow adequado;
 - provider `vertex_veo` opcional/futuro para API oficial;

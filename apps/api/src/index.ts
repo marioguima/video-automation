@@ -5495,8 +5495,149 @@ function parseJsonRecord(value: string | null | undefined): Record<string, unkno
   }
 }
 
-function normalizeProjectTtsMetadata(value: unknown): { value?: Record<string, unknown>; error?: string } {
-  if (value === undefined || value === null) return {};
+type ProjectPipelineScriptMode = "none" | "scene_blocks" | "music_storyboard";
+type ProjectPipelineAudioMode = "none" | "tts" | "music" | "video_native_audio";
+type ProjectPipelineVideoMode = "none" | "editor_motion" | "text_to_video" | "image_to_video" | "looped_clips";
+type ProjectPipelineRenderOutputMode = "images_only" | "single_video" | "clips";
+
+type NormalizedProjectPipeline = {
+  version: 1;
+  script: { mode: ProjectPipelineScriptMode };
+  audio: { mode: ProjectPipelineAudioMode };
+  image: { enabled: boolean };
+  video: { mode: ProjectPipelineVideoMode };
+  render: { outputMode: ProjectPipelineRenderOutputMode };
+};
+
+const PROJECT_PIPELINE_SCRIPT_MODES = new Set<ProjectPipelineScriptMode>(["none", "scene_blocks", "music_storyboard"]);
+const PROJECT_PIPELINE_AUDIO_MODES = new Set<ProjectPipelineAudioMode>(["none", "tts", "music", "video_native_audio"]);
+const PROJECT_PIPELINE_VIDEO_MODES = new Set<ProjectPipelineVideoMode>([
+  "none",
+  "editor_motion",
+  "text_to_video",
+  "image_to_video",
+  "looped_clips"
+]);
+const PROJECT_PIPELINE_RENDER_OUTPUT_MODES = new Set<ProjectPipelineRenderOutputMode>(["images_only", "single_video", "clips"]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function normalizeProjectPipelineEnum<T extends string>(
+  value: unknown,
+  allowed: Set<T>,
+  fallback: T,
+  field: string
+): { value: T } | { error: string } {
+  if (value === undefined || value === null || value === "") return { value: fallback };
+  if (typeof value !== "string" || !allowed.has(value as T)) {
+    return { error: `${field} must be one of: ${Array.from(allowed).join(", ")}` };
+  }
+  return { value: value as T };
+}
+
+function deriveProjectPipelineFromLegacy(metadata: Record<string, unknown>): NormalizedProjectPipeline {
+  const tts = asRecord(metadata.tts);
+  const visualGeneration = asRecord(metadata.visualGeneration);
+  const image = asRecord(visualGeneration?.image);
+  const video = asRecord(visualGeneration?.video);
+  const videoKind = normalizeOptionalText(video?.kind);
+  const videoMode: ProjectPipelineVideoMode = video
+    ? image && videoKind === "image_to_video"
+      ? "image_to_video"
+      : "text_to_video"
+    : "none";
+  return {
+    version: 1,
+    script: { mode: "scene_blocks" },
+    audio: { mode: tts ? "tts" : "none" },
+    image: { enabled: Boolean(image) },
+    video: { mode: videoMode },
+    render: { outputMode: video ? "single_video" : image ? "images_only" : "single_video" }
+  };
+}
+
+function normalizeProjectPipelineMetadata(
+  value: unknown,
+  metadata: Record<string, unknown>
+): { value?: NormalizedProjectPipeline; error?: string } {
+  const fallback = deriveProjectPipelineFromLegacy(metadata);
+  if (value === undefined || value === null) return { value: fallback };
+  const raw = asRecord(value);
+  if (!raw) return { error: "metadata.pipeline must be an object" };
+
+  const script = asRecord(raw.script);
+  const audio = asRecord(raw.audio);
+  const image = asRecord(raw.image);
+  const video = asRecord(raw.video);
+  const render = asRecord(raw.render);
+
+  const scriptMode = normalizeProjectPipelineEnum(
+    script?.mode,
+    PROJECT_PIPELINE_SCRIPT_MODES,
+    fallback.script.mode,
+    "metadata.pipeline.script.mode"
+  );
+  if ("error" in scriptMode) return { error: scriptMode.error };
+
+  const audioMode = normalizeProjectPipelineEnum(
+    audio?.mode,
+    PROJECT_PIPELINE_AUDIO_MODES,
+    fallback.audio.mode,
+    "metadata.pipeline.audio.mode"
+  );
+  if ("error" in audioMode) return { error: audioMode.error };
+
+  const videoMode = normalizeProjectPipelineEnum(
+    video?.mode,
+    PROJECT_PIPELINE_VIDEO_MODES,
+    fallback.video.mode,
+    "metadata.pipeline.video.mode"
+  );
+  if ("error" in videoMode) return { error: videoMode.error };
+
+  const renderOutputMode = normalizeProjectPipelineEnum(
+    render?.outputMode,
+    PROJECT_PIPELINE_RENDER_OUTPUT_MODES,
+    fallback.render.outputMode,
+    "metadata.pipeline.render.outputMode"
+  );
+  if ("error" in renderOutputMode) return { error: renderOutputMode.error };
+
+  const imageEnabled =
+    typeof image?.enabled === "boolean"
+      ? image.enabled
+      : videoMode.value === "editor_motion" || videoMode.value === "image_to_video"
+        ? true
+        : fallback.image.enabled;
+
+  if ((videoMode.value === "editor_motion" || videoMode.value === "image_to_video") && !imageEnabled) {
+    return { error: "metadata.pipeline.image.enabled must be true when video mode uses generated images" };
+  }
+  if (audioMode.value === "video_native_audio" && (videoMode.value === "none" || videoMode.value === "editor_motion")) {
+    return { error: "metadata.pipeline.video.mode must use a video generation provider when audio mode is video_native_audio" };
+  }
+  if (renderOutputMode.value === "images_only" && !imageEnabled) {
+    return { error: "metadata.pipeline.image.enabled must be true when render output is images_only" };
+  }
+
+  return {
+    value: {
+      version: 1,
+      script: { mode: scriptMode.value },
+      audio: { mode: audioMode.value },
+      image: { enabled: imageEnabled },
+      video: { mode: videoMode.value },
+      render: { outputMode: renderOutputMode.value }
+    }
+  };
+}
+
+function normalizeProjectTtsMetadata(value: unknown, required = false): { value?: Record<string, unknown>; error?: string } {
+  if (value === undefined || value === null) {
+    return required ? { error: "metadata.tts is required when metadata.pipeline.audio.mode is tts" } : {};
+  }
   if (typeof value !== "object" || Array.isArray(value)) {
     return { error: "metadata.tts must be an object" };
   }
@@ -5587,15 +5728,25 @@ function normalizeProjectVisualModelMetadata(
   };
 }
 
-function normalizeProjectVisualGenerationMetadata(value: unknown): { value?: Record<string, unknown>; error?: string } {
-  if (value === undefined || value === null) return {};
+function normalizeProjectVisualGenerationMetadata(
+  value: unknown,
+  options: { imageRequired?: boolean; videoRequired?: boolean } = {}
+): { value?: Record<string, unknown>; error?: string } {
+  const imageRequired = options.imageRequired ?? false;
+  const videoRequired = options.videoRequired ?? false;
+  if (value === undefined || value === null) {
+    if (imageRequired || videoRequired) {
+      return { error: "metadata.visualGeneration is required by metadata.pipeline" };
+    }
+    return {};
+  }
   if (typeof value !== "object" || Array.isArray(value)) {
     return { error: "metadata.visualGeneration must be an object" };
   }
   const raw = value as Record<string, unknown>;
-  const image = normalizeProjectVisualModelMetadata(raw.image, "image", true);
+  const image = normalizeProjectVisualModelMetadata(raw.image, "image", imageRequired);
   if (image.error) return { error: image.error };
-  const video = normalizeProjectVisualModelMetadata(raw.video, "video", false);
+  const video = normalizeProjectVisualModelMetadata(raw.video, "video", videoRequired);
   if (video.error) return { error: video.error };
   return {
     value: {
@@ -5605,21 +5756,97 @@ function normalizeProjectVisualGenerationMetadata(value: unknown): { value?: Rec
   };
 }
 
+function validateProjectPipelineVisualSelections(
+  pipeline: NormalizedProjectPipeline,
+  visualGeneration: Record<string, unknown> | undefined
+): string | null {
+  const image = asRecord(visualGeneration?.image);
+  const video = asRecord(visualGeneration?.video);
+  const videoKind = normalizeOptionalText(video?.kind);
+
+  if (pipeline.image.enabled && !image) {
+    return "metadata.visualGeneration.image is required when metadata.pipeline.image.enabled is true";
+  }
+  if (pipeline.video.mode === "editor_motion" && !image) {
+    return "metadata.visualGeneration.image is required when metadata.pipeline.video.mode is editor_motion";
+  }
+  if (pipeline.video.mode === "text_to_video") {
+    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.video.mode is text_to_video";
+    if (videoKind !== "text_to_video") {
+      return "metadata.visualGeneration.video.kind must be text_to_video when metadata.pipeline.video.mode is text_to_video";
+    }
+  }
+  if (pipeline.video.mode === "image_to_video") {
+    if (!image) return "metadata.visualGeneration.image is required when metadata.pipeline.video.mode is image_to_video";
+    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.video.mode is image_to_video";
+    if (videoKind !== "image_to_video") {
+      return "metadata.visualGeneration.video.kind must be image_to_video when metadata.pipeline.video.mode is image_to_video";
+    }
+  }
+  if (pipeline.video.mode === "looped_clips") {
+    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.video.mode is looped_clips";
+    if (videoKind === "image_to_video" && !image) {
+      return "metadata.visualGeneration.image is required when looped_clips uses an image_to_video model";
+    }
+  }
+  if (pipeline.audio.mode === "video_native_audio") {
+    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.audio.mode is video_native_audio";
+    if (video.supportsNativeAudio !== true) {
+      return "metadata.visualGeneration.video must support native audio when metadata.pipeline.audio.mode is video_native_audio";
+    }
+  }
+  return null;
+}
+
 function normalizeContentProjectMetadata(value: unknown): { metadataJson?: string; error?: string } {
   if (value === undefined || value === null) return {};
   if (typeof value !== "object" || Array.isArray(value)) {
     return { error: "metadata must be an object" };
   }
   const metadata = { ...(value as Record<string, unknown>) };
-  const tts = normalizeProjectTtsMetadata(metadata.tts);
-  if (tts.error) return { error: tts.error };
-  if (tts.value) {
-    metadata.tts = tts.value;
+
+  const pipeline = normalizeProjectPipelineMetadata(metadata.pipeline, metadata);
+  if (pipeline.error) return { error: pipeline.error };
+  if (!pipeline.value) return { error: "metadata.pipeline could not be resolved" };
+  metadata.pipeline = pipeline.value;
+
+  if (pipeline.value.audio.mode === "tts") {
+    const tts = normalizeProjectTtsMetadata(metadata.tts, true);
+    if (tts.error) return { error: tts.error };
+    if (tts.value) metadata.tts = tts.value;
+  } else {
+    delete metadata.tts;
   }
-  const visualGeneration = normalizeProjectVisualGenerationMetadata(metadata.visualGeneration);
-  if (visualGeneration.error) return { error: visualGeneration.error };
-  if (visualGeneration.value) {
-    metadata.visualGeneration = visualGeneration.value;
+
+  const imageRequired =
+    pipeline.value.image.enabled ||
+    pipeline.value.video.mode === "editor_motion" ||
+    pipeline.value.video.mode === "image_to_video";
+  const videoRequired =
+    pipeline.value.video.mode === "text_to_video" ||
+    pipeline.value.video.mode === "image_to_video" ||
+    pipeline.value.video.mode === "looped_clips" ||
+    pipeline.value.audio.mode === "video_native_audio";
+
+  if (imageRequired || videoRequired || metadata.visualGeneration !== undefined) {
+    const visualGeneration = normalizeProjectVisualGenerationMetadata(metadata.visualGeneration, {
+      imageRequired,
+      videoRequired
+    });
+    if (visualGeneration.error) return { error: visualGeneration.error };
+    const resolvedVisualGeneration = {
+      image: imageRequired ? visualGeneration.value?.image ?? null : null,
+      video: videoRequired ? visualGeneration.value?.video ?? null : null
+    };
+    const visualError = validateProjectPipelineVisualSelections(pipeline.value, resolvedVisualGeneration);
+    if (visualError) return { error: visualError };
+    if (resolvedVisualGeneration.image || resolvedVisualGeneration.video) {
+      metadata.visualGeneration = resolvedVisualGeneration;
+    } else {
+      delete metadata.visualGeneration;
+    }
+  } else {
+    delete metadata.visualGeneration;
   }
   return { metadataJson: JSON.stringify(metadata) };
 }

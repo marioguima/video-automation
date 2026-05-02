@@ -87,6 +87,20 @@ type ProjectVisualGenerationConfig = {
   video?: ProjectVisualModelConfig | null;
 };
 
+type ProjectPipelineScriptMode = 'none' | 'scene_blocks' | 'music_storyboard';
+type ProjectPipelineAudioMode = 'none' | 'tts' | 'music' | 'video_native_audio';
+type ProjectPipelineVideoMode = 'none' | 'editor_motion' | 'text_to_video' | 'image_to_video' | 'looped_clips';
+type ProjectPipelineRenderOutputMode = 'images_only' | 'single_video' | 'clips';
+
+type ProjectPipelineConfig = {
+  version?: 1;
+  script?: { mode?: ProjectPipelineScriptMode };
+  audio?: { mode?: ProjectPipelineAudioMode };
+  image?: { enabled?: boolean };
+  video?: { mode?: ProjectPipelineVideoMode };
+  render?: { outputMode?: ProjectPipelineRenderOutputMode };
+};
+
 type Project = {
   id: string;
   name: string;
@@ -100,6 +114,7 @@ type Project = {
     defaultDestinations?: Destination[];
     defaultAspectRatios?: AspectRatio[];
     defaultOutputs?: ProjectOutput[];
+    pipeline?: ProjectPipelineConfig;
     tts?: ProjectTtsConfig;
     visualGeneration?: ProjectVisualGenerationConfig;
   } | null;
@@ -216,6 +231,48 @@ const STAGES: Array<{ value: ProductionStage; label: string }> = [
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'published', label: 'Published' }
 ];
+
+const PIPELINE_SCRIPT_MODE_OPTIONS: Array<{ value: ProjectPipelineScriptMode; label: string; hint: string }> = [
+  { value: 'scene_blocks', label: 'Scene blocks', hint: 'Roteiro dividido em cenas para fala, imagem ou vídeo.' },
+  { value: 'music_storyboard', label: 'Music storyboard', hint: 'Roteiro visual guiado por música, álbum ou playlist.' },
+  { value: 'none', label: 'No script', hint: 'Projeto sem roteiro textual estruturado.' }
+];
+
+const PIPELINE_AUDIO_MODE_OPTIONS: Array<{ value: ProjectPipelineAudioMode; label: string; hint: string }> = [
+  { value: 'tts', label: 'TTS narration', hint: 'Converte blocos do roteiro em fala externa.' },
+  { value: 'music', label: 'Music / external audio', hint: 'Áudio principal vem de faixas ou mix externo.' },
+  { value: 'video_native_audio', label: 'Video native audio', hint: 'Fala ou áudio vem do provider de vídeo.' },
+  { value: 'none', label: 'No generated audio', hint: 'Fluxo visual sem fala ou áudio gerado.' }
+];
+
+const PIPELINE_VIDEO_MODE_OPTIONS: Array<{ value: ProjectPipelineVideoMode; label: string; hint: string }> = [
+  { value: 'none', label: 'No video generation', hint: 'Não gera vídeo por IA nem movimento automatizado.' },
+  { value: 'editor_motion', label: 'Editor motion', hint: 'Usa imagem com pan, zoom, loop e montagem automatizada.' },
+  { value: 'text_to_video', label: 'Text to video', hint: 'Gera vídeo diretamente do texto/prompt.' },
+  { value: 'image_to_video', label: 'Image to video', hint: 'Gera imagem base e anima com prompt de vídeo.' },
+  { value: 'looped_clips', label: 'Looped clips', hint: 'Gera poucos clipes curtos e repete para cobrir a duração final.' }
+];
+
+const PIPELINE_RENDER_OUTPUT_OPTIONS: Array<{ value: ProjectPipelineRenderOutputMode; label: string; hint: string }> = [
+  { value: 'single_video', label: 'Single video', hint: 'Produto final renderizado como um vídeo único.' },
+  { value: 'clips', label: 'Clips', hint: 'Produto final dividido em clipes reutilizáveis.' },
+  { value: 'images_only', label: 'Images only', hint: 'Produto final composto apenas por imagens.' }
+];
+
+const PIPELINE_AUDIO_LABELS: Record<ProjectPipelineAudioMode, string> = {
+  none: 'No audio',
+  tts: 'TTS',
+  music: 'Music',
+  video_native_audio: 'Native audio'
+};
+
+const PIPELINE_VIDEO_LABELS: Record<ProjectPipelineVideoMode, string> = {
+  none: 'No video IA',
+  editor_motion: 'Editor motion',
+  text_to_video: 'Text to video',
+  image_to_video: 'Image to video',
+  looped_clips: 'Looped clips'
+};
 
 const DEFAULT_PROJECT_ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16'];
 
@@ -536,6 +593,63 @@ function buildProjectVisualModelConfig(option: VisualModelOption): ProjectVisual
   };
 }
 
+function getProjectPipelineConfig(project: Project): Required<ProjectPipelineConfig> {
+  const pipeline = project.metadata?.pipeline;
+  const imageConfig = project.metadata?.visualGeneration?.image;
+  const videoConfig = project.metadata?.visualGeneration?.video;
+  const derivedVideoMode: ProjectPipelineVideoMode = videoConfig
+    ? imageConfig && videoConfig.kind === 'image_to_video'
+      ? 'image_to_video'
+      : 'text_to_video'
+    : 'none';
+  const videoMode = pipeline?.video?.mode ?? derivedVideoMode;
+  const imageEnabled =
+    pipeline?.image?.enabled ??
+    Boolean(imageConfig || videoMode === 'editor_motion' || videoMode === 'image_to_video');
+  return {
+    version: 1,
+    script: { mode: pipeline?.script?.mode ?? 'scene_blocks' },
+    audio: { mode: pipeline?.audio?.mode ?? (project.metadata?.tts ? 'tts' : 'none') },
+    image: { enabled: imageEnabled },
+    video: { mode: videoMode },
+    render: { outputMode: pipeline?.render?.outputMode ?? (videoConfig ? 'single_video' : imageConfig ? 'images_only' : 'single_video') }
+  };
+}
+
+function buildProjectPipelineConfig(options: {
+  scriptMode: ProjectPipelineScriptMode;
+  audioMode: ProjectPipelineAudioMode;
+  imageEnabled: boolean;
+  videoMode: ProjectPipelineVideoMode;
+  renderOutputMode: ProjectPipelineRenderOutputMode;
+}): Required<ProjectPipelineConfig> {
+  return {
+    version: 1,
+    script: { mode: options.scriptMode },
+    audio: { mode: options.audioMode },
+    image: { enabled: options.imageEnabled },
+    video: { mode: options.videoMode },
+    render: { outputMode: options.renderOutputMode }
+  };
+}
+
+function isVideoProviderMode(mode: ProjectPipelineVideoMode): boolean {
+  return mode === 'text_to_video' || mode === 'image_to_video' || mode === 'looped_clips';
+}
+
+function isImageRequiredByPipeline(
+  videoMode: ProjectPipelineVideoMode,
+  renderOutputMode: ProjectPipelineRenderOutputMode,
+  videoModel?: VisualModelOption | null
+): boolean {
+  return (
+    videoMode === 'editor_motion' ||
+    videoMode === 'image_to_video' ||
+    renderOutputMode === 'images_only' ||
+    (videoMode === 'looped_clips' && videoModel?.kind === 'image_to_video')
+  );
+}
+
 function getOutputFormatsByIds(outputIds: string[]): OutputFormat[] {
   const selectedIds = new Set(outputIds);
   return OUTPUT_FORMATS.filter((format) => selectedIds.has(format.id));
@@ -683,6 +797,11 @@ export default function ContentProjects({
   const [ttsRouteOptions, setTtsRouteOptions] = useState<TtsRouteOption[]>([]);
   const [imageModelOptions, setImageModelOptions] = useState<VisualModelOption[]>([]);
   const [videoModelOptions, setVideoModelOptions] = useState<VisualModelOption[]>([]);
+  const [pipelineScriptMode, setPipelineScriptMode] = useState<ProjectPipelineScriptMode>('scene_blocks');
+  const [pipelineAudioMode, setPipelineAudioMode] = useState<ProjectPipelineAudioMode>('tts');
+  const [pipelineImageEnabled, setPipelineImageEnabled] = useState(true);
+  const [pipelineVideoMode, setPipelineVideoMode] = useState<ProjectPipelineVideoMode>('none');
+  const [pipelineRenderOutputMode, setPipelineRenderOutputMode] = useState<ProjectPipelineRenderOutputMode>('single_video');
   const [selectedTtsRouteKey, setSelectedTtsRouteKey] = useState('');
   const [selectedImageModelKey, setSelectedImageModelKey] = useState('');
   const [selectedVideoModelKey, setSelectedVideoModelKey] = useState('');
@@ -723,6 +842,15 @@ export default function ContentProjects({
     [selectedVideoModelKey, videoModelOptions]
   );
 
+  const pipelineUsesTts = pipelineAudioMode === 'tts';
+  const pipelineImageRequired = isImageRequiredByPipeline(pipelineVideoMode, pipelineRenderOutputMode, selectedVideoModel);
+  const pipelineNeedsImageModel = pipelineImageRequired || (pipelineImageEnabled && Boolean(selectedImageModelKey));
+  const pipelineNeedsVideoModel = isVideoProviderMode(pipelineVideoMode) || pipelineAudioMode === 'video_native_audio';
+  const pipelineReady =
+    (!pipelineUsesTts || Boolean(selectedTtsRoute)) &&
+    (!pipelineNeedsImageModel || Boolean(selectedImageModel)) &&
+    (!pipelineNeedsVideoModel || Boolean(selectedVideoModel));
+
   const selectedChannelCount = useMemo(
     () => new Set(selectedOutputFormats.map((format) => format.channel)).size,
     [selectedOutputFormats]
@@ -747,6 +875,11 @@ export default function ContentProjects({
 
   const selectedProjectOutputs = useMemo(
     () => (selectedProject ? getProjectOutputs(selectedProject) : []),
+    [selectedProject]
+  );
+
+  const selectedProjectPipeline = useMemo(
+    () => (selectedProject ? getProjectPipelineConfig(selectedProject) : null),
     [selectedProject]
   );
 
@@ -937,6 +1070,11 @@ export default function ContentProjects({
     setProjectName('Novo projeto');
     setProjectDescription('');
     setSelectedOutputIds(DEFAULT_PROJECT_OUTPUT_IDS);
+    setPipelineScriptMode('scene_blocks');
+    setPipelineAudioMode('tts');
+    setPipelineImageEnabled(true);
+    setPipelineVideoMode('none');
+    setPipelineRenderOutputMode('single_video');
     setSelectedTtsRouteKey(ttsRouteOptions[0]?.key ?? '');
     setSelectedImageModelKey(imageModelOptions[0]?.key ?? '');
     setSelectedVideoModelKey('');
@@ -949,6 +1087,12 @@ export default function ContentProjects({
     setProjectName(project.name);
     setProjectDescription(project.description ?? '');
     setSelectedOutputIds(getProjectOutputIds(project));
+    const pipeline = getProjectPipelineConfig(project);
+    setPipelineScriptMode(pipeline.script.mode ?? 'scene_blocks');
+    setPipelineAudioMode(pipeline.audio.mode ?? 'none');
+    setPipelineImageEnabled(Boolean(pipeline.image.enabled));
+    setPipelineVideoMode(pipeline.video.mode ?? 'none');
+    setPipelineRenderOutputMode(pipeline.render.outputMode ?? 'single_video');
     setSelectedTtsRouteKey(getProjectTtsRouteKey(project) || ttsRouteOptions[0]?.key || '');
     setSelectedImageModelKey(getProjectVisualModelKey(project, 'image') || imageModelOptions[0]?.key || '');
     setSelectedVideoModelKey(getProjectVisualModelKey(project, 'video'));
@@ -957,18 +1101,55 @@ export default function ContentProjects({
 
   const saveProject = async () => {
     if (!projectName.trim()) return;
-    if (!selectedTtsRoute) {
+    const imageRequired = isImageRequiredByPipeline(pipelineVideoMode, pipelineRenderOutputMode, selectedVideoModel);
+    const needsImageModel = imageRequired || (pipelineImageEnabled && Boolean(selectedImageModelKey));
+    const needsVideoModel = isVideoProviderMode(pipelineVideoMode) || pipelineAudioMode === 'video_native_audio';
+    if (pipelineAudioMode === 'tts' && !selectedTtsRoute) {
       setError('Select a TTS route for this project.');
       return;
     }
-    if (!selectedImageModel) {
+    if (needsImageModel && !selectedImageModel) {
       setError('Select an image generation model for this project.');
+      return;
+    }
+    if (needsVideoModel && !selectedVideoModel) {
+      setError('Select a video generation model for this project.');
+      return;
+    }
+    if (pipelineAudioMode === 'video_native_audio' && (pipelineVideoMode === 'none' || pipelineVideoMode === 'editor_motion')) {
+      setError('Native video audio requires a video generation mode.');
+      return;
+    }
+    if (pipelineVideoMode === 'text_to_video' && selectedVideoModel?.kind !== 'text_to_video') {
+      setError('Select a text-to-video model for this project video mode.');
+      return;
+    }
+    if (pipelineVideoMode === 'image_to_video' && selectedVideoModel?.kind !== 'image_to_video') {
+      setError('Select an image-to-video model for this project video mode.');
+      return;
+    }
+    if (pipelineAudioMode === 'video_native_audio' && selectedVideoModel?.supportsNativeAudio !== true) {
+      setError('Select a video model that supports native audio.');
       return;
     }
     setBusy(true);
     setError(null);
     try {
       const outputFormats = getOutputFormatsByIds(selectedOutputIds);
+      const pipeline = buildProjectPipelineConfig({
+        scriptMode: pipelineScriptMode,
+        audioMode: pipelineAudioMode,
+        imageEnabled: needsImageModel,
+        videoMode: pipelineVideoMode,
+        renderOutputMode: pipelineRenderOutputMode
+      });
+      const visualGeneration =
+        needsImageModel || needsVideoModel
+          ? {
+              image: needsImageModel && selectedImageModel ? buildProjectVisualModelConfig(selectedImageModel) : null,
+              video: needsVideoModel && selectedVideoModel ? buildProjectVisualModelConfig(selectedVideoModel) : null
+            }
+          : undefined;
       const payload = {
         name: projectName,
         description: projectDescription,
@@ -978,11 +1159,9 @@ export default function ContentProjects({
           defaultDestinations: uniqueValues(outputFormats.map((format) => format.destination)),
           defaultAspectRatios: uniqueValues(outputFormats.map((format) => format.aspectRatio)),
           defaultOutputs: outputFormats.map(toProjectOutput),
-          tts: buildProjectTtsConfig(selectedTtsRoute),
-          visualGeneration: {
-            image: buildProjectVisualModelConfig(selectedImageModel),
-            video: selectedVideoModel ? buildProjectVisualModelConfig(selectedVideoModel) : null
-          },
+          pipeline,
+          ...(pipelineAudioMode === 'tts' && selectedTtsRoute ? { tts: buildProjectTtsConfig(selectedTtsRoute) } : {}),
+          ...(visualGeneration ? { visualGeneration } : {}),
           product: 'flowshopy'
         }
       };
@@ -1585,66 +1764,202 @@ export default function ContentProjects({
             />
 
             <div className="border border-border rounded-md bg-background p-4 space-y-4">
-              <div>
-                <h3 className="font-bold">Generation routes</h3>
-                <p className="text-sm text-muted-foreground">Project-level choices for voice, image generation, and optional video generation.</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="font-bold">Production pipeline</h3>
+                  <p className="text-sm text-muted-foreground">Turn on only the production steps this project needs.</p>
+                </div>
+                <Badge variant="outline" className="w-fit">
+                  {PIPELINE_AUDIO_LABELS[pipelineAudioMode]} / {PIPELINE_VIDEO_LABELS[pipelineVideoMode]}
+                </Badge>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <label className="space-y-2">
-                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
-                    <Mic size={13} /> TTS route
-                  </span>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <section className="rounded-md border border-border bg-card/60 p-3 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <ListChecks size={16} className="mt-0.5 text-primary" />
+                    <div>
+                      <h4 className="text-sm font-bold">Script structure</h4>
+                      <p className="text-xs text-muted-foreground">How text will guide scenes, storyboard, and prompts.</p>
+                    </div>
+                  </div>
                   <select
-                    value={selectedTtsRouteKey}
-                    onChange={(event) => setSelectedTtsRouteKey(event.target.value)}
-                    className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
+                    value={pipelineScriptMode}
+                    onChange={(event) => setPipelineScriptMode(event.target.value as ProjectPipelineScriptMode)}
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
                   >
-                    {ttsRouteOptions.length === 0 && <option value="">No TTS routes configured</option>}
-                    {ttsRouteOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {formatTtsRouteOption(option)}
+                    {PIPELINE_SCRIPT_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
-                </label>
+                  <p className="text-xs text-muted-foreground">
+                    {PIPELINE_SCRIPT_MODE_OPTIONS.find((option) => option.value === pipelineScriptMode)?.hint}
+                  </p>
+                </section>
 
-                <label className="space-y-2">
-                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
-                    <Image size={13} /> Image model
-                  </span>
+                <section className="rounded-md border border-border bg-card/60 p-3 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Mic size={16} className="mt-0.5 text-emerald-400" />
+                    <div>
+                      <h4 className="text-sm font-bold">Audio source</h4>
+                      <p className="text-xs text-muted-foreground">Choose whether this project generates speech, uses music, or stays visual.</p>
+                    </div>
+                  </div>
                   <select
-                    value={selectedImageModelKey}
-                    onChange={(event) => setSelectedImageModelKey(event.target.value)}
-                    className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
+                    value={pipelineAudioMode}
+                    onChange={(event) => {
+                      const mode = event.target.value as ProjectPipelineAudioMode;
+                      setPipelineAudioMode(mode);
+                      if (mode === 'video_native_audio' && (pipelineVideoMode === 'none' || pipelineVideoMode === 'editor_motion')) {
+                        setPipelineVideoMode('text_to_video');
+                      }
+                    }}
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
                   >
-                    {imageModelOptions.length === 0 && <option value="">No image models configured</option>}
-                    {imageModelOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {formatVisualModelOption(option)}
+                    {PIPELINE_AUDIO_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
-                </label>
+                  <p className="text-xs text-muted-foreground">
+                    {PIPELINE_AUDIO_MODE_OPTIONS.find((option) => option.value === pipelineAudioMode)?.hint}
+                  </p>
+                  {pipelineAudioMode === 'tts' && (
+                    <label className="space-y-2 block">
+                      <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">TTS route</span>
+                      <select
+                        value={selectedTtsRouteKey}
+                        onChange={(event) => setSelectedTtsRouteKey(event.target.value)}
+                        className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                      >
+                        {ttsRouteOptions.length === 0 && <option value="">No TTS routes configured</option>}
+                        {ttsRouteOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {formatTtsRouteOption(option)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </section>
 
-                <label className="space-y-2">
-                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
-                    <Video size={13} /> Video model
-                  </span>
+                <section className="rounded-md border border-border bg-card/60 p-3 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Image size={16} className="mt-0.5 text-cyan-400" />
+                    <h4 className="text-sm font-bold">Image generation</h4>
+                  </div>
+                  <label className="space-y-2 block">
+                    <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Image model</span>
+                    <select
+                      value={pipelineNeedsImageModel ? selectedImageModelKey : ''}
+                      onChange={(event) => {
+                        const modelKey = event.target.value;
+                        setSelectedImageModelKey(modelKey);
+                        setPipelineImageEnabled(Boolean(modelKey));
+                      }}
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                    >
+                      {!pipelineImageRequired && <option value="">No image</option>}
+                      {pipelineImageRequired && (
+                        <option value="" disabled>
+                          {imageModelOptions.length === 0 ? 'No image models configured' : 'Select image model'}
+                        </option>
+                      )}
+                      {imageModelOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {formatVisualModelOption(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </section>
+
+                <section className="rounded-md border border-border bg-card/60 p-3 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Video size={16} className="mt-0.5 text-orange-400" />
+                    <div>
+                      <h4 className="text-sm font-bold">Video production</h4>
+                      <p className="text-xs text-muted-foreground">Use editor motion, text-to-video, image-to-video, or looped short clips.</p>
+                    </div>
+                  </div>
                   <select
-                    value={selectedVideoModelKey}
-                    onChange={(event) => setSelectedVideoModelKey(event.target.value)}
-                    className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
+                    value={pipelineVideoMode}
+                    onChange={(event) => {
+                      const mode = event.target.value as ProjectPipelineVideoMode;
+                      setPipelineVideoMode(mode);
+                      if (mode === 'editor_motion' || mode === 'image_to_video') {
+                        setPipelineImageEnabled(true);
+                        setSelectedImageModelKey((current) => current || imageModelOptions[0]?.key || '');
+                      }
+                    }}
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
                   >
-                    <option value="">No video generation</option>
-                    {videoModelOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {formatVisualModelOption(option)}
+                    {PIPELINE_VIDEO_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
-                </label>
+                  <p className="text-xs text-muted-foreground">
+                    {PIPELINE_VIDEO_MODE_OPTIONS.find((option) => option.value === pipelineVideoMode)?.hint}
+                  </p>
+                  {pipelineNeedsVideoModel && (
+                    <label className="space-y-2 block">
+                      <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Video model</span>
+                      <select
+                        value={selectedVideoModelKey}
+                        onChange={(event) => {
+                          const modelKey = event.target.value;
+                          const model = videoModelOptions.find((option) => option.key === modelKey);
+                          setSelectedVideoModelKey(modelKey);
+                          if (pipelineVideoMode === 'looped_clips' && model?.kind === 'image_to_video') {
+                            setPipelineImageEnabled(true);
+                            setSelectedImageModelKey((current) => current || imageModelOptions[0]?.key || '');
+                          }
+                        }}
+                        className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                      >
+                        <option value="">Select video model</option>
+                        {videoModelOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {formatVisualModelOption(option)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </section>
               </div>
+
+              <label className="space-y-2 block">
+                <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+                  <Film size={13} /> Render output
+                </span>
+                <select
+                  value={pipelineRenderOutputMode}
+                  onChange={(event) => {
+                    const outputMode = event.target.value as ProjectPipelineRenderOutputMode;
+                    setPipelineRenderOutputMode(outputMode);
+                    if (outputMode === 'images_only') {
+                      setPipelineImageEnabled(true);
+                      setSelectedImageModelKey((current) => current || imageModelOptions[0]?.key || '');
+                    }
+                  }}
+                  className="h-10 w-full rounded-md border border-border bg-card px-3 text-sm"
+                >
+                  {PIPELINE_RENDER_OUTPUT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="block text-xs text-muted-foreground">
+                  {PIPELINE_RENDER_OUTPUT_OPTIONS.find((option) => option.value === pipelineRenderOutputMode)?.hint}
+                </span>
+              </label>
             </div>
 
             <div className="border border-border rounded-md bg-background p-4 space-y-4">
@@ -1731,7 +2046,7 @@ export default function ContentProjects({
               >
                 Cancel
               </Button>
-              <Button onClick={saveProject} disabled={busy || !projectName.trim() || !selectedTtsRoute || !selectedImageModel} className="gap-2">
+              <Button onClick={saveProject} disabled={busy || !projectName.trim() || !pipelineReady} className="gap-2">
                 <Plus size={16} /> {editingProjectId ? 'Save Changes' : 'Save Project'}
               </Button>
             </div>
@@ -1837,6 +2152,21 @@ export default function ContentProjects({
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-1.5">
+                    {selectedProjectPipeline && (
+                      <>
+                        <Badge variant="outline" className="border-slate-400/30 bg-slate-500/10 text-slate-200">
+                          Audio {PIPELINE_AUDIO_LABELS[selectedProjectPipeline.audio.mode ?? 'none']}
+                        </Badge>
+                        <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
+                          Video {PIPELINE_VIDEO_LABELS[selectedProjectPipeline.video.mode ?? 'none']}
+                        </Badge>
+                        {selectedProjectPipeline.image.enabled && (
+                          <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+                            Image pipeline
+                          </Badge>
+                        )}
+                      </>
+                    )}
                     {selectedProject.metadata?.tts?.providerId && selectedProject.metadata?.tts?.language && (
                       <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
                         TTS {selectedProject.metadata.tts.providerId} / {selectedProject.metadata.tts.language}

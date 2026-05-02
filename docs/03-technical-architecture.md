@@ -326,12 +326,57 @@ Uso:
 - se provider salvo for `gemini`, worker chama Gemini para tarefas LLM;
 - API exige `apiKey` para Gemini nas settings.
 
+## Pipeline de producao do projeto
+
+Direcao:
+
+- Settings cataloga providers, rotas e modelos disponiveis;
+- o Projeto declara quais etapas de producao fazem parte do produto final;
+- cada etapa ligada aponta para uma rota/modelo do catalogo quando precisar de um provider externo;
+- o fluxo deve aceitar projetos sem TTS, sem imagem, sem video IA, ou com combinacoes diferentes dessas etapas.
+
+Contrato inicial em `ContentProject.metadata.pipeline`:
+
+```text
+pipeline
+- script.mode: none | scene_blocks | music_storyboard
+- audio.mode: none | tts | music | video_native_audio
+- image.enabled: boolean
+- video.mode: none | editor_motion | text_to_video | image_to_video | looped_clips
+- render.outputMode: images_only | single_video | clips
+```
+
+Semantica:
+
+- `audio.mode = tts`: exige `metadata.tts` com rota TTS do projeto;
+- `audio.mode = music`: audio principal vem de musica/faixa externa, sem TTS associado ao projeto;
+- `audio.mode = video_native_audio`: fala/audio vem do provider de video, respeitando limites do modelo;
+- `image.enabled = true`: gera imagens a partir das cenas;
+- `video.mode = editor_motion`: usa imagens e movimentos automatizados de editor, como pan, zoom e loop;
+- `video.mode = text_to_video`: gera video direto de texto/prompt;
+- `video.mode = image_to_video`: gera imagem base e anima com provider de video;
+- `video.mode = looped_clips`: gera poucos clipes e repete/compõe ate cobrir a duracao do produto final.
+
+Decisao de beta:
+
+- nao usar React Flow agora;
+- expor cards/toggles de etapas no projeto;
+- manter o pipeline serial e validado por regras simples;
+- deixar React Flow como modo avancado futuro, quando houver ramificacoes reais e reutilizacao de steps.
+
+Exemplos:
+
+- narracao comum: `script.scene_blocks` + `audio.tts` + `image.enabled` + `video.editor_motion`;
+- shorts com video IA: `script.scene_blocks` + `audio.video_native_audio` + `video.text_to_video`;
+- playlist musical simples: `script.music_storyboard` + `audio.music` + `video.looped_clips`;
+- imagens sociais: `script.scene_blocks` + `audio.none` + `image.enabled` + `render.images_only`.
+
 ## Pipeline de video
 
 Fluxo esperado:
 
 1. `ContentItem.sourceText/scriptText` fica associado a um projeto.
-2. Projeto define canais, formatos, rota TTS, modelo de imagem e modelo de video opcional.
+2. Projeto define canais, formatos e pipeline de producao.
 3. Uma `Variant` de video escolhe modo de fala: sem fala, TTS externo ou audio nativo do motor de video.
 4. O sistema resolve `SpeechBudget` a partir da rota TTS por lingua ou do provider/modelo de video.
 5. Uma `Variant` de video inicia a segmentacao com limites de fala/duracao ja resolvidos.
