@@ -19,6 +19,33 @@ import { apiGet, apiPatch, apiPost } from '../lib/api';
 import ConfirmDialog from './ui/confirm-dialog';
 
 type LLMProvider = 'ollama' | 'gemini' | 'openai';
+const DEFAULT_GEMINI_MODEL = 'gemma-4-26b-a4b-it';
+type LlmProviderConfig = {
+  baseUrl: string;
+  model: string;
+  timeoutSeconds: string;
+  apiKey: string;
+};
+const DEFAULT_LLM_CONFIGS: Record<LLMProvider, LlmProviderConfig> = {
+  ollama: {
+    baseUrl: 'http://127.0.0.1:11434',
+    model: 'llama3.2:3b',
+    timeoutSeconds: '60',
+    apiKey: ''
+  },
+  gemini: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    model: DEFAULT_GEMINI_MODEL,
+    timeoutSeconds: '120',
+    apiKey: ''
+  },
+  openai: {
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    timeoutSeconds: '120',
+    apiKey: ''
+  }
+};
 
 interface SettingsProps {
   currentTheme: Theme;
@@ -37,14 +64,10 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
 
   // LLM State
   const [llmProvider, setLlmProvider] = useState<LLMProvider>('ollama');
-  const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434');
+  const [llmConfigs, setLlmConfigs] = useState<Record<LLMProvider, LlmProviderConfig>>(DEFAULT_LLM_CONFIGS);
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [selectedLlmModel, setSelectedLlmModel] = useState('');
-  const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [openAiApiKey, setOpenAiApiKey] = useState('');
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [llmTimeout, setLlmTimeout] = useState('60'); // Seconds
 
   // ComfyUI State
   const [comfyUiUrl, setComfyUiUrl] = useState('http://127.0.0.1:8188');
@@ -107,21 +130,32 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     return null;
   };
 
+  const activeLlmConfig = llmConfigs[llmProvider];
+  const updateLlmConfig = (provider: LLMProvider, patch: Partial<LlmProviderConfig>) => {
+    setLlmConfigs((current) => ({
+      ...current,
+      [provider]: {
+        ...current[provider],
+        ...patch
+      }
+    }));
+  };
+
   const fetchOllamaModels = async () => {
     setIsFetchingModels(true);
     setFetchError(null);
     setOllamaModels([]);
 
     try {
-      const response = await fetch(`${ollamaUrl}/api/tags`);
+      const response = await fetch(`${llmConfigs.ollama.baseUrl}/api/tags`);
       if (!response.ok) throw new Error('Failed to connect to Ollama server');
       
       const data = await response.json();
       if (data.models && Array.isArray(data.models)) {
         const modelNames = data.models.map((m: any) => m.name);
         setOllamaModels(modelNames);
-        if (modelNames.length > 0 && !selectedLlmModel) {
-          setSelectedLlmModel(modelNames[0]);
+        if (modelNames.length > 0 && !llmConfigs.ollama.model) {
+          updateLlmConfig('ollama', { model: modelNames[0] });
         }
       }
     } catch (err) {
@@ -135,22 +169,6 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
 
   const selectLlmProvider = (provider: LLMProvider) => {
     setLlmProvider(provider);
-    if (provider === 'gemini') {
-      setOllamaUrl('https://generativelanguage.googleapis.com/v1beta');
-      setSelectedLlmModel((current) =>
-        current && !current.includes(':') && !current.startsWith('gpt-') ? current : 'gemini-2.0-flash'
-      );
-      return;
-    }
-    if (provider === 'openai') {
-      setOllamaUrl('https://api.openai.com/v1');
-      setSelectedLlmModel((current) =>
-        current && !current.includes(':') && !current.startsWith('gemini-') ? current : 'gpt-4o-mini'
-      );
-      return;
-    }
-    setOllamaUrl('http://127.0.0.1:11434');
-    setSelectedLlmModel((current) => current.includes(':') ? current : 'llama3.2:3b');
   };
 
   useEffect(() => {
@@ -158,9 +176,15 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       theme?: { family?: string; mode?: string };
       llm?: {
         provider?: LLMProvider;
+        providers?: Partial<Record<LLMProvider, {
+          baseUrl?: string;
+          model?: string;
+          apiKey?: string;
+          timeoutMs?: number;
+        }>>;
+        // Legacy fields are read only for old local settings.
         baseUrl?: string;
         model?: string;
-        apiKey?: string;
         apiKeys?: { gemini?: string; openai?: string };
         timeoutMs?: number;
       };
@@ -178,12 +202,47 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     }>('/settings')
       .then((data) => {
         if (data.llm?.provider) setLlmProvider(data.llm.provider);
-        if (data.llm?.baseUrl) setOllamaUrl(data.llm.baseUrl);
-        if (data.llm?.model) setSelectedLlmModel(data.llm.model);
-        const provider = data.llm?.provider;
-        setGeminiApiKey(data.llm?.apiKeys?.gemini ?? (provider === 'gemini' ? data.llm?.apiKey ?? '' : ''));
-        setOpenAiApiKey(data.llm?.apiKeys?.openai ?? (provider === 'openai' ? data.llm?.apiKey ?? '' : ''));
-        if (data.llm?.timeoutMs) setLlmTimeout(String(Math.round(data.llm.timeoutMs / 1000)));
+        setLlmConfigs((current) => {
+          const next: Record<LLMProvider, LlmProviderConfig> = {
+            ollama: { ...current.ollama },
+            gemini: { ...current.gemini },
+            openai: { ...current.openai }
+          };
+          (['ollama', 'gemini', 'openai'] as const).forEach((provider) => {
+            const providerSettings = data.llm?.providers?.[provider];
+            if (!providerSettings) return;
+            next[provider] = {
+              ...next[provider],
+              baseUrl: providerSettings.baseUrl ?? next[provider].baseUrl,
+              model: providerSettings.model ?? next[provider].model,
+              timeoutSeconds:
+                providerSettings.timeoutMs !== undefined
+                  ? String(Math.round(providerSettings.timeoutMs / 1000))
+                  : next[provider].timeoutSeconds,
+              apiKey: provider === 'ollama' ? '' : providerSettings.apiKey ?? next[provider].apiKey
+            };
+          });
+
+          const provider = data.llm?.provider;
+          if (provider && !data.llm?.providers?.[provider]) {
+            next[provider] = {
+              ...next[provider],
+              baseUrl: data.llm?.baseUrl ?? next[provider].baseUrl,
+              model: data.llm?.model ?? next[provider].model,
+              timeoutSeconds:
+                data.llm?.timeoutMs !== undefined
+                  ? String(Math.round(data.llm.timeoutMs / 1000))
+                  : next[provider].timeoutSeconds,
+              apiKey:
+                provider === 'gemini'
+                  ? data.llm?.apiKeys?.gemini ?? next[provider].apiKey
+                  : provider === 'openai'
+                    ? data.llm?.apiKeys?.openai ?? next[provider].apiKey
+                    : ''
+            };
+          }
+          return next;
+        });
 
         if (data.comfy?.baseUrl) setComfyUiUrl(data.comfy.baseUrl);
         if (data.comfy?.promptTimeoutMs) setComfyPromptTimeoutMs(String(data.comfy.promptTimeoutMs));
@@ -222,7 +281,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     const promptMs = Number(comfyPromptTimeoutMs);
     const generationMs = Number(comfyGenerationTimeoutMs);
     const viewMs = Number(comfyViewTimeoutMs);
-    const llmTimeoutMs = Number(llmTimeout) * 1000;
+    const llmTimeoutMs = Number(activeLlmConfig.timeoutSeconds) * 1000;
     const ttsTimeoutUsValue = Number(ttsTimeout);
     const idleUnloadMsValue = Number(idleUnloadMs);
     if (!Number.isFinite(promptMs) || promptMs <= 0) {
@@ -245,7 +304,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       setSettingsError('LLM timeout must be a positive number.');
       return;
     }
-    const activeApiKey = llmProvider === 'gemini' ? geminiApiKey.trim() : llmProvider === 'openai' ? openAiApiKey.trim() : 'ollama';
+    const activeApiKey = llmProvider === 'ollama' ? '' : activeLlmConfig.apiKey.trim();
     if ((llmProvider === 'gemini' || llmProvider === 'openai') && !activeApiKey) {
       setIsSaving(false);
       setSettingsError(`${llmProvider === 'gemini' ? 'Gemini' : 'OpenAI'} API key is required.`);
@@ -271,14 +330,25 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
         theme: { family: currentFamily, mode: currentMode },
         llm: {
           provider: llmProvider,
-          baseUrl: ollamaUrl,
-          model: selectedLlmModel,
-          apiKey: activeApiKey,
-          apiKeys: {
-            gemini: geminiApiKey.trim(),
-            openai: openAiApiKey.trim()
-          },
-          timeoutMs: llmTimeoutMs
+          providers: {
+            ollama: {
+              baseUrl: llmConfigs.ollama.baseUrl.trim(),
+              model: llmConfigs.ollama.model.trim(),
+              timeoutMs: Math.trunc(Number(llmConfigs.ollama.timeoutSeconds) * 1000)
+            },
+            gemini: {
+              baseUrl: llmConfigs.gemini.baseUrl.trim(),
+              model: llmConfigs.gemini.model.trim(),
+              apiKey: llmConfigs.gemini.apiKey.trim(),
+              timeoutMs: Math.trunc(Number(llmConfigs.gemini.timeoutSeconds) * 1000)
+            },
+            openai: {
+              baseUrl: llmConfigs.openai.baseUrl.trim(),
+              model: llmConfigs.openai.model.trim(),
+              apiKey: llmConfigs.openai.apiKey.trim(),
+              timeoutMs: Math.trunc(Number(llmConfigs.openai.timeoutSeconds) * 1000)
+            }
+          }
         },
         comfy: {
           baseUrl: comfyUiUrl,
@@ -648,8 +718,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Server URL</label>
                       <input 
                         className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                        value={ollamaUrl}
-                        onChange={(e) => setOllamaUrl(e.target.value)}
+                        value={activeLlmConfig.baseUrl}
+                        onChange={(e) => updateLlmConfig('ollama', { baseUrl: e.target.value })}
                       />
                       <p className="text-[10px] text-slate-400">Default: http://127.0.0.1:11434</p>
                     </div>
@@ -659,8 +729,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                        <input 
                         type="number"
                         className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
-                        value={llmTimeout}
-                        onChange={(e) => setLlmTimeout(e.target.value)}
+                        value={activeLlmConfig.timeoutSeconds}
+                        onChange={(e) => updateLlmConfig('ollama', { timeoutSeconds: e.target.value })}
                       />
                     </div>
                   </div>
@@ -671,8 +741,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Available Models</label>
                         <select 
                           className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
-                          value={selectedLlmModel}
-                          onChange={(e) => setSelectedLlmModel(e.target.value)}
+                          value={activeLlmConfig.model}
+                          onChange={(e) => updateLlmConfig('ollama', { model: e.target.value })}
                           disabled={ollamaModels.length === 0}
                         >
                           {ollamaModels.length === 0 ? (
@@ -707,9 +777,9 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                     <div className="space-y-2">
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Model</label>
                       <input
-                        value={selectedLlmModel}
-                        onChange={(e) => setSelectedLlmModel(e.target.value)}
-                        placeholder={llmProvider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini'}
+                        value={activeLlmConfig.model}
+                        onChange={(e) => updateLlmConfig(llmProvider, { model: e.target.value })}
+                        placeholder={llmProvider === 'gemini' ? DEFAULT_GEMINI_MODEL : 'gpt-4o-mini'}
                         className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
                       />
                     </div>
@@ -717,8 +787,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Timeout (Seconds)</label>
                       <input
                         type="number"
-                        value={llmTimeout}
-                        onChange={(e) => setLlmTimeout(e.target.value)}
+                        value={activeLlmConfig.timeoutSeconds}
+                        onChange={(e) => updateLlmConfig(llmProvider, { timeoutSeconds: e.target.value })}
                         className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
                       />
                     </div>
@@ -726,8 +796,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API Base URL</label>
                     <input
-                      value={ollamaUrl}
-                      onChange={(e) => setOllamaUrl(e.target.value)}
+                      value={activeLlmConfig.baseUrl}
+                      onChange={(e) => updateLlmConfig(llmProvider, { baseUrl: e.target.value })}
                       className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
                     />
                   </div>
@@ -750,14 +820,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                     </div>
                     <input
                       type="password"
-                      value={llmProvider === 'gemini' ? geminiApiKey : openAiApiKey}
-                      onChange={(e) => {
-                        if (llmProvider === 'gemini') {
-                          setGeminiApiKey(e.target.value);
-                        } else {
-                          setOpenAiApiKey(e.target.value);
-                        }
-                      }}
+                      value={activeLlmConfig.apiKey}
+                      onChange={(e) => updateLlmConfig(llmProvider, { apiKey: e.target.value })}
                       placeholder={`Enter your ${llmProvider === 'gemini' ? 'Google Gemini' : 'OpenAI'} API Key`}
                       className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
                     />

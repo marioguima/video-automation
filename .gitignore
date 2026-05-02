@@ -76,10 +76,6 @@ data/
 *.sqlite
 *.sqlite3
 *.db
-!data/
-!data/*.json
-!data/app_settings.json
-!data/tts_settings.json
 data/courses/
 data/courses/**
 

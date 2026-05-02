@@ -1,0 +1,48 @@
+{
+  "theme": {
+    "family": "premium",
+    "mode": "dark"
+  },
+  "llm": {
+    "provider": "ollama",
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "model": "llama3.2:3b",
+        "timeoutMs": 60000
+      },
+      "gemini": {
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "model": "gemma-4-26b-a4b-it",
+        "apiKey": "",
+        "timeoutMs": 120000
+      },
+      "openai": {
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "apiKey": "",
+        "timeoutMs": 120000
+      }
+    }
+  },
+  "comfy": {
+    "baseUrl": "http://127.0.0.1:8188",
+    "promptTimeoutMs": 60000,
+    "generationTimeoutMs": 300000,
+    "viewTimeoutMs": 60000,
+    "masterPrompt": "",
+    "workflowFile": "vantage-z-image-turbo-api.json"
+  },
+  "tts": {
+    "baseUrl": "http://127.0.0.1:8020",
+    "timeoutUs": 5000000,
+    "language": "pt",
+    "defaultVoiceId": "cohesive-pt-santiago-22050hz"
+  },
+  "memory": {
+    "idleUnloadMs": 900000
+  },
+  "auth": {
+    "loginBackground": null
+  }
+}

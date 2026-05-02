@@ -18,13 +18,20 @@ import type { WebSocket } from "ws";
 import {
   buildDeterministicBlocks,
   buildFallbackMeta,
+  ensureAppSettingsFile,
   ensureDataDir,
   getConfig,
+  getMissingAppSettingsSecrets,
   loadRootEnv,
+  normalizeLlmProvider,
+  readAppSettingsFile,
+  resolveLlmProviders,
   sanitizeNarratedScriptText,
+  writeAppSettingsFile,
   loadVoiceIndex,
   findVoiceById,
-  blockSlideDir
+  blockSlideDir,
+  type AppSettings
 } from "@vizlec/shared";
 import { createPrismaClient } from "@vizlec/db";
 import { buildEndpointPurposeExplanation } from "./openapi-endpoint-explanations.js";
@@ -1170,8 +1177,10 @@ function getConnectedAgentForWorkspace(
 
 function getAgentIntegrationConfigSnapshot(): AgentIntegrationConfigSnapshot {
   const current = readAppSettings();
+  const provider = normalizeLlmProvider(current.llm?.provider);
+  const llmProviders = resolveLlmProviders(current.llm);
   return {
-    llmBaseUrl: (current.llm?.baseUrl ?? config.ollamaBaseUrl).trim(),
+    llmBaseUrl: (llmProviders[provider]?.baseUrl ?? config.ollamaBaseUrl).trim(),
     comfyuiBaseUrl: (current.comfy?.baseUrl ?? config.comfyuiBaseUrl).trim(),
     ttsBaseUrl: (current.tts?.baseUrl ?? config.xttsApiBaseUrl).trim()
   };
@@ -1585,37 +1594,6 @@ async function ensureSlideTemplates(): Promise<void> {
   }
 }
 
-type AppSettings = {
-  theme?: { family?: string; mode?: string };
-  llm?: {
-    provider?: string;
-    baseUrl?: string;
-    model?: string;
-    apiKey?: string;
-    apiKeys?: {
-      gemini?: string;
-      openai?: string;
-    };
-    timeoutMs?: number;
-  };
-  comfy?: {
-    baseUrl?: string;
-    promptTimeoutMs?: number;
-    generationTimeoutMs?: number;
-    viewTimeoutMs?: number;
-    masterPrompt?: string;
-    workflowFile?: string;
-  };
-  tts?: {
-    baseUrl?: string;
-    timeoutUs?: number;
-    language?: string;
-    defaultVoiceId?: string;
-  };
-  memory?: { idleUnloadMs?: number };
-  auth?: { loginBackground?: string };
-};
-
 type ComfyWorkflowNode = {
   inputs?: Record<string, unknown>;
   class_type?: string;
@@ -1729,87 +1707,43 @@ function resolveConfiguredWorkflowFile(current: AppSettings): string {
   return DEFAULT_COMFY_WORKFLOW_FILE;
 }
 function readAppSettings(): AppSettings {
-  try {
-    if (fs.existsSync(config.appSettingsPath)) {
-      const raw = fs.readFileSync(config.appSettingsPath, "utf8");
-      const parsed = JSON.parse(raw) as AppSettings;
-      return parsed ?? {};
-    }
-  } catch {
-    // ignore
-  }
-  return {};
+  return readAppSettingsFile(config.appSettingsPath, config.appSettingsTemplatePath);
 }
 
 function writeAppSettings(next: AppSettings): void {
-  fs.writeFileSync(config.appSettingsPath, JSON.stringify(next, null, 2), "utf8");
+  writeAppSettingsFile(config.appSettingsPath, next);
 }
 
-function migrateLegacySettings(): void {
-  if (fs.existsSync(config.appSettingsPath)) return;
-
-  const next: AppSettings = {};
-
-  try {
-    if (fs.existsSync(config.ttsSettingsPath)) {
-      const raw = fs.readFileSync(config.ttsSettingsPath, "utf8");
-      const parsed = JSON.parse(raw) as { voiceId?: string; language?: string };
-      if (parsed?.voiceId || parsed?.language) {
-        next.tts = {
-          defaultVoiceId: typeof parsed.voiceId === "string" ? parsed.voiceId : undefined,
-          language: typeof parsed.language === "string" ? parsed.language : undefined
-        };
-      }
-    }
-  } catch {
-    // ignore
+function initializeAppSettings(): void {
+  const result = ensureAppSettingsFile({
+    settingsPath: config.appSettingsPath,
+    templatePath: config.appSettingsTemplatePath,
+    ttsSettingsPath: config.ttsSettingsPath,
+    comfySettingsPath: config.comfySettingsPath,
+    removeLegacyFiles: true
+  });
+  if (result.created) {
+    fastify.log.info({
+      app_settings_path: config.appSettingsPath,
+      app_settings_template_path: config.appSettingsTemplatePath
+    }, "app_settings_created");
+  } else if (result.normalized) {
+    fastify.log.info({
+      app_settings_path: config.appSettingsPath,
+      app_settings_template_path: config.appSettingsTemplatePath
+    }, "app_settings_normalized");
   }
-
-  try {
-    if (fs.existsSync(config.comfySettingsPath)) {
-      const raw = fs.readFileSync(config.comfySettingsPath, "utf8");
-      const parsed = JSON.parse(raw) as {
-        baseUrl?: string;
-        promptTimeoutMs?: number;
-        generationTimeoutMs?: number;
-        viewTimeoutMs?: number;
-      };
-      if (parsed && Object.keys(parsed).length > 0) {
-        next.comfy = {
-          baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl : undefined,
-          promptTimeoutMs:
-            typeof parsed.promptTimeoutMs === "number" && Number.isFinite(parsed.promptTimeoutMs)
-              ? parsed.promptTimeoutMs
-              : undefined,
-          generationTimeoutMs:
-            typeof parsed.generationTimeoutMs === "number" && Number.isFinite(parsed.generationTimeoutMs)
-              ? parsed.generationTimeoutMs
-              : undefined,
-          viewTimeoutMs:
-            typeof parsed.viewTimeoutMs === "number" && Number.isFinite(parsed.viewTimeoutMs)
-              ? parsed.viewTimeoutMs
-              : undefined
-        };
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  if (Object.keys(next).length > 0) {
-    writeAppSettings(next);
-  }
-
-  if (fs.existsSync(config.ttsSettingsPath)) {
-    fs.unlinkSync(config.ttsSettingsPath);
-  }
-  if (fs.existsSync(config.comfySettingsPath)) {
-    fs.unlinkSync(config.comfySettingsPath);
+  for (const issue of result.missingSecrets) {
+    fastify.log.warn({
+      provider: issue.provider,
+      field: issue.field,
+      settings_path: config.appSettingsPath
+    }, "app_settings_secret_missing");
   }
 }
 
 await ensureSlideTemplates();
-migrateLegacySettings();
+initializeAppSettings();
 
 await fastify.register(cors, {
   origin: true,
@@ -4289,19 +4223,8 @@ fastify.get(
   },
   async () => {
     const current = readAppSettings();
-    const provider = (current.llm?.provider ?? "ollama").trim().toLowerCase();
-    const apiKeys = {
-      gemini: current.llm?.apiKeys?.gemini ?? "",
-      openai: current.llm?.apiKeys?.openai ?? ""
-    };
-    if (!apiKeys.gemini && provider === "gemini" && current.llm?.apiKey) {
-      apiKeys.gemini = current.llm.apiKey;
-    }
-    if (!apiKeys.openai && provider === "openai" && current.llm?.apiKey) {
-      apiKeys.openai = current.llm.apiKey;
-    }
-    const activeApiKey =
-      provider === "gemini" ? apiKeys.gemini : provider === "openai" ? apiKeys.openai : (current.llm?.apiKey ?? "");
+    const provider = normalizeLlmProvider(current.llm?.provider);
+    const providers = resolveLlmProviders(current.llm);
     const workflows = listComfyWorkflowFiles();
     const selectedWorkflow =
       current.comfy?.workflowFile && workflows.includes(current.comfy.workflowFile)
@@ -4312,12 +4235,8 @@ fastify.get(
     return {
       theme: current.theme ?? null,
       llm: {
-        provider: provider === "gemini" || provider === "openai" ? provider : "ollama",
-        baseUrl: current.llm?.baseUrl ?? config.ollamaBaseUrl,
-        model: current.llm?.model ?? config.ollamaModel,
-        apiKey: activeApiKey,
-        apiKeys,
-        timeoutMs: current.llm?.timeoutMs ?? config.ollamaTimeoutMs
+        provider,
+        providers
       },
       comfy: {
         baseUrl: current.comfy?.baseUrl ?? config.comfyuiBaseUrl,
@@ -4339,6 +4258,9 @@ fastify.get(
       },
       auth: {
         loginBackground: current.auth?.loginBackground ?? null
+      },
+      setup: {
+        missingSecrets: getMissingAppSettingsSecrets(current)
       }
     };
   }
@@ -4368,58 +4290,39 @@ fastify.patch(
       };
     }
     if (body.llm) {
-      const timeout = body.llm.timeoutMs;
-      if (timeout !== undefined && (!Number.isFinite(timeout) || timeout <= 0)) {
-        return reply.code(400).send({ error: "llm.timeoutMs must be a positive number" });
-      }
       const provider = (body.llm.provider ?? current.llm?.provider ?? "ollama").trim().toLowerCase();
       if (!["ollama", "gemini", "openai"].includes(provider)) {
         return reply.code(400).send({ error: "llm.provider must be one of: ollama, gemini, openai" });
       }
-      const apiKeys = {
-        gemini: current.llm?.apiKeys?.gemini ?? "",
-        openai: current.llm?.apiKeys?.openai ?? ""
-      };
-      const currentProvider = (current.llm?.provider ?? "").trim().toLowerCase();
-      if (!apiKeys.gemini && currentProvider === "gemini" && current.llm?.apiKey) {
-        apiKeys.gemini = current.llm.apiKey;
+      const providers = resolveLlmProviders(current.llm);
+      for (const [providerKey, providerSettings] of Object.entries(body.llm.providers ?? {})) {
+        if (!providerSettings) continue;
+        const timeout = providerSettings.timeoutMs;
+        if (timeout !== undefined && (!Number.isFinite(timeout) || timeout <= 0)) {
+          return reply.code(400).send({ error: `llm.providers.${providerKey}.timeoutMs must be a positive number` });
+        }
+        providers[providerKey] = {
+          ...(providers[providerKey] ?? {}),
+          baseUrl: providerSettings.baseUrl ?? providers[providerKey]?.baseUrl,
+          model: providerSettings.model ?? providers[providerKey]?.model,
+          timeoutMs: timeout !== undefined ? Math.trunc(timeout) : providers[providerKey]?.timeoutMs
+        };
+        if (providerKey !== "ollama") {
+          providers[providerKey].apiKey =
+            providerSettings.apiKey !== undefined ? providerSettings.apiKey.trim() : providers[providerKey]?.apiKey ?? "";
+        }
       }
-      if (!apiKeys.openai && currentProvider === "openai" && current.llm?.apiKey) {
-        apiKeys.openai = current.llm.apiKey;
-      }
-      if (body.llm.apiKeys?.gemini !== undefined) {
-        apiKeys.gemini = body.llm.apiKeys.gemini.trim();
-      }
-      if (body.llm.apiKeys?.openai !== undefined) {
-        apiKeys.openai = body.llm.apiKeys.openai.trim();
-      }
-      const apiKey =
-        body.llm.apiKey !== undefined
-          ? body.llm.apiKey.trim()
-          : provider === "gemini"
-            ? apiKeys.gemini
-            : provider === "openai"
-              ? apiKeys.openai
-              : (current.llm?.apiKey ?? "");
-      if (provider === "gemini") {
-        apiKeys.gemini = apiKey;
-      }
-      if (provider === "openai") {
-        apiKeys.openai = apiKey;
-      }
-      if (provider === "gemini" && !apiKey) {
+      const activeSettings = providers[provider] ?? {};
+      const activeApiKey = activeSettings.apiKey?.trim() ?? "";
+      if (provider === "gemini" && !activeApiKey) {
         return reply.code(400).send({ error: "Gemini API key is required when Gemini is selected" });
       }
-      if (provider === "openai" && !apiKey) {
+      if (provider === "openai" && !activeApiKey) {
         return reply.code(400).send({ error: "OpenAI API key is required when OpenAI is selected" });
       }
       next.llm = {
         provider,
-        baseUrl: body.llm.baseUrl ?? current.llm?.baseUrl,
-        model: body.llm.model ?? current.llm?.model,
-        apiKey,
-        apiKeys,
-        timeoutMs: timeout !== undefined ? Math.trunc(timeout) : current.llm?.timeoutMs
+        providers
       };
     }
     if (body.comfy) {

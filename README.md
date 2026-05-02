@@ -116,6 +116,59 @@ api:    http://127.0.0.1:4110
 worker: http://127.0.0.1:4111
 ```
 
+## App settings
+
+As configuracoes runtime do aplicativo ficam em `APP_SETTINGS_PATH`, por padrao
+`data/app_settings.json`. Esse arquivo e gerado automaticamente quando a API ou
+o worker iniciam e nao deve ser versionado, porque pode conter chaves de API.
+
+O template versionado fica fora de `data`:
+
+```text
+config/app_settings.template.json
+```
+
+Ele contem apenas valores nao criticos: URLs locais, modelos padrao, timeouts,
+tema, TTS, ComfyUI e memoria. As chaves de provedores externos ficam vazias no
+template e devem ser preenchidas pela tela Settings ou diretamente no arquivo
+local de desenvolvimento.
+
+Formato atual do bloco LLM:
+
+```json
+{
+  "llm": {
+    "provider": "gemini",
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "model": "llama3.2:3b",
+        "timeoutMs": 60000
+      },
+      "gemini": {
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "model": "gemma-4-26b-a4b-it",
+        "apiKey": "",
+        "timeoutMs": 120000
+      }
+    }
+  }
+}
+```
+
+Na inicializacao, a aplicacao:
+
+- cria `data/` se a pasta nao existir;
+- cria `data/app_settings.json` a partir do template se o arquivo nao existir;
+- normaliza formatos antigos para `llm.providers.<provider>`;
+- preserva chaves ja preenchidas no arquivo local;
+- registra `app_settings_secret_missing` se o provedor ativo exigir chave e ela
+  ainda estiver vazia.
+
+Para recriar o arquivo local a partir do template, apague apenas
+`data/app_settings.json` e reinicie a API ou o worker. O arquivo sera gerado de
+novo sem segredos.
+
 ## Worker, agent e pareamento
 
 O `apps/worker` e o processo local que executa as tarefas pesadas e/ou
@@ -246,7 +299,7 @@ pnpm --filter @vizlec/api run test:one -- test/content-cope-flow.test.ts
 - Mover chaves de providers externos, como Gemini e OpenAI, do arquivo
   `data/app_settings.json` para armazenamento persistido na base com criptografia
   ou envelope encryption. Enquanto isso, tratar `data/app_settings.json` como
-  segredo local de desenvolvimento e nao commitar esse arquivo.
+  segredo local de desenvolvimento. Esse arquivo e ignorado pelo git.
 
 ## Regra importante
 

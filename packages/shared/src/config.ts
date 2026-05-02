@@ -17,6 +17,7 @@ export type AppConfig = {
   comfyViewTimeoutMs: number;
   comfySettingsPath: string;
   appSettingsPath: string;
+  appSettingsTemplatePath: string;
   qwenTtsBaseUrl: string;
   ttsProvider: string;
   ttsVoicesDir: string;
@@ -96,6 +97,20 @@ export function ensureDataDir(dataDir = resolveDataDir()): void {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
+export function resolveProjectRoot(startDir = process.cwd()): string {
+  let current = path.resolve(startDir);
+  while (true) {
+    if (fs.existsSync(path.join(current, "pnpm-workspace.yaml")) || fs.existsSync(path.join(current, ".git"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return path.resolve(startDir);
+    }
+    current = parent;
+  }
+}
+
 function normalizeFilePath(filePath: string): string {
   if (process.platform === "win32") {
     return filePath.replace(/\\/g, "/");
@@ -123,6 +138,9 @@ export function getConfig(): AppConfig {
     process.env.COMFY_SETTINGS_PATH ?? path.join(dataDir, "comfy_settings.json");
   const appSettingsPath =
     process.env.APP_SETTINGS_PATH ?? path.join(dataDir, "app_settings.json");
+  const appSettingsTemplatePath =
+    process.env.APP_SETTINGS_TEMPLATE_PATH ??
+    path.join(resolveProjectRoot(process.cwd()), "config", "app_settings.template.json");
   const xttsApiModelDir =
     process.env.XTTS_API_MODEL_DIR ?? path.join(dataDir, "xtts_models");
   const xttsApiOutputDir =
@@ -145,6 +163,7 @@ export function getConfig(): AppConfig {
     comfyViewTimeoutMs: Number(process.env.COMFY_VIEW_TIMEOUT_MS ?? 60000),
     comfySettingsPath,
     appSettingsPath,
+    appSettingsTemplatePath,
     qwenTtsBaseUrl: process.env.QWEN_TTS_BASE_URL ?? "http://127.0.0.1:9000",
     ttsProvider: process.env.TTS_PROVIDER ?? "qwen",
     ttsVoicesDir,
