@@ -1,0 +1,31 @@
+prompts:
+  - name: vizlec-tech-spec
+    description: Especificação técnica inicial
+    content_file: vizlec-tech-spec.md
+  - name: vizlec-prd-tech-v1
+    description: PRD+Tech Spec completo (local-first)
+    content_file: vizlec-prd-tech-v1.md
+  - name: vizlec-segmentation-json
+    description: Segmentar roteiro em blocos de 15–20s (JSON)
+    content_file: vizlec-segmentation-json.md
+  - name: vizlec-onscreen-bullets-json
+    description: Gerar título+bullets on-screen por bloco (JSON)
+    content_file: vizlec-onscreen-bullets-json.md
+  - name: vizlec-image-prompt-json
+    description: Gerar prompt variável de imagem por bloco (JSON)
+    content_file: vizlec-image-prompt-json.md
+  - name: vizlec-tts-normalizer-json
+    description: Normalizar texto para TTS (JSON)
+    content_file: vizlec-tts-normalizer-json.md
+  - name: vizlec-ffmpeg-plan-json
+    description: Plano de renderização de vídeo com ffmpeg (JSON)
+    content_file: vizlec-ffmpeg-plan-json.md
+  - name: vizlec-job-state-machine-json
+    description: Máquina de estados do pipeline e invalidações (JSON)
+    content_file: vizlec-job-state-machine-json.md
+  - name: vizlec-template-spec-json
+    description: Especificação de template HTML/CSS para slides (JSON)
+    content_file: vizlec-template-spec-json.md
+  - name: vizlec-comfyui-workflow-map-json
+    description: Mapeamento/parametrização do workflow do ComfyUI (JSON)
+    content_file: vizlec-comfyui-workflow-map-json.md
