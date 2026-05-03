@@ -188,6 +188,8 @@ function buildRelevantJobUpdateFingerprintPayload(payload: Record<string, unknow
       ? phaseRaw
       : null;
   const progressPercent = normalizeNumber(payload.progressPercent);
+  const progressCurrent = normalizeNumber(payload.progressCurrent);
+  const progressTotal = normalizeNumber(payload.progressTotal);
   const buildStatusRaw =
     payload.buildStatus && typeof payload.buildStatus === "object"
       ? (payload.buildStatus as Record<string, unknown>)
@@ -212,6 +214,8 @@ function buildRelevantJobUpdateFingerprintPayload(payload: Record<string, unknow
     lifecycle,
     phase,
     progressPercent,
+    progressCurrent,
+    progressTotal,
     error,
     buildStatus
   });
@@ -2024,6 +2028,8 @@ fastify.post(
       lifecycle?: string;
       phase?: string;
       progressPercent?: number;
+      progressCurrent?: number;
+      progressTotal?: number;
     };
     const jobId = body?.jobId?.trim();
     if (!jobId) {
@@ -2044,6 +2050,14 @@ fastify.post(
     const progressPercent =
       typeof body?.progressPercent === "number" && Number.isFinite(body.progressPercent)
         ? Math.max(1, Math.min(99, Math.trunc(body.progressPercent)))
+        : null;
+    const progressCurrent =
+      typeof body?.progressCurrent === "number" && Number.isFinite(body.progressCurrent)
+        ? Math.max(0, Math.trunc(body.progressCurrent))
+        : null;
+    const progressTotal =
+      typeof body?.progressTotal === "number" && Number.isFinite(body.progressTotal)
+        ? Math.max(0, Math.trunc(body.progressTotal))
         : null;
     const job = await prisma.job.findUnique({
       where: { id: jobId },
@@ -2138,6 +2152,8 @@ fastify.post(
       lifecycle,
       phase,
       progressPercent,
+      progressCurrent,
+      progressTotal,
       error: job.error,
       updatedAt: job.updatedAt,
       buildStatus
@@ -5497,20 +5513,22 @@ function parseJsonRecord(value: string | null | undefined): Record<string, unkno
 
 type ProjectPipelineScriptMode = "none" | "scene_blocks" | "music_storyboard";
 type ProjectPipelineAudioMode = "none" | "tts" | "music" | "video_native_audio";
+type ProjectPipelineImageMode = "none" | "generate";
 type ProjectPipelineVideoMode = "none" | "editor_motion" | "text_to_video" | "image_to_video" | "looped_clips";
 type ProjectPipelineRenderOutputMode = "images_only" | "single_video" | "clips";
 
 type NormalizedProjectPipeline = {
   version: 1;
   script: { mode: ProjectPipelineScriptMode };
-  audio: { mode: ProjectPipelineAudioMode };
-  image: { enabled: boolean };
-  video: { mode: ProjectPipelineVideoMode };
+  audio: { mode: ProjectPipelineAudioMode; tts?: Record<string, unknown> };
+  image: { mode: ProjectPipelineImageMode; model?: Record<string, unknown> };
+  video: { mode: ProjectPipelineVideoMode; model?: Record<string, unknown> };
   render: { outputMode: ProjectPipelineRenderOutputMode };
 };
 
 const PROJECT_PIPELINE_SCRIPT_MODES = new Set<ProjectPipelineScriptMode>(["none", "scene_blocks", "music_storyboard"]);
 const PROJECT_PIPELINE_AUDIO_MODES = new Set<ProjectPipelineAudioMode>(["none", "tts", "music", "video_native_audio"]);
+const PROJECT_PIPELINE_IMAGE_MODES = new Set<ProjectPipelineImageMode>(["none", "generate"]);
 const PROJECT_PIPELINE_VIDEO_MODES = new Set<ProjectPipelineVideoMode>([
   "none",
   "editor_motion",
@@ -5522,6 +5540,10 @@ const PROJECT_PIPELINE_RENDER_OUTPUT_MODES = new Set<ProjectPipelineRenderOutput
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function isProjectPipelineVideoProviderMode(mode: ProjectPipelineVideoMode): boolean {
+  return mode === "text_to_video" || mode === "image_to_video" || mode === "looped_clips";
 }
 
 function normalizeProjectPipelineEnum<T extends string>(
@@ -5537,132 +5559,37 @@ function normalizeProjectPipelineEnum<T extends string>(
   return { value: value as T };
 }
 
-function deriveProjectPipelineFromLegacy(metadata: Record<string, unknown>): NormalizedProjectPipeline {
-  const tts = asRecord(metadata.tts);
-  const visualGeneration = asRecord(metadata.visualGeneration);
-  const image = asRecord(visualGeneration?.image);
-  const video = asRecord(visualGeneration?.video);
-  const videoKind = normalizeOptionalText(video?.kind);
-  const videoMode: ProjectPipelineVideoMode = video
-    ? image && videoKind === "image_to_video"
-      ? "image_to_video"
-      : "text_to_video"
-    : "none";
-  return {
-    version: 1,
-    script: { mode: "scene_blocks" },
-    audio: { mode: tts ? "tts" : "none" },
-    image: { enabled: Boolean(image) },
-    video: { mode: videoMode },
-    render: { outputMode: video ? "single_video" : image ? "images_only" : "single_video" }
-  };
-}
-
-function normalizeProjectPipelineMetadata(
+function normalizeProjectTtsRouteMetadata(
   value: unknown,
-  metadata: Record<string, unknown>
-): { value?: NormalizedProjectPipeline; error?: string } {
-  const fallback = deriveProjectPipelineFromLegacy(metadata);
-  if (value === undefined || value === null) return { value: fallback };
-  const raw = asRecord(value);
-  if (!raw) return { error: "metadata.pipeline must be an object" };
-
-  const script = asRecord(raw.script);
-  const audio = asRecord(raw.audio);
-  const image = asRecord(raw.image);
-  const video = asRecord(raw.video);
-  const render = asRecord(raw.render);
-
-  const scriptMode = normalizeProjectPipelineEnum(
-    script?.mode,
-    PROJECT_PIPELINE_SCRIPT_MODES,
-    fallback.script.mode,
-    "metadata.pipeline.script.mode"
-  );
-  if ("error" in scriptMode) return { error: scriptMode.error };
-
-  const audioMode = normalizeProjectPipelineEnum(
-    audio?.mode,
-    PROJECT_PIPELINE_AUDIO_MODES,
-    fallback.audio.mode,
-    "metadata.pipeline.audio.mode"
-  );
-  if ("error" in audioMode) return { error: audioMode.error };
-
-  const videoMode = normalizeProjectPipelineEnum(
-    video?.mode,
-    PROJECT_PIPELINE_VIDEO_MODES,
-    fallback.video.mode,
-    "metadata.pipeline.video.mode"
-  );
-  if ("error" in videoMode) return { error: videoMode.error };
-
-  const renderOutputMode = normalizeProjectPipelineEnum(
-    render?.outputMode,
-    PROJECT_PIPELINE_RENDER_OUTPUT_MODES,
-    fallback.render.outputMode,
-    "metadata.pipeline.render.outputMode"
-  );
-  if ("error" in renderOutputMode) return { error: renderOutputMode.error };
-
-  const imageEnabled =
-    typeof image?.enabled === "boolean"
-      ? image.enabled
-      : videoMode.value === "editor_motion" || videoMode.value === "image_to_video"
-        ? true
-        : fallback.image.enabled;
-
-  if ((videoMode.value === "editor_motion" || videoMode.value === "image_to_video") && !imageEnabled) {
-    return { error: "metadata.pipeline.image.enabled must be true when video mode uses generated images" };
-  }
-  if (audioMode.value === "video_native_audio" && (videoMode.value === "none" || videoMode.value === "editor_motion")) {
-    return { error: "metadata.pipeline.video.mode must use a video generation provider when audio mode is video_native_audio" };
-  }
-  if (renderOutputMode.value === "images_only" && !imageEnabled) {
-    return { error: "metadata.pipeline.image.enabled must be true when render output is images_only" };
-  }
-
-  return {
-    value: {
-      version: 1,
-      script: { mode: scriptMode.value },
-      audio: { mode: audioMode.value },
-      image: { enabled: imageEnabled },
-      video: { mode: videoMode.value },
-      render: { outputMode: renderOutputMode.value }
-    }
-  };
-}
-
-function normalizeProjectTtsMetadata(value: unknown, required = false): { value?: Record<string, unknown>; error?: string } {
+  required: boolean
+): { value?: Record<string, unknown>; error?: string } {
+  const field = "metadata.pipeline.audio.tts";
   if (value === undefined || value === null) {
-    return required ? { error: "metadata.tts is required when metadata.pipeline.audio.mode is tts" } : {};
+    return required ? { error: `${field} is required when metadata.pipeline.audio.mode is tts` } : {};
   }
-  if (typeof value !== "object" || Array.isArray(value)) {
-    return { error: "metadata.tts must be an object" };
-  }
-  const raw = value as Record<string, unknown>;
+  const raw = asRecord(value);
+  if (!raw) return { error: `${field} must be an object` };
+
   const providerId = normalizeOptionalText(raw.providerId);
   const languageInput = normalizeOptionalText(raw.language);
-  if (!providerId) return { error: "metadata.tts.providerId is required" };
-  if (!languageInput) return { error: "metadata.tts.language is required" };
+  if (!providerId) return { error: `${field}.providerId is required` };
+  if (!languageInput) return { error: `${field}.language is required` };
 
   const settings = readAppSettings();
   const provider = settings.tts?.providers?.[providerId];
   if (!provider) {
-    return { error: `metadata.tts.providerId '${providerId}' is not configured` };
+    return { error: `${field}.providerId '${providerId}' is not configured` };
   }
 
   const routeEntry = Object.entries(settings.tts?.languageRoutes ?? {}).find(
     ([language, route]) => language.toLowerCase() === languageInput.toLowerCase() && route?.providerId === providerId
   );
   if (!routeEntry) {
-    return { error: `metadata.tts language '${languageInput}' is not assigned to provider '${providerId}'` };
+    return { error: `${field}.language '${languageInput}' is not assigned to provider '${providerId}'` };
   }
   const [language, route] = routeEntry;
   return {
     value: {
-      mode: "external_tts",
       providerId,
       provider: provider.provider ?? providerId,
       language,
@@ -5679,36 +5606,35 @@ function normalizeProjectVisualModelMetadata(
   value: unknown,
   field: "image" | "video",
   required: boolean
-): { value?: Record<string, unknown> | null; error?: string } {
+): { value?: Record<string, unknown>; error?: string } {
+  const fieldPath = `metadata.pipeline.${field}.model`;
   if (value === undefined || value === null) {
-    return required ? { error: `metadata.visualGeneration.${field} is required` } : { value: null };
+    return required ? { error: `${fieldPath} is required` } : {};
   }
-  if (typeof value !== "object" || Array.isArray(value)) {
-    return { error: `metadata.visualGeneration.${field} must be an object` };
-  }
-  const raw = value as Record<string, unknown>;
+  const raw = asRecord(value);
+  if (!raw) return { error: `${fieldPath} must be an object` };
   const providerId = normalizeOptionalText(raw.providerId);
   const modelId = normalizeOptionalText(raw.modelId);
-  if (!providerId) return { error: `metadata.visualGeneration.${field}.providerId is required` };
-  if (!modelId) return { error: `metadata.visualGeneration.${field}.modelId is required` };
+  if (!providerId) return { error: `${fieldPath}.providerId is required` };
+  if (!modelId) return { error: `${fieldPath}.modelId is required` };
 
   const settings = readAppSettings();
   const provider = settings.visualGeneration?.providers?.[providerId];
   if (!provider) {
-    return { error: `metadata.visualGeneration.${field}.providerId '${providerId}' is not configured` };
+    return { error: `${fieldPath}.providerId '${providerId}' is not configured` };
   }
   const model = provider.models?.[modelId];
   if (!model) {
-    return { error: `metadata.visualGeneration.${field}.modelId '${modelId}' is not configured for '${providerId}'` };
+    return { error: `${fieldPath}.modelId '${modelId}' is not configured for '${providerId}'` };
   }
   const kind = model.kind ?? (field === "image" ? "text_to_image" : "image_to_video");
   const imageKinds = new Set(["text_to_image", "image_to_image"]);
   const videoKinds = new Set(["text_to_video", "image_to_video"]);
   if (field === "image" && !imageKinds.has(kind)) {
-    return { error: `metadata.visualGeneration.image.modelId '${modelId}' is not an image generation model` };
+    return { error: `${fieldPath}.modelId '${modelId}' is not an image generation model` };
   }
   if (field === "video" && !videoKinds.has(kind)) {
-    return { error: `metadata.visualGeneration.video.modelId '${modelId}' is not a video generation model` };
+    return { error: `${fieldPath}.modelId '${modelId}' is not a video generation model` };
   }
   return {
     value: {
@@ -5728,74 +5654,121 @@ function normalizeProjectVisualModelMetadata(
   };
 }
 
-function normalizeProjectVisualGenerationMetadata(
-  value: unknown,
-  options: { imageRequired?: boolean; videoRequired?: boolean } = {}
-): { value?: Record<string, unknown>; error?: string } {
-  const imageRequired = options.imageRequired ?? false;
-  const videoRequired = options.videoRequired ?? false;
-  if (value === undefined || value === null) {
-    if (imageRequired || videoRequired) {
-      return { error: "metadata.visualGeneration is required by metadata.pipeline" };
-    }
-    return {};
+function normalizeProjectPipelineMetadata(value: unknown): { value?: NormalizedProjectPipeline; error?: string } {
+  if (value === undefined || value === null) return { error: "metadata.pipeline is required" };
+  const raw = asRecord(value);
+  if (!raw) return { error: "metadata.pipeline must be an object" };
+
+  const script = asRecord(raw.script);
+  const audio = asRecord(raw.audio);
+  const image = asRecord(raw.image);
+  const video = asRecord(raw.video);
+  const render = asRecord(raw.render);
+
+  const scriptMode = normalizeProjectPipelineEnum(
+    script?.mode,
+    PROJECT_PIPELINE_SCRIPT_MODES,
+    "scene_blocks",
+    "metadata.pipeline.script.mode"
+  );
+  if ("error" in scriptMode) return { error: scriptMode.error };
+
+  const audioMode = normalizeProjectPipelineEnum(
+    audio?.mode,
+    PROJECT_PIPELINE_AUDIO_MODES,
+    "none",
+    "metadata.pipeline.audio.mode"
+  );
+  if ("error" in audioMode) return { error: audioMode.error };
+
+  const imageMode = normalizeProjectPipelineEnum(
+    image?.mode,
+    PROJECT_PIPELINE_IMAGE_MODES,
+    image?.model ? "generate" : "none",
+    "metadata.pipeline.image.mode"
+  );
+  if ("error" in imageMode) return { error: imageMode.error };
+
+  const videoMode = normalizeProjectPipelineEnum(
+    video?.mode,
+    PROJECT_PIPELINE_VIDEO_MODES,
+    "none",
+    "metadata.pipeline.video.mode"
+  );
+  if ("error" in videoMode) return { error: videoMode.error };
+
+  const renderOutputMode = normalizeProjectPipelineEnum(
+    render?.outputMode,
+    PROJECT_PIPELINE_RENDER_OUTPUT_MODES,
+    "single_video",
+    "metadata.pipeline.render.outputMode"
+  );
+  if ("error" in renderOutputMode) return { error: renderOutputMode.error };
+
+  const tts = normalizeProjectTtsRouteMetadata(audio?.tts, audioMode.value === "tts");
+  if (tts.error) return { error: tts.error };
+  if (audioMode.value !== "tts" && audio?.tts !== undefined) {
+    return { error: "metadata.pipeline.audio.tts is only allowed when metadata.pipeline.audio.mode is tts" };
   }
-  if (typeof value !== "object" || Array.isArray(value)) {
-    return { error: "metadata.visualGeneration must be an object" };
+
+  const videoRequired = isProjectPipelineVideoProviderMode(videoMode.value) || audioMode.value === "video_native_audio";
+  if (!videoRequired && video?.model !== undefined) {
+    return { error: "metadata.pipeline.video.model is only allowed when video mode uses a video provider" };
   }
-  const raw = value as Record<string, unknown>;
-  const image = normalizeProjectVisualModelMetadata(raw.image, "image", imageRequired);
-  if (image.error) return { error: image.error };
-  const video = normalizeProjectVisualModelMetadata(raw.video, "video", videoRequired);
-  if (video.error) return { error: video.error };
+  if (audioMode.value === "video_native_audio" && (videoMode.value === "none" || videoMode.value === "editor_motion")) {
+    return { error: "metadata.pipeline.video.mode must use a video generation provider when audio mode is video_native_audio" };
+  }
+
+  const videoModel = normalizeProjectVisualModelMetadata(video?.model, "video", videoRequired);
+  if (videoModel.error) return { error: videoModel.error };
+  const videoKind = normalizeOptionalText(videoModel.value?.kind);
+
+  if (videoMode.value === "text_to_video" && videoKind !== "text_to_video") {
+    return { error: "metadata.pipeline.video.model.kind must be text_to_video when metadata.pipeline.video.mode is text_to_video" };
+  }
+  if (videoMode.value === "image_to_video" && videoKind !== "image_to_video") {
+    return { error: "metadata.pipeline.video.model.kind must be image_to_video when metadata.pipeline.video.mode is image_to_video" };
+  }
+  if (audioMode.value === "video_native_audio" && videoModel.value?.supportsNativeAudio !== true) {
+    return { error: "metadata.pipeline.video.model must support native audio when metadata.pipeline.audio.mode is video_native_audio" };
+  }
+
+  const imageRequired =
+    imageMode.value === "generate" ||
+    videoMode.value === "editor_motion" ||
+    videoMode.value === "image_to_video" ||
+    renderOutputMode.value === "images_only" ||
+    (videoMode.value === "looped_clips" && videoKind === "image_to_video");
+
+  if (imageRequired && imageMode.value !== "generate") {
+    return { error: "metadata.pipeline.image.mode must be generate when the selected pipeline requires images" };
+  }
+  if (!imageRequired && image?.model !== undefined) {
+    return { error: "metadata.pipeline.image.model is only allowed when metadata.pipeline.image.mode is generate" };
+  }
+
+  const imageModel = normalizeProjectVisualModelMetadata(image?.model, "image", imageRequired);
+  if (imageModel.error) return { error: imageModel.error };
+
   return {
     value: {
-      image: image.value,
-      video: video.value ?? null
+      version: 1,
+      script: { mode: scriptMode.value },
+      audio: {
+        mode: audioMode.value,
+        ...(tts.value ? { tts: tts.value } : {})
+      },
+      image: {
+        mode: imageRequired ? "generate" : "none",
+        ...(imageModel.value ? { model: imageModel.value } : {})
+      },
+      video: {
+        mode: videoMode.value,
+        ...(videoModel.value ? { model: videoModel.value } : {})
+      },
+      render: { outputMode: renderOutputMode.value }
     }
   };
-}
-
-function validateProjectPipelineVisualSelections(
-  pipeline: NormalizedProjectPipeline,
-  visualGeneration: Record<string, unknown> | undefined
-): string | null {
-  const image = asRecord(visualGeneration?.image);
-  const video = asRecord(visualGeneration?.video);
-  const videoKind = normalizeOptionalText(video?.kind);
-
-  if (pipeline.image.enabled && !image) {
-    return "metadata.visualGeneration.image is required when metadata.pipeline.image.enabled is true";
-  }
-  if (pipeline.video.mode === "editor_motion" && !image) {
-    return "metadata.visualGeneration.image is required when metadata.pipeline.video.mode is editor_motion";
-  }
-  if (pipeline.video.mode === "text_to_video") {
-    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.video.mode is text_to_video";
-    if (videoKind !== "text_to_video") {
-      return "metadata.visualGeneration.video.kind must be text_to_video when metadata.pipeline.video.mode is text_to_video";
-    }
-  }
-  if (pipeline.video.mode === "image_to_video") {
-    if (!image) return "metadata.visualGeneration.image is required when metadata.pipeline.video.mode is image_to_video";
-    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.video.mode is image_to_video";
-    if (videoKind !== "image_to_video") {
-      return "metadata.visualGeneration.video.kind must be image_to_video when metadata.pipeline.video.mode is image_to_video";
-    }
-  }
-  if (pipeline.video.mode === "looped_clips") {
-    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.video.mode is looped_clips";
-    if (videoKind === "image_to_video" && !image) {
-      return "metadata.visualGeneration.image is required when looped_clips uses an image_to_video model";
-    }
-  }
-  if (pipeline.audio.mode === "video_native_audio") {
-    if (!video) return "metadata.visualGeneration.video is required when metadata.pipeline.audio.mode is video_native_audio";
-    if (video.supportsNativeAudio !== true) {
-      return "metadata.visualGeneration.video must support native audio when metadata.pipeline.audio.mode is video_native_audio";
-    }
-  }
-  return null;
 }
 
 function normalizeContentProjectMetadata(value: unknown): { metadataJson?: string; error?: string } {
@@ -5804,49 +5777,18 @@ function normalizeContentProjectMetadata(value: unknown): { metadataJson?: strin
     return { error: "metadata must be an object" };
   }
   const metadata = { ...(value as Record<string, unknown>) };
-
-  const pipeline = normalizeProjectPipelineMetadata(metadata.pipeline, metadata);
-  if (pipeline.error) return { error: pipeline.error };
-  if (!pipeline.value) return { error: "metadata.pipeline could not be resolved" };
-  metadata.pipeline = pipeline.value;
-
-  if (pipeline.value.audio.mode === "tts") {
-    const tts = normalizeProjectTtsMetadata(metadata.tts, true);
-    if (tts.error) return { error: tts.error };
-    if (tts.value) metadata.tts = tts.value;
-  } else {
-    delete metadata.tts;
+  if (Object.prototype.hasOwnProperty.call(metadata, "tts")) {
+    return { error: "metadata.tts is not supported; use metadata.pipeline.audio.tts" };
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "visualGeneration")) {
+    return { error: "metadata.visualGeneration is not supported; use metadata.pipeline.image.model and metadata.pipeline.video.model" };
   }
 
-  const imageRequired =
-    pipeline.value.image.enabled ||
-    pipeline.value.video.mode === "editor_motion" ||
-    pipeline.value.video.mode === "image_to_video";
-  const videoRequired =
-    pipeline.value.video.mode === "text_to_video" ||
-    pipeline.value.video.mode === "image_to_video" ||
-    pipeline.value.video.mode === "looped_clips" ||
-    pipeline.value.audio.mode === "video_native_audio";
-
-  if (imageRequired || videoRequired || metadata.visualGeneration !== undefined) {
-    const visualGeneration = normalizeProjectVisualGenerationMetadata(metadata.visualGeneration, {
-      imageRequired,
-      videoRequired
-    });
-    if (visualGeneration.error) return { error: visualGeneration.error };
-    const resolvedVisualGeneration = {
-      image: imageRequired ? visualGeneration.value?.image ?? null : null,
-      video: videoRequired ? visualGeneration.value?.video ?? null : null
-    };
-    const visualError = validateProjectPipelineVisualSelections(pipeline.value, resolvedVisualGeneration);
-    if (visualError) return { error: visualError };
-    if (resolvedVisualGeneration.image || resolvedVisualGeneration.video) {
-      metadata.visualGeneration = resolvedVisualGeneration;
-    } else {
-      delete metadata.visualGeneration;
-    }
-  } else {
-    delete metadata.visualGeneration;
+  if (Object.prototype.hasOwnProperty.call(metadata, "pipeline")) {
+    const pipeline = normalizeProjectPipelineMetadata(metadata.pipeline);
+    if (pipeline.error) return { error: pipeline.error };
+    if (!pipeline.value) return { error: "metadata.pipeline could not be resolved" };
+    metadata.pipeline = pipeline.value;
   }
   return { metadataJson: JSON.stringify(metadata) };
 }
@@ -5909,6 +5851,46 @@ function normalizeContentItemInput(body: unknown):
   };
 }
 
+function normalizeContentProjectIdsInput(value: unknown): { projectIds: string[] } | { error: string } {
+  if (value === undefined || value === null) return { projectIds: [] };
+  if (!Array.isArray(value)) return { error: "projectIds must be an array" };
+  const projectIds: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.trim().length === 0) {
+      return { error: "projectIds must contain non-empty strings" };
+    }
+    const projectId = item.trim();
+    if (!projectIds.includes(projectId)) {
+      projectIds.push(projectId);
+    }
+  }
+  return { projectIds };
+}
+
+function normalizeContentProjectAssociationInput(payload: Record<string, unknown>):
+  | { projectIds: string[]; provided: boolean }
+  | { error: string } {
+  const hasProjectIds = Object.prototype.hasOwnProperty.call(payload, "projectIds");
+  if (!hasProjectIds) return { projectIds: [], provided: false };
+  const normalized = normalizeContentProjectIdsInput(payload.projectIds);
+  if ("error" in normalized) return normalized;
+  return { projectIds: normalized.projectIds, provided: true };
+}
+
+async function validateContentProjectIds(projectIds: string[], workspaceId: string): Promise<{ ok: true } | { error: string }> {
+  if (projectIds.length === 0) return { ok: true };
+  const projects = await prisma.contentProject.findMany({
+    where: { workspaceId, id: { in: projectIds } },
+    select: { id: true }
+  });
+  const found = new Set(projects.map((project) => project.id));
+  const missing = projectIds.filter((projectId) => !found.has(projectId));
+  if (missing.length > 0) {
+    return { error: `content project not found: ${missing.join(", ")}` };
+  }
+  return { ok: true };
+}
+
 function serializeContentProject(project: {
   id: string;
   workspaceId: string;
@@ -5919,20 +5901,19 @@ function serializeContentProject(project: {
   metadataJson: string | null;
   createdAt: Date;
   updatedAt: Date;
-  _count?: { items?: number };
+  _count?: { projectItems?: number };
 }) {
   return {
     ...project,
     metadata: parseJsonRecord(project.metadataJson),
     metadataJson: undefined,
-    itemsCount: project._count?.items ?? 0
+    itemsCount: project._count?.projectItems ?? 0
   };
 }
 
 function serializeContentItem(item: {
   id: string;
   workspaceId: string;
-  projectId: string;
   kind: string;
   title: string;
   sourceText: string | null;
@@ -5941,10 +5922,26 @@ function serializeContentItem(item: {
   metadataJson: string | null;
   createdAt: Date;
   updatedAt: Date;
+  projectItems?: Array<{ projectId: string; project?: { id: string; name: string | null } | null }>;
 }) {
+  const projectIds = Array.from(
+    new Set((item.projectItems ?? []).map((link) => link.projectId))
+  );
+  const projects = projectIds.map((projectId) => {
+    const linkProject = item.projectItems?.find((link) => link.projectId === projectId)?.project;
+    return {
+      id: projectId,
+      name: linkProject?.name ?? null
+    };
+  });
+  const { metadataJson, projectItems: _projectItems, ...rest } = item;
   return {
-    ...item,
-    metadata: parseJsonRecord(item.metadataJson),
+    ...rest,
+    projectIds,
+    projectName: projects[0]?.name ?? null,
+    projectNames: projects.map((project) => project.name).filter((name): name is string => Boolean(name)),
+    projects,
+    metadata: parseJsonRecord(metadataJson),
     metadataJson: undefined
   };
 }
@@ -5979,49 +5976,38 @@ function mergeContentItemMetadata(
   });
 }
 
-async function deleteContentProjectCascade(
+async function deleteContentProjectOnly(
   projectId: string,
   workspaceId: string
 ): Promise<{
   deletedProject: boolean;
-  deletedItems: number;
-  deletedBackingCourseIds: string[];
+  detachedItems: number;
 }> {
-  const project = await prisma.contentProject.findFirst({
-    where: { id: projectId, workspaceId },
-    select: { id: true }
-  });
-  if (!project) {
-    return { deletedProject: false, deletedItems: 0, deletedBackingCourseIds: [] };
-  }
-
-  const items = await prisma.contentItem.findMany({
-    where: { projectId, workspaceId },
-    select: { id: true, metadataJson: true }
-  });
-  const backingCourseIds = Array.from(
-    new Set(
-      items
-        .map((item) => readContentItemBacking(item)?.courseId)
-        .filter((courseId): courseId is string => Boolean(courseId))
-    )
-  );
-  const deletedBackingCourseIds: string[] = [];
-  for (const courseId of backingCourseIds) {
-    const result = await deleteCourseCascade(courseId, workspaceId);
-    if (result.deletedCourse) {
-      deletedBackingCourseIds.push(courseId);
+  return prisma.$transaction(async (tx) => {
+    const project = await tx.contentProject.findFirst({
+      where: { id: projectId, workspaceId },
+      select: { id: true }
+    });
+    if (!project) {
+      return { deletedProject: false, detachedItems: 0 };
     }
-  }
 
-  const deleted = await prisma.contentProject.deleteMany({
-    where: { id: projectId, workspaceId }
+    const linkedRows = await tx.contentProjectItem.findMany({
+      where: { projectId, workspaceId },
+      select: { itemId: true }
+    });
+    const affectedItemIds = Array.from(new Set(linkedRows.map((row) => row.itemId)));
+
+    await tx.contentProjectItem.deleteMany({ where: { projectId, workspaceId } });
+
+    const deleted = await tx.contentProject.deleteMany({
+      where: { id: projectId, workspaceId }
+    });
+    return {
+      deletedProject: deleted.count > 0,
+      detachedItems: affectedItemIds.length
+    };
   });
-  return {
-    deletedProject: deleted.count > 0,
-    deletedItems: items.length,
-    deletedBackingCourseIds
-  };
 }
 
 async function ensureContentItemBacking(
@@ -6030,7 +6016,12 @@ async function ensureContentItemBacking(
 ): Promise<ContentItemBacking> {
   const item = await prisma.contentItem.findFirst({
     where: { id: itemId, workspaceId },
-    include: { project: true }
+    include: {
+      projectItems: {
+        orderBy: { createdAt: "asc" },
+        include: { project: true }
+      }
+    }
   });
   if (!item) {
     throw new Error("content item not found");
@@ -6051,11 +6042,12 @@ async function ensureContentItemBacking(
     }
   }
 
+  const backingProject = item.projectItems[0]?.project ?? null;
   const course = await prisma.course.create({
     data: {
       workspaceId,
-      name: `[Content] ${item.project.name}`,
-      description: item.project.description ?? undefined,
+      name: `[Content] ${backingProject?.name ?? item.title}`,
+      description: backingProject?.description ?? undefined,
       status: "draft"
     }
   });
@@ -6159,7 +6151,7 @@ fastify.get(
           workspaceId: auth.scope.workspaceId
         },
         orderBy: { createdAt: "desc" },
-        include: { _count: { select: { items: true } } }
+        include: { _count: { select: { projectItems: true } } }
     });
     return projects.map(serializeContentProject);
   }
@@ -6186,7 +6178,7 @@ fastify.post(
         ...normalized,
         workspaceId: auth.scope.workspaceId
       },
-      include: { _count: { select: { items: true } } }
+      include: { _count: { select: { projectItems: true } } }
     });
     return reply.code(201).send(serializeContentProject(project));
   }
@@ -6253,7 +6245,7 @@ fastify.patch(
     const project = await prisma.contentProject.update({
       where: { id: projectId },
       data,
-      include: { _count: { select: { items: true } } }
+      include: { _count: { select: { projectItems: true } } }
     });
     return reply.code(200).send(serializeContentProject(project));
   }
@@ -6265,29 +6257,22 @@ fastify.delete(
     schema: {
       tags: ["Content"],
       summary: "Remove projeto de conteúdo COPE",
-      description: "Remove um projeto content-first, seus itens e os dados técnicos gerados para edição."
+      description: "Remove um projeto content-first e desassocia seus conteúdos, preservando os itens e os dados técnicos gerados."
     }
   },
   async (request, reply) => {
     const auth = await getAuthenticatedScope(request, reply);
     if (!auth) return;
     const { projectId } = request.params as { projectId: string };
-    const result = await deleteContentProjectCascade(projectId, auth.scope.workspaceId);
+    const result = await deleteContentProjectOnly(projectId, auth.scope.workspaceId);
     if (!result.deletedProject) {
       return reply.code(404).send({ error: "content project not found" });
     }
-    for (const courseId of result.deletedBackingCourseIds) {
-      broadcastEntityChanged({
-        entity: "course",
-        action: "deleted",
-        courseId,
-        occurredAt: new Date().toISOString()
-      });
-    }
     return reply.code(200).send({
       ok: true,
-      deletedItems: result.deletedItems,
-      deletedBackingCourses: result.deletedBackingCourseIds.length
+      detachedItems: result.detachedItems,
+      deletedItems: 0,
+      deletedBackingCourses: 0
     });
   }
 );
@@ -6309,10 +6294,23 @@ fastify.get(
       where: { id: projectId, workspaceId: auth.scope.workspaceId }
     });
     if (!project) return reply.code(404).send({ error: "content project not found" });
-    const items = await prisma.contentItem.findMany({
+    const linkedRows = await prisma.contentProjectItem.findMany({
       where: { projectId, workspaceId: auth.scope.workspaceId },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      include: {
+        item: {
+          include: {
+            projectItems: {
+              orderBy: { createdAt: "asc" },
+              include: { project: { select: { id: true, name: true } } }
+            }
+          }
+        }
+      }
     });
+    const items = linkedRows.map((row) => row.item).sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    );
     return items.map(serializeContentItem);
   }
 );
@@ -6338,21 +6336,127 @@ fastify.get(
     if ("error" in normalized) {
       return reply.code(400).send({ error: normalized.error });
     }
-    const item = await prisma.contentItem.create({
-      data: {
-        ...normalized,
-        projectId,
-        workspaceId: auth.scope.workspaceId
-      }
+    const item = await prisma.$transaction(async (tx) => {
+      const created = await tx.contentItem.create({
+        data: {
+          ...normalized,
+          workspaceId: auth.scope.workspaceId
+        }
+      });
+      await tx.contentProjectItem.create({
+        data: {
+          workspaceId: auth.scope.workspaceId,
+          projectId,
+          itemId: created.id
+        }
+      });
+      return created;
     });
     const backing = normalized.kind === "content" || normalized.kind === "video" || normalized.kind === "music_video"
       ? await ensureContentItemBacking(item.id, auth.scope.workspaceId)
       : null;
-    const refreshed = await prisma.contentItem.findUnique({ where: { id: item.id } });
+    const refreshed = await prisma.contentItem.findUnique({
+      where: { id: item.id },
+      include: {
+        projectItems: {
+          orderBy: { createdAt: "asc" },
+          include: { project: { select: { id: true, name: true } } }
+        }
+      }
+    });
     return reply.code(201).send({
       ...serializeContentItem(refreshed ?? item),
       backing
     });
+    }
+  );
+
+  fastify.post(
+    "/content-items",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Cria conteúdo COPE",
+        description: "Cria um conteúdo independente, opcionalmente associado a um ou mais projetos."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const payload = (request.body ?? {}) as Record<string, unknown>;
+      const normalized = normalizeContentItemInput(payload);
+      if ("error" in normalized) {
+        return reply.code(400).send({ error: normalized.error });
+      }
+      const association = normalizeContentProjectAssociationInput(payload);
+      if ("error" in association) {
+        return reply.code(400).send({ error: association.error });
+      }
+      const projectValidation = await validateContentProjectIds(association.projectIds, auth.scope.workspaceId);
+      if ("error" in projectValidation) {
+        return reply.code(404).send({ error: projectValidation.error });
+      }
+
+      const item = await prisma.$transaction(async (tx) => {
+        const created = await tx.contentItem.create({
+          data: {
+            ...normalized,
+            workspaceId: auth.scope.workspaceId
+          }
+        });
+        for (const projectId of association.projectIds) {
+          await tx.contentProjectItem.create({
+            data: {
+              workspaceId: auth.scope.workspaceId,
+              projectId,
+              itemId: created.id
+            }
+          });
+        }
+        return created;
+      });
+      const backing = normalized.kind === "content" || normalized.kind === "video" || normalized.kind === "music_video"
+        ? await ensureContentItemBacking(item.id, auth.scope.workspaceId)
+        : null;
+      const refreshed = await prisma.contentItem.findUnique({
+        where: { id: item.id },
+        include: {
+          projectItems: {
+            orderBy: { createdAt: "asc" },
+            include: { project: { select: { id: true, name: true } } }
+          }
+        }
+      });
+      return reply.code(201).send({
+        ...serializeContentItem(refreshed ?? item),
+        backing
+      });
+    }
+  );
+
+  fastify.get(
+    "/content-items",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Lista conteúdos COPE",
+        description: "Lista conteúdos independentes de projeto, incluindo itens sem associação a projeto."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const items = await prisma.contentItem.findMany({
+        where: { workspaceId: auth.scope.workspaceId },
+        orderBy: { createdAt: "desc" },
+        include: {
+          projectItems: {
+            orderBy: { createdAt: "asc" },
+            include: { project: { select: { id: true, name: true } } }
+          }
+        }
+      });
+      return items.map(serializeContentItem);
     }
   );
 
@@ -6410,14 +6514,53 @@ fastify.get(
         data.metadataJson = mergeContentItemMetadata(item.metadataJson, payload.metadata as Record<string, unknown>);
       }
 
-      if (Object.keys(data).length === 0) {
+      const association = normalizeContentProjectAssociationInput(payload);
+      if ("error" in association) {
+        return reply.code(400).send({ error: association.error });
+      }
+      if (association.provided) {
+        const projectValidation = await validateContentProjectIds(association.projectIds, auth.scope.workspaceId);
+        if ("error" in projectValidation) {
+          return reply.code(404).send({ error: projectValidation.error });
+        }
+      }
+
+      if (Object.keys(data).length === 0 && !association.provided) {
         return reply.code(400).send({ error: "no valid fields to update" });
       }
 
-      const updated = await prisma.contentItem.update({
-        where: { id: item.id },
-        data
+      const updated = await prisma.$transaction(async (tx) => {
+        if (Object.keys(data).length > 0) {
+          await tx.contentItem.update({
+            where: { id: item.id },
+            data
+          });
+        }
+        if (association.provided) {
+          await tx.contentProjectItem.deleteMany({
+            where: { itemId: item.id, workspaceId: auth.scope.workspaceId }
+          });
+          for (const projectId of association.projectIds) {
+            await tx.contentProjectItem.create({
+              data: {
+                workspaceId: auth.scope.workspaceId,
+                projectId,
+                itemId: item.id
+              }
+            });
+          }
+        }
+        return tx.contentItem.findUnique({
+          where: { id: item.id },
+          include: {
+            projectItems: {
+              orderBy: { createdAt: "asc" },
+              include: { project: { select: { id: true, name: true } } }
+            }
+          }
+        });
       });
+      if (!updated) return reply.code(404).send({ error: "content item not found" });
       if (data.sourceText !== undefined) {
         const backing = readContentItemBacking(updated);
         if (backing) {
@@ -8199,6 +8342,8 @@ async function emitCourseBuildStatusEvent(
     lifecycle?: string | null;
     phase?: string | null;
     progressPercent?: number | null;
+    progressCurrent?: number | null;
+    progressTotal?: number | null;
     error?: string | null;
     updatedAt?: Date | null;
   } = {}
@@ -8224,6 +8369,14 @@ async function emitCourseBuildStatusEvent(
     progressPercent:
       typeof payload.progressPercent === "number" && Number.isFinite(payload.progressPercent)
         ? Math.max(1, Math.min(99, Math.trunc(payload.progressPercent)))
+        : null,
+    progressCurrent:
+      typeof payload.progressCurrent === "number" && Number.isFinite(payload.progressCurrent)
+        ? Math.max(0, Math.trunc(payload.progressCurrent))
+        : null,
+    progressTotal:
+      typeof payload.progressTotal === "number" && Number.isFinite(payload.progressTotal)
+        ? Math.max(0, Math.trunc(payload.progressTotal))
         : null,
     error: payload.error ?? null,
     updatedAt: payload.updatedAt ?? new Date(),

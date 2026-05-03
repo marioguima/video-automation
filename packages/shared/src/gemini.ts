@@ -66,7 +66,7 @@ export async function geminiChat(options: GeminiChatOptions): Promise<string> {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 120000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 600000);
   const baseUrl = (options.baseUrl ?? DEFAULT_GEMINI_BASE_URL).replace(/\/$/, "");
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {

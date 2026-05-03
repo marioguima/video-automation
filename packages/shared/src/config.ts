@@ -156,7 +156,7 @@ export function getConfig(): AppConfig {
     webPort: Number(process.env.WEB_PORT ?? 4173),
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434",
     ollamaModel: process.env.OLLAMA_MODEL ?? "llama3.2:3b",
-    ollamaTimeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS ?? 120000),
+    ollamaTimeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS ?? 600000),
     comfyuiBaseUrl: process.env.COMFYUI_BASE_URL ?? "http://127.0.0.1:8188",
     comfyPromptTimeoutMs: Number(process.env.COMFY_PROMPT_TIMEOUT_MS ?? 60000),
     comfyGenerationTimeoutMs: Number(process.env.COMFY_GENERATION_TIMEOUT_MS ?? 300000),

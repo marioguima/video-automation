@@ -177,19 +177,19 @@ const FALLBACK_TEMPLATE: AppSettings = {
       ollama: {
         baseUrl: "http://127.0.0.1:11434",
         model: "llama3.2:3b",
-        timeoutMs: 60000
+        timeoutMs: 600000
       },
       gemini: {
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
         model: "gemma-4-26b-a4b-it",
         apiKey: "",
-        timeoutMs: 120000
+        timeoutMs: 600000
       },
       openai: {
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-4o-mini",
         apiKey: "",
-        timeoutMs: 120000
+        timeoutMs: 600000
       }
     }
   },

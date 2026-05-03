@@ -31,6 +31,7 @@ model Workspace {
   courses     Course[]
   contentProjects ContentProject[]
   contentItems ContentItem[]
+  contentProjectItems ContentProjectItem[]
   modules     Module[]
   lessons     Lesson[]
   lessonVersions LessonVersion[]
@@ -102,7 +103,7 @@ model ContentProject {
   updatedAt   DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  items     ContentItem[]
+  projectItems ContentProjectItem[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -111,7 +112,6 @@ model ContentProject {
 model ContentItem {
   id          String   @id @default(cuid())
   workspaceId String
-  projectId   String
   /// String enum: video | image | ebook | audio | music_video
   kind        String   @default("video")
   title       String
@@ -123,10 +123,25 @@ model ContentItem {
   updatedAt   DateTime @updatedAt
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project   ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectItems ContentProjectItem[]
 
-  @@index([workspaceId, projectId, createdAt])
   @@index([workspaceId, kind, status])
+}
+
+model ContentProjectItem {
+  id          String   @id @default(cuid())
+  workspaceId String
+  projectId   String
+  itemId      String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  item      ContentItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, projectId, itemId])
+  @@index([workspaceId, projectId, createdAt])
+  @@index([workspaceId, itemId, createdAt])
 }
 
 model Course {

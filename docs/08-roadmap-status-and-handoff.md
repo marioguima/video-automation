@@ -51,21 +51,36 @@ Implementado:
 - decisao: limites de fala devem ser configurados antes da segmentacao, por idioma/provider, para evitar blocos que degradam a qualidade do TTS.
 - Settings TTS agora salva providers, linguas atendidas por provider, rota por lingua e orcamento inicial de fala (`targetChars`, `maxChars`, `targetSpeechSeconds`, `maxSpeechSeconds`).
 - decisao: nao existe TTS ativo global; projeto escolhe a rota TTS que vai usar.
-- decisao: nao existe provider ativo global para imagem/video; projeto escolhe modelo de imagem e modelo de video opcional.
+- decisao: nao existe provider ativo global para imagem/video; pipeline do projeto escolhe modelo de imagem e modelo de video opcional.
 - decisao: uma lingua so pode aparecer em uma rota TTS do catalogo para evitar ambiguidade na geracao de fala.
 - decisao: troca de voz por amostra entra no roadmap como pos-processamento de videos com fala nativa ou vozes inconsistentes.
 - decisao: segmentacao deve receber um `SpeechBudget`; quando a fala vier do TTS, usar limites da rota TTS; quando vier do motor de video com audio nativo, usar limites do provider/modelo de video.
 - decisao: geracao de imagem/video deve evoluir para providers configuraveis por capacidade; ComfyUI e o provider de imagem atual, e a extensao Veo deve entrar como provider `veo_extension`.
-- Settings Visual agora cataloga providers/modelos de imagem e video; projeto escolhe modelo de imagem e modelo de video opcional.
+- Settings Visual agora cataloga providers/modelos de imagem e video; pipeline do projeto escolhe modelo de imagem e modelo de video opcional.
 - decisao: projeto passa a declarar um Pipeline de Producao em `metadata.pipeline`; Settings continua sendo catalogo, e o projeto liga/desliga etapas como TTS, musica, imagem, movimento de editor e video IA.
+- decisao: `metadata.pipeline` deve ser a fonte unica de verdade do projeto; rotas TTS, modelo de imagem e modelo de video ficam dentro dele, sem `metadata.tts` nem `metadata.visualGeneration` paralelos.
 - decisao: React Flow fica fora do beta; a configuracao inicial sera por cards/toggles de etapas para reduzir complexidade para o usuario.
+- decisao: eventos detalhados de job do worker devem ser persistidos em JSONL para diagnostico; o console sozinho nao e suficiente para acompanhar falhas de segmentacao, TTS, imagem e render.
+- decisao: logs persistidos do worker ficam em `logs/`, fora de `data/`, para facilitar limpeza sem misturar com banco, assets e configuracoes.
+- decisao: progresso da segmentacao deve acompanhar blocos salvos/atualizados, nao apenas blocos criados, porque regeneracao reaproveita `Block` existente.
+- decisao: ao abrir o editor durante uma segmentacao ativa, a UI deve hidratar os blocos ja salvos pelo job, nao esperar apenas o fim do processo.
+- decisao: a segmentacao estrutural por LLM deve considerar o `scriptStructure` do projeto; prompts por estrutura devem ser versionados e futuramente editaveis apenas por admin.
+- decisao: `textLayer` nao e tipo de roteiro; captions, highlights, slide points, logo, overlays e estilos pertencem ao template/render do video final.
+- decisao: `music_storyboard` deve gerar visual beats, nao blocos de fala; sincronizacao fina com musica fica para etapa posterior com BPM/waveform/transientes ou marcadores manuais.
+- decisao: sound effects e background music sao camadas opcionais de mix/render do projeto, nao requisitos da segmentacao estrutural.
+- segmentacao estrutural por LLM conectada ao worker usando `buildSegmentationPrompt`, com fallback para segundo modelo Gemini quando disponivel e fallback final por heuristica deterministica; aguardando validacao manual.
+- `buildSegmentationPrompt` nao pede mais `on_screen`; `on_screen` permanece temporariamente na etapa de metadados por bloco para compatibilidade com editor/render atual; aguardando validacao manual.
+- regeneracao manual de bloco (`segment_block`) usa o `sourceText` ja salvo no bloco, evitando voltar para os cortes heuristicos antigos; aguardando validacao manual.
 
 Nao implementado ainda:
 
-- segmentacao LLM efetiva usando `buildSegmentationPrompt`;
-- orcamento de fala consumido pelo segmentador;
+- catalogo/admin UI de prompts de segmentacao por `scriptStructure`;
+- render efetivamente dirigido por `render.textLayer`;
+- templates de render com politicas manual/aleatoria/sequencial;
+- biblioteca global de musicas de fundo e selecao por projeto;
+- geracao/mixagem efetiva de sound effects;
 - validacao de projeto/variant com TTS exigido e lingua sem rota TTS configurada;
-- worker ainda nao consome a escolha visual do projeto em `metadata.visualGeneration`;
+- worker ainda nao consome a escolha visual do projeto em `metadata.pipeline.image`/`metadata.pipeline.video`;
 - adaptador da extensao Veo para pedir imagem/video, acompanhar status e importar resultado;
 - render de cena animada usando provider configurado;
 - troca de voz por amostra (`voice_replacement`);
@@ -179,10 +194,10 @@ Itens:
 - [x] editar prompt de animacao;
 - [x] reservar sound effect;
 - [x] invalidacao granular basica.
-- [ ] `SpeechBudget` resolvido antes da segmentacao;
-- [ ] segmentacao deterministica usando `maxChars` configurado;
-- [ ] segmentacao LLM usando `buildSegmentationPrompt` com `SpeechBudget`;
-- [ ] validacao deterministicamente bloqueando blocos acima do limite de fala;
+- [ ] `SpeechBudget` resolvido antes da segmentacao a partir do `metadata.pipeline` quando o projeto estiver associado ao ContentItem; implementado, aguardando validacao manual;
+- [ ] segmentacao deterministica usando `maxChars` configurado ou estimado pelo limite de fala; implementado, aguardando validacao manual;
+- [ ] segmentacao LLM usando `buildSegmentationPrompt` com `SpeechBudget`; implementado, aguardando validacao manual;
+- [ ] validacao deterministica bloqueando blocos acima do limite de fala antes de persistir; implementado, aguardando validacao manual;
 - [ ] aviso/bloqueio quando a lingua do projeto/variant nao tiver rota TTS e o modo exigir TTS.
 
 Aceite parcial concluido:
@@ -230,8 +245,9 @@ Objetivo: imagem estatica virar cena animada e habilitar provider de video confi
 Itens:
 
 - settings `visualGeneration` para imagem/video;
-- selecao de provider/modelo visual por projeto;
+- selecao de provider/modelo visual dentro do Pipeline de Producao do projeto;
 - Pipeline de Producao por projeto com modos `tts`, `music`, `editor_motion`, `text_to_video`, `image_to_video` e `looped_clips`;
+- consolidar rotas TTS/imagem/video dentro de `metadata.pipeline` e remover campos paralelos do projeto;
 - provider `veo_extension` para comunicacao com a extensao externa;
 - provider `comfyui` como motor local/futuro para video quando houver workflow adequado;
 - provider `vertex_veo` opcional/futuro para API oficial;
@@ -264,21 +280,22 @@ Antes de continuar implementacao pesada de render/publicacao, fechar o contrato 
 
 Prioridade:
 
-1. criar helper `SpeechBudget` e resolver budget atual via settings TTS/idioma;
-2. fazer `buildDeterministicBlocks`/segmentacao usar limite configurado em vez de `200` fixo;
-3. ligar `buildSegmentationPrompt` ao fluxo real, passando orcamento de fala e validando retorno;
-4. bloquear/avisar quando projeto/variant exige TTS e a lingua nao possui rota TTS configurada;
-5. fazer worker consumir `metadata.visualGeneration.image` na geracao de imagem;
-6. tratar limite separado para fala nativa de provider de video, como duracoes aceitas pelo modelo;
-7. adicionar adaptador `veo_extension` para imagem/video como objetivo central do pipeline;
-8. modelar troca de voz por amostra como pipeline separado de pos-processamento;
-9. testar Content -> produzir roteiro -> associar projeto -> salvar, sem gerar cenas;
-10. testar Projects -> abrir projeto com conteudo associado -> gerar cenas -> editor;
-11. conectar bloco de prompt IA ao provider LLM selecionado;
-12. modelar biblioteca de conteudos reutilizaveis e associacao muitos-para-muitos conteudo-projeto;
-13. modelar canais de entrega e formatos permitidos como contrato dedicado no projeto/variant;
-14. modelar PromotionTarget e ShortLink como entidades futuras;
-15. manter fluxo/telas de cursos intactos ate decisao explicita de migracao.
+1. validar manualmente Projects -> conteudo associado -> Generate Scenes -> editor e confirmar log `segment_structure_llm_completed`;
+2. bloquear/avisar quando projeto/variant exige TTS e a lingua nao possui rota TTS configurada;
+3. fazer worker consumir `metadata.pipeline.image.model` na geracao de imagem;
+4. tratar limite separado para fala nativa de provider de video, como duracoes aceitas pelo modelo;
+5. adicionar `render.textLayer`/templates ao projeto e separar `on_screen` da etapa de metadados atual;
+6. adicionar biblioteca global de musicas de fundo e selecao de faixas por projeto;
+7. modelar sound effects como etapa opcional de mix/render;
+8. adicionar adaptador `veo_extension` para imagem/video como objetivo central do pipeline;
+9. modelar troca de voz por amostra como pipeline separado de pos-processamento;
+10. testar Content -> produzir roteiro -> associar projeto -> salvar, sem gerar cenas;
+11. testar Projects -> abrir projeto com conteudo associado -> gerar cenas -> editor;
+12. conectar bloco de prompt IA ao provider LLM selecionado;
+13. modelar biblioteca de conteudos reutilizaveis e associacao muitos-para-muitos conteudo-projeto;
+14. modelar canais de entrega e formatos permitidos como contrato dedicado no projeto/variant;
+15. modelar PromotionTarget e ShortLink como entidades futuras;
+16. manter fluxo/telas de cursos intactos ate decisao explicita de migracao.
 
 ## Checklist antes de finalizar proxima tarefa
 

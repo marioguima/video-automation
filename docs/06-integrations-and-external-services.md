@@ -212,7 +212,7 @@ Direcao alvo:
 
 - criar uma configuracao de providers de geracao visual, semelhante ao LLM/TTS, mas separando capacidades;
 - suportar motores diferentes para `text_to_image`, `image_to_image`, `text_to_video`, `image_to_video` e `video_with_native_audio`;
-- resolver provider/modelo por projeto/variant/formato, nao como um unico global fixo;
+- resolver provider/modelo pelo `metadata.pipeline` do projeto e, no futuro, por variant/formato, nao como um unico global fixo;
 - permitir que um projeto use somente imagem local via ComfyUI e outro use Veo Extension/Veo 3 para imagem e video;
 - video deve ser opcional no projeto, porque nem todo fluxo precisa animar cenas;
 - salvar limites do provider/modelo para orientar segmentacao, prompts, duracao e validacao antes de executar jobs caros.
@@ -258,6 +258,27 @@ Provider futuro deve aceitar:
 - duracao;
 - seed/config;
 - retorno MP4 ou frames.
+
+## Sound effects e musica de fundo
+
+Ainda nao implementado.
+
+Direcao para sound effects:
+
+- tratar efeitos sonoros como camada opcional do pipeline do projeto;
+- gerar ou selecionar efeitos por bloco/cena quando o projeto pedir;
+- manter `soundEffectPromptJson` como contrato de preparacao, sem obrigar geracao nesta fase;
+- mixar efeitos depois de TTS/musica para controlar volume, timing e fade.
+
+Direcao para background music:
+
+- criar biblioteca global de musicas enviadas pelo usuario;
+- permitir que cada projeto selecione quais faixas podem entrar no video final;
+- politica de uso por projeto/variant: manual, aleatoria ou sequencial;
+- mixagem com volume, loop, fade in/out e crossfade;
+- futuramente adicionar provider de musica instrumental IA para gerar trilhas sem letra.
+
+Essas camadas pertencem ao render/mix final. Elas nao devem complicar a segmentacao estrutural do roteiro.
 
 Tipos de job futuros:
 

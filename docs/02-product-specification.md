@@ -83,7 +83,7 @@ Campos conceituais:
 
 - `id`
 - `workspaceId`
-- `projectId`
+- `projectIds`
 - `kind`
 - `title`
 - `ideaText`
@@ -95,7 +95,7 @@ Campos conceituais:
 - `createdAt`
 - `updatedAt`
 
-Observacao: conteudo deve evoluir para uma entidade independente de projeto. `projectId` atual e compatibilidade tecnica temporaria; o modelo alvo deve usar uma associacao `ProjectContent` ou equivalente para permitir um mesmo conteudo em muitos projetos. Enquanto o contrato final nao existir, a UI deve tratar projeto como uso/associacao, nao como identidade do conteudo.
+Observacao: conteudo e uma entidade independente de projeto. A associacao com projetos deve ser feita por uma tabela de vinculo, permitindo conteudo sem projeto e conteudo usado em muitos projetos.
 
 Status de producao sugeridos:
 

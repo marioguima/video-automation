@@ -423,6 +423,9 @@ const App: React.FC = () => {
               relatedLessonId?: string | null;
               jobType?: string;
               jobStatus?: string;
+              progressPercent?: number | null;
+              progressCurrent?: number | null;
+              progressTotal?: number | null;
             } & EntityChangedPayload;
           };
           window.dispatchEvent(new CustomEvent('vizlec:ws', { detail: data }));

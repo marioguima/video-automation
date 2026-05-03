@@ -107,6 +107,96 @@ test("content project flow updates project metadata", async () => {
   assert.deepEqual(patched.metadata.defaultAspectRatios, ["16:9", "9:16"]);
 });
 
+test("content item flow saves without project and can be associated to multiple projects", async () => {
+  const unassociatedRes = await app.inject({
+    method: "POST",
+    url: "/content-items",
+    headers: { cookie: sessionCookie },
+    payload: {
+      kind: "content",
+      title: "Conteudo independente",
+      sourceText: "Texto salvo na biblioteca sem depender de projeto."
+    }
+  });
+  assert.equal(unassociatedRes.statusCode, 201);
+  const item = unassociatedRes.json() as { id: string; projectIds: string[] };
+  assert.equal(Object.prototype.hasOwnProperty.call(item, "projectId"), false);
+  assert.deepEqual(item.projectIds, []);
+
+  const firstProjectRes = await app.inject({
+    method: "POST",
+    url: "/content-projects",
+    headers: { cookie: sessionCookie },
+    payload: { name: "Projeto A" }
+  });
+  const secondProjectRes = await app.inject({
+    method: "POST",
+    url: "/content-projects",
+    headers: { cookie: sessionCookie },
+    payload: { name: "Projeto B" }
+  });
+  assert.equal(firstProjectRes.statusCode, 201);
+  assert.equal(secondProjectRes.statusCode, 201);
+  const firstProject = firstProjectRes.json() as { id: string };
+  const secondProject = secondProjectRes.json() as { id: string };
+
+  const patchRes = await app.inject({
+    method: "PATCH",
+    url: `/content-items/${item.id}`,
+    headers: { cookie: sessionCookie },
+    payload: {
+      projectIds: [firstProject.id, secondProject.id]
+    }
+  });
+  assert.equal(patchRes.statusCode, 200);
+  const patched = patchRes.json() as { id: string; projectIds: string[] };
+  assert.equal(Object.prototype.hasOwnProperty.call(patched, "projectId"), false);
+  assert.deepEqual(patched.projectIds, [firstProject.id, secondProject.id]);
+
+  for (const project of [firstProject, secondProject]) {
+    const projectItemsRes = await app.inject({
+      method: "GET",
+      url: `/content-projects/${project.id}/items`,
+      headers: { cookie: sessionCookie }
+    });
+    assert.equal(projectItemsRes.statusCode, 200);
+    assert.equal(
+      (projectItemsRes.json() as Array<{ id: string }>).some((row) => row.id === item.id),
+      true
+    );
+  }
+
+  const listProjectsRes = await app.inject({
+    method: "GET",
+    url: "/content-projects",
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(listProjectsRes.statusCode, 200);
+  const listedProjects = listProjectsRes.json() as Array<{ id: string; itemsCount: number }>;
+  assert.equal(listedProjects.find((project) => project.id === firstProject.id)?.itemsCount, 1);
+  assert.equal(listedProjects.find((project) => project.id === secondProject.id)?.itemsCount, 1);
+
+  const deleteFirstProjectRes = await app.inject({
+    method: "DELETE",
+    url: `/content-projects/${firstProject.id}`,
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(deleteFirstProjectRes.statusCode, 200);
+
+  const allItemsRes = await app.inject({
+    method: "GET",
+    url: "/content-items",
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(allItemsRes.statusCode, 200);
+  const stillAssociated = (allItemsRes.json() as Array<{ id: string; projectIds: string[] }>).find(
+    (row) => row.id === item.id
+  );
+  assert.ok(stillAssociated);
+  assert.equal(Object.prototype.hasOwnProperty.call(stillAssociated, "projectId"), false);
+  assert.deepEqual(stillAssociated.projectIds, [secondProject.id]);
+});
+
 test("content project flow rejects project kind classification", async () => {
   const projectRes = await app.inject({
     method: "POST",
@@ -263,7 +353,7 @@ test("content project flow creates technical backing and deterministic blocks", 
   assert.ok(patchedBlock.soundEffectPromptJson?.includes("confirmation tone"));
 });
 
-test("content project flow deletes project, items, and technical backing", async () => {
+test("content project flow deletes project while preserving content and technical backing", async () => {
   const projectRes = await app.inject({
     method: "POST",
     url: "/content-projects",
@@ -301,12 +391,14 @@ test("content project flow deletes project, items, and technical backing", async
   assert.equal(deleteRes.statusCode, 200);
   const deleted = deleteRes.json() as {
     ok: boolean;
+    detachedItems: number;
     deletedItems: number;
     deletedBackingCourses: number;
   };
   assert.equal(deleted.ok, true);
-  assert.equal(deleted.deletedItems, 1);
-  assert.equal(deleted.deletedBackingCourses, 1);
+  assert.equal(deleted.detachedItems, 1);
+  assert.equal(deleted.deletedItems, 0);
+  assert.equal(deleted.deletedBackingCourses, 0);
 
   const listRes = await app.inject({
     method: "GET",
@@ -323,12 +415,34 @@ test("content project flow deletes project, items, and technical backing", async
   });
   assert.equal(itemsRes.statusCode, 404);
 
+  const blocksRes = await app.inject({
+    method: "GET",
+    url: `/content-items/${item.id}/blocks`,
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(blocksRes.statusCode, 200);
+
+  const allItemsRes = await app.inject({
+    method: "GET",
+    url: "/content-items",
+    headers: { cookie: sessionCookie }
+  });
+  assert.equal(allItemsRes.statusCode, 200);
+  const detachedItem = (allItemsRes.json() as Array<{ id: string; projectIds: string[] }>).find(
+    (row) => row.id === item.id
+  );
+  assert.ok(detachedItem);
+  assert.equal(Object.prototype.hasOwnProperty.call(detachedItem, "projectId"), false);
+  assert.deepEqual(detachedItem.projectIds, []);
+
   const db = new Database(runtime.dbPath, { readonly: true });
   try {
-    const contentItemRow = db.prepare('SELECT id FROM "ContentItem" WHERE id = ?').get(item.id);
+    const contentItemRow = db.prepare('SELECT id FROM "ContentItem" WHERE id = ?').get(item.id) as
+      | { id: string }
+      | undefined;
     const courseRow = db.prepare('SELECT id FROM "Course" WHERE id = ?').get(item.backing.courseId);
-    assert.equal(contentItemRow, undefined);
-    assert.equal(courseRow, undefined);
+    assert.ok(contentItemRow);
+    assert.ok(courseRow);
   } finally {
     db.close();
   }

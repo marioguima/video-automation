@@ -34,19 +34,19 @@ const DEFAULT_LLM_CONFIGS: Record<LLMProvider, LlmProviderConfig> = {
   ollama: {
     baseUrl: 'http://127.0.0.1:11434',
     model: 'llama3.2:3b',
-    timeoutSeconds: '60',
+    timeoutSeconds: '600',
     apiKey: ''
   },
   gemini: {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     model: DEFAULT_GEMINI_MODEL,
-    timeoutSeconds: '120',
+    timeoutSeconds: '600',
     apiKey: ''
   },
   openai: {
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
-    timeoutSeconds: '120',
+    timeoutSeconds: '600',
     apiKey: ''
   }
 };

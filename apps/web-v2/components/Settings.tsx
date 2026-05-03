@@ -36,7 +36,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [llmTimeout, setLlmTimeout] = useState('60'); // Seconds
+  const [llmTimeout, setLlmTimeout] = useState('600'); // Seconds
 
   // ComfyUI State
   const [comfyUiUrl, setComfyUiUrl] = useState('http://127.0.0.1:8188');

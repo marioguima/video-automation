@@ -66,8 +66,7 @@ Estrategia atual:
 - manter `Course/Module/Lesson` como backing tecnico;
 - expor `Project/ContentItem` para a UI;
 - salvar ponte em `ContentItem.metadataJson.backing`;
-- tratar `ContentItem.projectId` como acoplamento temporario;
-- evoluir para `ProjectContent` para permitir um conteudo associado a muitos projetos;
+- usar `ProjectContent`/`ContentProjectItem` para associar conteudo a zero, um ou muitos projetos;
 - migrar gradualmente para Variant/Scene sem quebrar o pipeline.
 - nao iniciar segmentacao/render a partir de `ContentItem` isolado na UI;
 - iniciar segmentacao/render somente no contexto de `Project` e, idealmente, `Variant`.
@@ -341,21 +340,33 @@ Contrato inicial em `ContentProject.metadata.pipeline`:
 pipeline
 - script.mode: none | scene_blocks | music_storyboard
 - audio.mode: none | tts | music | video_native_audio
-- image.enabled: boolean
+- audio.tts: rota TTS resolvida quando mode = tts
+- audio.soundFx: camada opcional futura de efeitos sonoros
+- audio.backgroundMusic: biblioteca/selecao opcional futura de musicas de fundo
+- image.mode: none | generate
+- image.model: provider/modelo de imagem quando mode = generate
 - video.mode: none | editor_motion | text_to_video | image_to_video | looped_clips
+- video.model: provider/modelo de video quando o modo usar provider de video IA
 - render.outputMode: images_only | single_video | clips
+- render.textLayer: none | captions | slide_points | highlights
+- render.templateSelection: manual | random | sequential
 ```
 
 Semantica:
 
-- `audio.mode = tts`: exige `metadata.tts` com rota TTS do projeto;
+- `metadata.pipeline` e a fonte unica de verdade para as etapas do projeto;
+- nao devem existir campos paralelos como `metadata.tts` ou `metadata.visualGeneration` no contrato novo;
+- `audio.mode = tts`: exige `pipeline.audio.tts` com rota TTS do projeto;
 - `audio.mode = music`: audio principal vem de musica/faixa externa, sem TTS associado ao projeto;
 - `audio.mode = video_native_audio`: fala/audio vem do provider de video, respeitando limites do modelo;
-- `image.enabled = true`: gera imagens a partir das cenas;
+- `audio.soundFx`: efeitos sonoros entram como camada de mixagem, nao como parte obrigatoria da segmentacao;
+- `audio.backgroundMusic`: projeto seleciona musicas permitidas de uma biblioteca global ou, futuramente, um provider de musica instrumental IA;
+- `image.mode = generate`: gera imagens a partir das cenas;
 - `video.mode = editor_motion`: usa imagens e movimentos automatizados de editor, como pan, zoom e loop;
 - `video.mode = text_to_video`: gera video direto de texto/prompt;
 - `video.mode = image_to_video`: gera imagem base e anima com provider de video;
 - `video.mode = looped_clips`: gera poucos clipes e repete/compõe ate cobrir a duracao do produto final.
+- `render.textLayer`: define se o video final tera captions, pontos de slide ou destaques, sem obrigar `on_screen` na segmentacao.
 
 Decisao de beta:
 
@@ -366,33 +377,97 @@ Decisao de beta:
 
 Exemplos:
 
-- narracao comum: `script.scene_blocks` + `audio.tts` + `image.enabled` + `video.editor_motion`;
+- narracao comum: `script.scene_blocks` + `audio.tts` + `image.generate` + `video.editor_motion`;
 - shorts com video IA: `script.scene_blocks` + `audio.video_native_audio` + `video.text_to_video`;
 - playlist musical simples: `script.music_storyboard` + `audio.music` + `video.looped_clips`;
-- imagens sociais: `script.scene_blocks` + `audio.none` + `image.enabled` + `render.images_only`.
+- imagens sociais: `script.scene_blocks` + `audio.none` + `image.generate` + `render.images_only`.
+
+## Templates de render e textLayer
+
+Decisao:
+
+- texto na tela nao e `script.mode`;
+- texto na tela e uma camada de saida/render, controlada por template;
+- `script.mode` decide como o roteiro vira blocos estruturais;
+- `render.textLayer` e o template decidem como esses blocos aparecem no produto final.
+
+Responsabilidades do template:
+
+- captions: com ou sem legenda, estilo, posicao, tamanho, cor, sombra e efeito;
+- highlights: palavras ou trechos em destaque, possivelmente dirigidos por marcadores futuros como `[show]`;
+- slide_points: pontos curtos na tela, mais perto do fluxo atual de aulas;
+- logo: asset, posicao, tamanho e opacidade;
+- overlay: asset de video com alpha, opacidade e velocidade;
+- transicoes, enquadramento, safe areas e identidade visual.
+
+Politicas por projeto/variant:
+
+- `manual`: usuario aprova o template antes de renderizar;
+- `random`: escolhe um template permitido aleatoriamente;
+- `sequential`: percorre templates permitidos em ordem e volta ao inicio.
+
+Implicacao para a segmentacao:
+
+- `buildSegmentationPrompt` nao deve gerar `on_screen`;
+- a divisao estrutural deve produzir `source_text`, `word_count` e `duration_estimate_s`;
+- a etapa seguinte pode gerar prompts visuais, captions ou destaques conforme `render.textLayer` e template.
+
+## Visual beats para music_storyboard
+
+`music_storyboard` nao deve ser tratado como uma sequencia de blocos de fala. Ele descreve momentos visuais de uma musica, playlist ou album.
+
+Definicao:
+
+- um visual beat e uma mudanca coerente de imagem, clima, assunto, energia, camera ou acao visual;
+- no beta, visual beats podem usar duracoes fixas ou faixas aceitas pelo provider de video;
+- sincronizacao fina com musica fica para etapa posterior, usando BPM, waveform, transientes ou marcadores manuais.
+
+Implementacao incremental:
+
+- beta: segmentar roteiro/storyboard em visual beats com duracao aproximada;
+- depois: importar musica, medir duracao, BPM e transientes;
+- depois: distribuir beats visuais no timeline;
+- depois: permitir loop de poucos clipes curtos sobre musicas longas;
+- depois: gerar uma historia visual completa para playlist/album.
+
+## Biblioteca de musicas de fundo
+
+Direcao:
+
+- criar uma biblioteca global de musicas enviadas pelo usuario;
+- cada projeto escolhe quais faixas podem ser usadas como background music;
+- na renderizacao, a selecao pode ser aleatoria, sequencial ou manual;
+- a mixagem deve respeitar volume, fade, loop, crossfade e duracao final.
+
+Futuro:
+
+- adicionar providers de geracao de musica instrumental IA;
+- manter musica instrumental sem letra como caso principal para background;
+- guardar licenca/origem/metadados para evitar uso indevido em publicacao.
 
 ## Pipeline de video
 
 Fluxo esperado:
 
-1. `ContentItem.sourceText/scriptText` fica associado a um projeto.
+1. `ContentItem.sourceText/scriptText` pode existir sem projeto e pode ser associado a um ou mais projetos.
 2. Projeto define canais, formatos e pipeline de producao.
 3. Uma `Variant` de video escolhe modo de fala: sem fala, TTS externo ou audio nativo do motor de video.
 4. O sistema resolve `SpeechBudget` a partir da rota TTS por lingua ou do provider/modelo de video.
 5. Uma `Variant` de video inicia a segmentacao com limites de fala/duracao ja resolvidos.
-6. Segmentacao cria `Block[]` com `role` e `variantScope`.
-7. criacao de `onScreenJson`
-8. criacao de `ttsText` quando a fala for externa;
-9. criacao de `imagePromptJson`
-10. criacao de `animationPromptJson`
-11. criacao/reserva de `directionNotesJson`
-12. criacao/reserva opcional de `soundEffectPromptJson`
-13. TTS gera audio quando o modo for `external_tts`
-14. ffprobe mede duracao quando existir audio externo
-15. provider visual gera imagem ou video de cena conforme capacidade escolhida
-16. Playwright renderiza slide PNG quando o fluxo for slide/imagem estatica
-17. ffmpeg renderiza clip MP4 quando necessario
-18. ffmpeg concatena/compoe video final da Variant
+6. Segmentacao estrutural por LLM cria `Block[]`/visual beats, sem exigir `onScreenJson`.
+7. fallback secundario usa segundo modelo Gemini quando disponivel.
+8. fallback final usa heuristica deterministica com o mesmo orcamento conhecido.
+9. criacao de `ttsText` quando a fala for externa;
+10. criacao de `imagePromptJson`
+11. criacao de `animationPromptJson`
+12. criacao/reserva de `directionNotesJson`
+13. criacao/reserva opcional de `soundEffectPromptJson`
+14. TTS gera audio quando o modo for `external_tts`
+15. ffprobe mede duracao quando existir audio externo
+16. provider visual gera imagem ou video de cena conforme capacidade escolhida
+17. Playwright renderiza slide PNG quando o fluxo for slide/imagem estatica
+18. ffmpeg renderiza clip MP4 quando necessario
+19. ffmpeg concatena/compoe video final da Variant
 
 ## Orcamento de fala e segmentacao
 
@@ -430,6 +505,8 @@ Uso pelo segmentador:
 - o prompt deve pedir blocos dentro de `targetChars` e nunca acima de `maxChars` quando houver TTS;
 - para fala nativa de video, o prompt deve pedir blocos que caibam na duracao maxima aceita pelo provider/modelo;
 - a resposta do LLM deve ser validada deterministicamente antes de persistir blocos.
+- se o LLM primario falhar ou retornar JSON/blocos invalidos, o worker tenta o modelo Gemini fallback configurado;
+- se o fallback tambem falhar, o worker usa heuristica deterministica e registra isso em log.
 
 ## Providers visuais
 

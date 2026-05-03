@@ -100,7 +100,6 @@ type ContentProject = {
 
 type ContentItem = {
   id: string;
-  projectId: string;
   title: string;
   sourceText?: string | null;
   status: string;

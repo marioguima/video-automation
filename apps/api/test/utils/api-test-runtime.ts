@@ -111,6 +111,47 @@ function applyCopeContentProjectsMigrationIfNeeded(rootDir: string, db: Database
   db.exec(migrationSql);
 }
 
+function applyContentProjectItemLinksMigrationIfNeeded(rootDir: string, db: Database.Database): void {
+  const hasLinkTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ContentProjectItem'")
+    .get() as { name: string } | undefined;
+  if (hasLinkTable) return;
+  const migrationPath = path.join(
+    rootDir,
+    "packages",
+    "db",
+    "prisma",
+    "migrations",
+    "20260502213000_add_content_project_item_links",
+    "migration.sql"
+  );
+  if (!fs.existsSync(migrationPath)) {
+    throw new Error(`Content project item links migration file not found at ${migrationPath}`);
+  }
+  const migrationSql = fs.readFileSync(migrationPath, "utf8");
+  db.exec(migrationSql);
+}
+
+function applyRemoveContentItemProjectIdMigrationIfNeeded(rootDir: string, db: Database.Database): void {
+  if (!hasColumn(db, "ContentItem", "projectId")) {
+    return;
+  }
+  const migrationPath = path.join(
+    rootDir,
+    "packages",
+    "db",
+    "prisma",
+    "migrations",
+    "20260502223000_remove_content_item_project_id",
+    "migration.sql"
+  );
+  if (!fs.existsSync(migrationPath)) {
+    throw new Error(`Content item projectId removal migration file not found at ${migrationPath}`);
+  }
+  const migrationSql = fs.readFileSync(migrationPath, "utf8");
+  db.exec(migrationSql);
+}
+
 function applyBlockAnimationPromptMigrationIfNeeded(rootDir: string, db: Database.Database): void {
   if (hasColumn(db, "Block", "animationPromptJson")) {
     return;
@@ -163,6 +204,8 @@ function cloneAndResetDatabase(rootDir: string, targetDbPath: string): void {
     applyWorkspaceLayer1MigrationIfNeeded(rootDir, db);
     applyWorkspaceLayers234MigrationIfNeeded(rootDir, db);
     applyCopeContentProjectsMigrationIfNeeded(rootDir, db);
+    applyContentProjectItemLinksMigrationIfNeeded(rootDir, db);
+    applyRemoveContentItemProjectIdMigrationIfNeeded(rootDir, db);
     applyBlockAnimationPromptMigrationIfNeeded(rootDir, db);
     applyBlockSceneNotesAndSoundEffectMigrationIfNeeded(rootDir, db);
 

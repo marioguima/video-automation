@@ -1920,6 +1920,33 @@ const Editor: React.FC<EditorProps> = ({
           setIsSegmenting(true);
           setSegmentPhase(state.segment.phase);
           setSegmentProgress({ current: state.segment.current, total: state.segment.total });
+          if (state.segment.current > 0) {
+            apiGet<LegacyBlock[]>(`/lesson-versions/${selectedVersionId}/blocks`, {
+              cacheMs: 0,
+              dedupe: false
+            })
+              .then((items) => {
+                if (cancelled) return;
+                items.forEach(mergeLegacyBlock);
+                const completedIds = new Set(
+                  items
+                    .filter((item) => item.index <= state.segment.current)
+                    .map((item) => item.id)
+                );
+                if (completedIds.size > 0) {
+                  setGeneratingStates((prev) => {
+                    const next = { ...prev };
+                    completedIds.forEach((id) => {
+                      next[id] = { ...next[id], text: false };
+                    });
+                    return next;
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error(err);
+              });
+          }
         } else {
           setIsSegmenting(false);
           setSegmentJobId(null);
@@ -2075,6 +2102,9 @@ const Editor: React.FC<EditorProps> = ({
           type?: string;
           blockId?: string | null;
           lessonVersionId?: string | null;
+          progressPercent?: number | null;
+          progressCurrent?: number | null;
+          progressTotal?: number | null;
         };
       }>).detail;
       if (!detail || detail.event !== 'job_update') return;
@@ -2085,6 +2115,18 @@ const Editor: React.FC<EditorProps> = ({
       const status = payload?.status?.trim() ?? '';
       const type = payload?.type?.trim() ?? '';
       const blockId = payload?.blockId?.trim() ?? '';
+      const progressCurrent =
+        typeof payload?.progressCurrent === 'number' && Number.isFinite(payload.progressCurrent)
+          ? Math.max(0, Math.trunc(payload.progressCurrent))
+          : null;
+      const progressTotal =
+        typeof payload?.progressTotal === 'number' && Number.isFinite(payload.progressTotal)
+          ? Math.max(0, Math.trunc(payload.progressTotal))
+          : null;
+      const progressPercent =
+        typeof payload?.progressPercent === 'number' && Number.isFinite(payload.progressPercent)
+          ? Math.max(1, Math.min(99, Math.trunc(payload.progressPercent)))
+          : null;
       const blockScoped = blockId.length > 0;
       if (!jobId || !status || !type) return;
       if (isTerminal(status)) {
@@ -2248,6 +2290,44 @@ const Editor: React.FC<EditorProps> = ({
           setSegmentJobId(jobId);
           setIsSegmenting(true);
           setSegmentPhase(toPhase(status));
+          if (progressTotal !== null && progressTotal > 0) {
+            setSegmentProgress({
+              current: Math.min(progressTotal, progressCurrent ?? 0),
+              total: progressTotal
+            });
+          } else if (progressPercent !== null) {
+            setSegmentProgress((prev) => {
+              if (!prev || prev.total <= 0) return prev;
+              const current = Math.floor((prev.total * progressPercent) / 100);
+              return { current: Math.min(prev.total, Math.max(0, current)), total: prev.total };
+            });
+          }
+          if (progressCurrent !== null && progressCurrent > 0) {
+            apiGet<LegacyBlock[]>(`/lesson-versions/${selectedVersionId}/blocks`, {
+              cacheMs: 0,
+              dedupe: false
+            })
+              .then((items) => {
+                items.forEach(mergeLegacyBlock);
+                const completedIds = new Set(
+                  items
+                    .filter((item) => item.index <= progressCurrent)
+                    .map((item) => item.id)
+                );
+                if (completedIds.size > 0) {
+                  setGeneratingStates((prev) => {
+                    const next = { ...prev };
+                    completedIds.forEach((id) => {
+                      next[id] = { ...next[id], text: false };
+                    });
+                    return next;
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error(err);
+              });
+          }
         }
         return;
       }
@@ -3069,6 +3149,12 @@ const Editor: React.FC<EditorProps> = ({
         });
         return { ...prev, ...next };
       });
+      setBlocks((prev) =>
+        prev.map((block) => ({
+          ...block,
+          status: 'Editing Now'
+        }))
+      );
       setIsSegmenting(true);
       setSegmentPhase('waiting');
       setSegmentProgress({ current: 0, total: blocks.length });

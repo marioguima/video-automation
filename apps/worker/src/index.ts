@@ -14,13 +14,16 @@ import {
   buildBlockMetaPrompt,
   buildDeterministicBlocks,
   buildFallbackMeta,
+  buildSegmentationPrompt,
   normalizeBlockMetaResponse,
+  normalizeSegmentation,
   sanitizeNarratedScriptText,
   geminiChat,
   ollamaChat,
   ollamaHealth,
   ensureDataDir,
   getConfig,
+  resolveProjectRoot,
   loadRootEnv,
   loadVoiceIndex,
   findVoiceById,
@@ -40,7 +43,11 @@ import {
   type AppSettings,
   type BlockDraft,
   type BlockMeta,
-  type OnScreen
+  type LlmSegmentation,
+  type OnScreen,
+  type ScriptStructureMode,
+  type SpeechBudget,
+  type TextLayerMode
 } from "@vizlec/shared";
 import { createPrismaClient } from "@vizlec/db";
 
@@ -135,6 +142,18 @@ const GEMINI_MIN_REQUEST_INTERVAL_MS = Math.ceil(60_000 / GEMINI_REQUESTS_PER_MI
 let geminiRateLimitQueue: Promise<void> = Promise.resolve();
 let nextGeminiRequestAt = 0;
 
+type LlmTimingStat = {
+  count: number;
+  successCount: number;
+  failureCount: number;
+  timeoutCount: number;
+  totalMs: number;
+  minMs: number;
+  maxMs: number;
+};
+
+const llmTimingStats = new Map<string, LlmTimingStat>();
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -168,21 +187,86 @@ async function waitForGeminiRateLimit(options: {
   await run;
 }
 
+function recordLlmTimingSample(options: {
+  stage: string;
+  provider: string;
+  model: string;
+  attempt?: string;
+  blockIndex?: number;
+  status: "success" | "failure";
+  timeout: boolean;
+  durationMs: number;
+  timeoutMs: number;
+  promptChars: number;
+  responseChars?: number;
+  error?: string;
+}): void {
+  const key = `${options.provider}:${options.model}:${options.stage}`;
+  const current = llmTimingStats.get(key) ?? {
+    count: 0,
+    successCount: 0,
+    failureCount: 0,
+    timeoutCount: 0,
+    totalMs: 0,
+    minMs: Number.POSITIVE_INFINITY,
+    maxMs: 0
+  };
+  current.count += 1;
+  current.successCount += options.status === "success" ? 1 : 0;
+  current.failureCount += options.status === "failure" ? 1 : 0;
+  current.timeoutCount += options.timeout ? 1 : 0;
+  current.totalMs += options.durationMs;
+  current.minMs = Math.min(current.minMs, options.durationMs);
+  current.maxMs = Math.max(current.maxMs, options.durationMs);
+  llmTimingStats.set(key, current);
+
+  logWorkerAction("llm_response_timing", {
+    stage: options.stage,
+    provider: options.provider,
+    model: options.model,
+    attempt: options.attempt ?? null,
+    block_index: options.blockIndex ?? null,
+    status: options.status,
+    timeout: options.timeout,
+    duration_ms: options.durationMs,
+    timeout_ms: options.timeoutMs,
+    prompt_chars: options.promptChars,
+    response_chars: options.responseChars ?? null,
+    error: options.error ?? null,
+    sample_count: current.count,
+    success_count: current.successCount,
+    failure_count: current.failureCount,
+    timeout_count: current.timeoutCount,
+    avg_duration_ms: Math.round(current.totalMs / current.count),
+    min_duration_ms: Number.isFinite(current.minMs) ? current.minMs : 0,
+    max_duration_ms: current.maxMs
+  });
+}
+
 function logJobEvent(event: string, job: JobRecord, extra: Record<string, unknown> = {}): void {
   const correlationId = job.requestId?.trim() || null;
   const payload: Record<string, unknown> = {
+    ts: localIsoNow(),
+    kind: "job_event",
     event,
     job_id: job.id,
+    scope: job.scope,
     block_id: job.blockId,
     lesson_version_id: job.lessonVersionId,
     type: job.type,
+    status: job.status,
     attempts: job.attempts,
+    priority: job.priority,
+    client_id: job.clientId,
+    request_id: job.requestId,
     ...extra
   };
   if (correlationId) {
     payload.correlationId = correlationId;
   }
-  console.log(JSON.stringify(payload));
+  const line = JSON.stringify(payload);
+  console.log(line);
+  fs.promises.appendFile(getWorkerJobEventsLogPath(), `${line}\n`).catch(() => null);
   // Push only lifecycle-level job updates to API WS bridge.
   const shouldNotifyApi =
     event === "job_started" ||
@@ -206,15 +290,34 @@ function localIsoNow(): string {
   const offsetMinutes = -date.getTimezoneOffset();
   const sign = offsetMinutes >= 0 ? "+" : "-";
   const pad = (value: number) => String(Math.trunc(Math.abs(value))).padStart(2, "0");
-  const offsetHours = pad(offsetMinutes / 60);
+  const offsetHours = pad(Math.floor(Math.abs(offsetMinutes) / 60));
   const offsetMins = pad(offsetMinutes % 60);
-  const base = date.toISOString().replace("Z", "");
-  return `${base}${sign}${offsetHours}:${offsetMins}`;
+  const localDate = [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join("-");
+  const localTime = [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join(":");
+  const millis = String(date.getMilliseconds()).padStart(3, "0");
+  return `${localDate}T${localTime}.${millis}${sign}${offsetHours}:${offsetMins}`;
 }
 
 function getWorkerLogPath(): string {
-  const root = config.dataDir ?? process.cwd();
+  const configuredLogDir = process.env.WORKER_LOG_DIR?.trim();
+  const root = configuredLogDir || path.join(resolveProjectRoot(config.dataDir), "logs");
+  fs.mkdirSync(root, { recursive: true });
   return path.join(root, "worker-actions.log");
+}
+
+function getWorkerJobEventsLogPath(): string {
+  const configuredLogDir = process.env.WORKER_LOG_DIR?.trim();
+  const root = configuredLogDir || path.join(resolveProjectRoot(config.dataDir), "logs");
+  fs.mkdirSync(root, { recursive: true });
+  return path.join(root, "worker-job-events.log");
 }
 
 function logWorkerAction(message: string, meta: Record<string, unknown> = {}): void {
@@ -2785,7 +2888,11 @@ async function handleWorkerCommandRequest(
         const generatedCount = await prisma.block.count({
           where: {
             lessonVersionId: versionId,
-            createdAt: { gte: segmentJob.createdAt }
+            status: { in: ["segmentation_done", "segment_error"] },
+            OR: [
+              { createdAt: { gte: segmentJob.createdAt } },
+              { updatedAt: { gte: segmentJob.createdAt } }
+            ]
           }
         });
         return {
@@ -3130,6 +3237,8 @@ type NotifyApiJobEventOptions = {
   lifecycle?: JobEventLifecycle;
   phase?: JobEventPhase;
   progressPercent?: number;
+  progressCurrent?: number;
+  progressTotal?: number;
 };
 
 async function notifyApiJobEvent(
@@ -3146,6 +3255,14 @@ async function notifyApiJobEvent(
     typeof options.progressPercent === "number" && Number.isFinite(options.progressPercent)
       ? Math.max(1, Math.min(99, Math.trunc(options.progressPercent)))
       : undefined;
+  const progressCurrent =
+    typeof options.progressCurrent === "number" && Number.isFinite(options.progressCurrent)
+      ? Math.max(0, Math.trunc(options.progressCurrent))
+      : undefined;
+  const progressTotal =
+    typeof options.progressTotal === "number" && Number.isFinite(options.progressTotal)
+      ? Math.max(0, Math.trunc(options.progressTotal))
+      : undefined;
   try {
     const headers: Record<string, string> = {
       "X-Internal-Token": internalJobsEventToken,
@@ -3157,7 +3274,9 @@ async function notifyApiJobEvent(
         jobId,
         lifecycle: options.lifecycle,
         phase: options.phase,
-        progressPercent
+        progressPercent,
+        progressCurrent,
+        progressTotal
       },
       timeoutMs: 5000,
       headers
@@ -3492,12 +3611,19 @@ async function notifyRunningPhase(job: JobRecord, phase: JobEventPhase): Promise
   });
 }
 
-async function notifyRunningProgress(job: JobRecord, progressPercent: number): Promise<void> {
+async function notifyRunningProgress(
+  job: JobRecord,
+  progressPercent: number,
+  progressCurrent?: number,
+  progressTotal?: number
+): Promise<void> {
   const correlationId = await ensureJobCorrelationId(job);
   await notifyApiJobEvent(job.id, correlationId, {
     lifecycle: "running",
     phase: "generation",
-    progressPercent
+    progressPercent,
+    progressCurrent,
+    progressTotal
   });
 }
 
@@ -5738,6 +5864,418 @@ async function executeWithOomRetry<T>(options: {
   }
 }
 
+type ProjectSegmentationContext = {
+  selectedProjectId: string | null;
+  contentItemId: string | null;
+  pipelineFound: boolean;
+  rawScriptMode: string | null;
+  scriptMode: ScriptStructureMode;
+  textLayerMode: TextLayerMode;
+  speechBudget: SpeechBudget;
+};
+
+type SegmentDraftsResult = {
+  drafts: BlockDraft[];
+  source: "llm_primary" | "llm_fallback" | "heuristic";
+  provider: string;
+  model: string | null;
+  fallbackReason: string | null;
+  context: ProjectSegmentationContext;
+};
+
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordField(record: Record<string, unknown> | null | undefined, field: string): Record<string, unknown> | null {
+  const value = record?.[field];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringField(record: Record<string, unknown> | null | undefined, field: string): string | null {
+  const value = record?.[field];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function numberField(record: Record<string, unknown> | null | undefined, field: string): number | undefined {
+  const value = record?.[field];
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function numberArrayField(record: Record<string, unknown> | null | undefined, field: string): number[] | undefined {
+  const value = record?.[field];
+  if (!Array.isArray(value)) return undefined;
+  const numbers = value.filter((item): item is number => typeof item === "number" && Number.isFinite(item) && item > 0);
+  return numbers.length > 0 ? numbers : undefined;
+}
+
+function readBackingLessonVersionId(metadataJson: string | null): string | null {
+  const metadata = parseJsonObject(metadataJson);
+  const backing = recordField(metadata, "backing");
+  return stringField(backing, "lessonVersionId");
+}
+
+function normalizeScriptStructureMode(value: string | null): ScriptStructureMode {
+  return value === "music_storyboard" ? "music_storyboard" : "scene_blocks";
+}
+
+function normalizeTextLayerMode(value: string | null): TextLayerMode {
+  if (value === "captions" || value === "slide_points" || value === "highlights") return value;
+  return "none";
+}
+
+function resolveSpeechBudgetFromPipeline(
+  pipeline: Record<string, unknown> | null,
+  projectLanguage: string | null
+): SpeechBudget {
+  const audio = recordField(pipeline, "audio");
+  const audioMode = stringField(audio, "mode");
+  if (audioMode === "tts") {
+    const tts = recordField(audio, "tts");
+    return {
+      mode: "external_tts",
+      language: stringField(tts, "language") ?? projectLanguage ?? undefined,
+      sourceProviderId: stringField(tts, "providerId") ?? stringField(tts, "provider") ?? undefined,
+      targetChars: numberField(tts, "targetChars"),
+      maxChars: numberField(tts, "maxChars") ?? 200,
+      targetSpeechSeconds: numberField(tts, "targetSpeechSeconds"),
+      maxSpeechSeconds: numberField(tts, "maxSpeechSeconds")
+    };
+  }
+  if (audioMode === "video_native_audio") {
+    const video = recordField(pipeline, "video");
+    const model = recordField(video, "model");
+    const acceptedDurationsSeconds = numberArrayField(model, "acceptedDurationsSeconds");
+    const maxAcceptedDuration = acceptedDurationsSeconds ? Math.max(...acceptedDurationsSeconds) : undefined;
+    const maxSpeechSeconds = numberField(model, "maxNativeSpeechSeconds") ?? maxAcceptedDuration;
+    return {
+      mode: "video_native_audio",
+      language: projectLanguage ?? undefined,
+      sourceProviderId: stringField(model, "providerId") ?? stringField(model, "provider") ?? undefined,
+      targetSpeechSeconds: maxSpeechSeconds ? Math.min(maxSpeechSeconds, 6) : undefined,
+      maxSpeechSeconds,
+      acceptedDurationsSeconds
+    };
+  }
+  return {
+    mode: "none",
+    language: projectLanguage ?? undefined
+  };
+}
+
+function resolveTextLayerModeFromPipeline(pipeline: Record<string, unknown> | null): TextLayerMode {
+  const render = recordField(pipeline, "render");
+  const textLayer = recordField(render, "textLayer");
+  return normalizeTextLayerMode(stringField(textLayer, "mode") ?? stringField(render, "textLayerMode"));
+}
+
+async function resolveProjectSegmentationContext(options: {
+  job: JobRecord;
+  versionId: string;
+  workspaceId: string;
+}): Promise<ProjectSegmentationContext> {
+  const jobMeta = parseJsonObject(options.job.metaJson);
+  const contentItemId = stringField(jobMeta, "contentItemId");
+  const selectProject = {
+    id: true,
+    language: true,
+    metadataJson: true
+  } as const;
+  let item: {
+    id: string;
+    metadataJson: string | null;
+    projectItems: Array<{ project: { id: string; language: string | null; metadataJson: string | null } }>;
+  } | null = null;
+
+  if (contentItemId) {
+    item = await prisma.contentItem.findFirst({
+      where: { id: contentItemId, workspaceId: options.workspaceId },
+      select: {
+        id: true,
+        metadataJson: true,
+        projectItems: {
+          orderBy: { createdAt: "asc" },
+          select: { project: { select: selectProject } }
+        }
+      }
+    });
+  }
+
+  if (!item) {
+    const candidates = await prisma.contentItem.findMany({
+      where: { workspaceId: options.workspaceId },
+      select: {
+        id: true,
+        metadataJson: true,
+        projectItems: {
+          orderBy: { createdAt: "asc" },
+          select: { project: { select: selectProject } }
+        }
+      }
+    });
+    item = candidates.find((candidate) => readBackingLessonVersionId(candidate.metadataJson) === options.versionId) ?? null;
+  }
+
+  const selectedProject = item?.projectItems[0]?.project ?? null;
+  const projectMetadata = parseJsonObject(selectedProject?.metadataJson);
+  const pipeline = recordField(projectMetadata, "pipeline");
+  const script = recordField(pipeline, "script");
+  const rawScriptMode = stringField(script, "mode");
+  const projectLanguage = selectedProject?.language?.trim() || null;
+
+  return {
+    selectedProjectId: selectedProject?.id ?? null,
+    contentItemId: item?.id ?? contentItemId ?? null,
+    pipelineFound: Boolean(pipeline),
+    rawScriptMode,
+    scriptMode: normalizeScriptStructureMode(rawScriptMode),
+    textLayerMode: resolveTextLayerModeFromPipeline(pipeline),
+    speechBudget: resolveSpeechBudgetFromPipeline(pipeline, projectLanguage)
+  };
+}
+
+function parseLlmSegmentationResponse(content: string): LlmSegmentation {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      throw new Error("Invalid JSON response from segmentation LLM");
+    }
+    parsed = JSON.parse(content.slice(start, end + 1));
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Segmentation LLM returned a non-object payload");
+  }
+  return parsed as LlmSegmentation;
+}
+
+function resolveHeuristicMaxChars(budget: SpeechBudget, speechRateWps: number): number {
+  const candidates: number[] = [];
+  if (typeof budget.maxChars === "number" && budget.maxChars > 0) {
+    candidates.push(budget.maxChars);
+  }
+  if (
+    typeof budget.maxSpeechSeconds === "number" &&
+    budget.maxSpeechSeconds > 0 &&
+    speechRateWps > 0
+  ) {
+    candidates.push(Math.floor(budget.maxSpeechSeconds * speechRateWps * 6));
+  }
+  if (candidates.length === 0) return 200;
+  return Math.max(40, Math.min(...candidates));
+}
+
+function validateSegmentDraftsAgainstBudget(drafts: BlockDraft[], budget: SpeechBudget): void {
+  for (const draft of drafts) {
+    if (typeof budget.maxChars === "number" && budget.maxChars > 0 && draft.sourceText.length > budget.maxChars) {
+      throw new Error(
+        `Block ${draft.index} has ${draft.sourceText.length} chars; max allowed is ${budget.maxChars}`
+      );
+    }
+    if (
+      typeof budget.maxSpeechSeconds === "number" &&
+      budget.maxSpeechSeconds > 0 &&
+      draft.durationEstimateS > budget.maxSpeechSeconds
+    ) {
+      throw new Error(
+        `Block ${draft.index} estimates ${draft.durationEstimateS}s; max allowed is ${budget.maxSpeechSeconds}s`
+      );
+    }
+  }
+}
+
+async function buildSegmentDraftsForVersion(options: {
+  job: JobRecord;
+  versionId: string;
+  workspaceId: string;
+  scriptText: string;
+  speechRateWps: number;
+  model: string;
+}): Promise<SegmentDraftsResult> {
+  const { job, versionId, workspaceId, scriptText, speechRateWps } = options;
+  const context = await resolveProjectSegmentationContext({ job, versionId, workspaceId });
+  const llmSettings = resolveLlmSettings();
+  const activeModel = llmSettings.model || options.model;
+  const fallbackModel =
+    llmSettings.provider === "gemini" && activeModel !== GEMINI_FALLBACK_MODEL ? GEMINI_FALLBACK_MODEL : null;
+  const prompt = buildSegmentationPrompt(scriptText, {
+    scriptMode: context.scriptMode,
+    speechRateWps,
+    speechBudget: context.speechBudget,
+    textLayerMode: context.textLayerMode
+  });
+
+  logJobEvent("segment_structure_started", job, {
+    project_id: context.selectedProjectId,
+    content_item_id: context.contentItemId,
+    pipeline_found: context.pipelineFound,
+    raw_script_mode: context.rawScriptMode,
+    script_mode: context.scriptMode,
+    text_layer_mode: context.textLayerMode,
+    speech_budget_mode: context.speechBudget.mode,
+    speech_budget_max_chars: context.speechBudget.maxChars ?? null,
+    speech_budget_max_seconds: context.speechBudget.maxSpeechSeconds ?? null,
+    model: activeModel,
+    provider: llmSettings.provider,
+    fallback_model: fallbackModel,
+    prompt_chars: prompt.length
+  });
+
+  const runAttempt = async (
+    attempt: "primary" | "fallback",
+    model: string
+  ): Promise<SegmentDraftsResult> => {
+    const startedAt = Date.now();
+    let content = "";
+    try {
+      logWorkerAction("segment_structure_llm_request_started", {
+        job_id: job.id,
+        attempt,
+        model,
+        provider: llmSettings.provider,
+        base_url: llmSettings.baseUrl,
+        timeout_ms: llmSettings.timeoutMs,
+        chars: prompt.length
+      });
+      const result = await configuredLlmChat({
+        prompt,
+        format: "json",
+        temperature: 0.1,
+        modelOverride: model,
+        job,
+        attempt: `segment_structure_${attempt}`
+      });
+      content = result.content;
+      const durationMs = Date.now() - startedAt;
+      logWorkerAction("segment_structure_llm_request_completed", {
+        job_id: job.id,
+        attempt,
+        model: result.model,
+        provider: result.provider,
+        base_url: result.baseUrl,
+        duration_ms: durationMs,
+        response_chars: content.length
+      });
+      recordLlmTimingSample({
+        stage: "segment_structure",
+        provider: result.provider,
+        model: result.model,
+        attempt,
+        status: "success",
+        timeout: false,
+        durationMs,
+        timeoutMs: result.timeoutMs,
+        promptChars: prompt.length,
+        responseChars: content.length
+      });
+      const parsed = parseLlmSegmentationResponse(content);
+      const normalized = normalizeSegmentation(parsed, scriptText, speechRateWps);
+      const drafts: BlockDraft[] = normalized.blocks.map((block) => ({
+        index: block.index,
+        sourceText: block.sourceText,
+        wordCount: block.wordCount,
+        durationEstimateS: block.durationEstimateS
+      }));
+      validateSegmentDraftsAgainstBudget(drafts, context.speechBudget);
+      logJobEvent("segment_structure_llm_completed", job, {
+        attempt,
+        provider: result.provider,
+        model: result.model,
+        block_count: drafts.length,
+        duration_ms: Date.now() - startedAt
+      });
+      return {
+        drafts,
+        source: attempt === "primary" ? "llm_primary" : "llm_fallback",
+        provider: result.provider,
+        model: result.model,
+        fallbackReason: attempt === "fallback" ? "primary_failed" : null,
+        context
+      };
+    } catch (err) {
+      const durationMs = Date.now() - startedAt;
+      const error = serializeError(err);
+      if (!content) {
+        recordLlmTimingSample({
+          stage: "segment_structure",
+          provider: llmSettings.provider,
+          model,
+          attempt,
+          status: "failure",
+          timeout: isLikelyTimeoutError(err),
+          durationMs,
+          timeoutMs: llmSettings.timeoutMs,
+          promptChars: prompt.length,
+          error
+        });
+      }
+      logJobEvent("segment_structure_llm_failed", job, {
+        attempt,
+        provider: llmSettings.provider,
+        model,
+        error,
+        raw_len: content.length,
+        raw_preview: content ? (content.length > 400 ? `${content.slice(0, 400)}...` : content) : null,
+        duration_ms: durationMs
+      });
+      throw err;
+    }
+  };
+
+  let primaryError: unknown = null;
+  try {
+    return await runAttempt("primary", activeModel);
+  } catch (err) {
+    primaryError = err;
+  }
+
+  if (fallbackModel) {
+    logJobEvent("segment_structure_llm_fallback_started", job, {
+      from_model: activeModel,
+      to_model: fallbackModel,
+      reason: serializeError(primaryError)
+    });
+    try {
+      return await runAttempt("fallback", fallbackModel);
+    } catch {
+      // Fall through to deterministic heuristic.
+    }
+  }
+
+  const heuristicMaxChars = resolveHeuristicMaxChars(context.speechBudget, speechRateWps);
+  const drafts = buildDeterministicBlocks(scriptText, speechRateWps, heuristicMaxChars);
+  validateSegmentDraftsAgainstBudget(drafts, context.speechBudget);
+  logJobEvent("segment_structure_heuristic_used", job, {
+    reason: serializeError(primaryError),
+    provider: llmSettings.provider,
+    model: activeModel,
+    fallback_model: fallbackModel,
+    block_count: drafts.length,
+    max_chars: heuristicMaxChars
+  });
+  return {
+    drafts,
+    source: "heuristic",
+    provider: llmSettings.provider,
+    model: null,
+    fallbackReason: serializeError(primaryError),
+    context
+  };
+}
+
 async function generateBlockMeta(options: {
   job: JobRecord;
   block: BlockDraft;
@@ -5791,27 +6329,59 @@ async function generateBlockMeta(options: {
       timeout_ms: timeoutMs,
       chars: prompt.length
     });
-    const llmResult = await configuredLlmChat({
-      prompt,
-      format: "json",
-      temperature: 0.2,
-      keepAlive: options.keepAlive,
-      modelOverride: attemptModel,
-      job,
-      blockIndex: block.index,
-      attempt
-    });
-    logWorkerAction("segment_block_llm_request_completed", {
-      job_id: job.id,
-      block_index: block.index,
-      attempt,
-      model: llmResult.model,
-      provider: llmResult.provider,
-      base_url: llmResult.baseUrl,
-      duration_ms: Date.now() - attemptStartedAt,
-      response_chars: llmResult.content.length
-    });
-    return llmResult;
+    try {
+      const llmResult = await configuredLlmChat({
+        prompt,
+        format: "json",
+        temperature: 0.2,
+        keepAlive: options.keepAlive,
+        modelOverride: attemptModel,
+        job,
+        blockIndex: block.index,
+        attempt
+      });
+      const durationMs = Date.now() - attemptStartedAt;
+      logWorkerAction("segment_block_llm_request_completed", {
+        job_id: job.id,
+        block_index: block.index,
+        attempt,
+        model: llmResult.model,
+        provider: llmResult.provider,
+        base_url: llmResult.baseUrl,
+        duration_ms: durationMs,
+        response_chars: llmResult.content.length
+      });
+      recordLlmTimingSample({
+        stage: "segment_block",
+        provider: llmResult.provider,
+        model: llmResult.model,
+        attempt,
+        blockIndex: block.index,
+        status: "success",
+        timeout: false,
+        durationMs,
+        timeoutMs: llmResult.timeoutMs,
+        promptChars: prompt.length,
+        responseChars: llmResult.content.length
+      });
+      return llmResult;
+    } catch (err) {
+      const durationMs = Date.now() - attemptStartedAt;
+      recordLlmTimingSample({
+        stage: "segment_block",
+        provider: activeProvider,
+        model: attemptModel,
+        attempt,
+        blockIndex: block.index,
+        status: "failure",
+        timeout: isLikelyTimeoutError(err),
+        durationMs,
+        timeoutMs,
+        promptChars: prompt.length,
+        error: serializeError(err)
+      });
+      throw err;
+    }
   };
 
   const parseAttempt = (
@@ -5955,7 +6525,18 @@ async function generateBlocksForVersion(options: {
   scriptText: string;
   speechRateWps: number;
   model: string;
-}): Promise<{ total: number; failed: number[]; modelUsage: Record<string, number>; fallbackBlocks: number[] }> {
+}): Promise<{
+  total: number;
+  failed: number[];
+  modelUsage: Record<string, number>;
+  fallbackBlocks: number[];
+  segmentationSource: SegmentDraftsResult["source"];
+  segmentationModel: string | null;
+  segmentationFallbackReason: string | null;
+  scriptMode: ScriptStructureMode;
+  speechBudgetMode: SpeechBudget["mode"];
+  textLayerMode: TextLayerMode;
+}> {
   const { job, versionId, scriptText, speechRateWps, model } = options;
   const versionScope = await prisma.lessonVersion.findUnique({
     where: { id: versionId },
@@ -5964,8 +6545,15 @@ async function generateBlocksForVersion(options: {
   if (!versionScope) {
     throw new Error("lesson version not found");
   }
-  const appSettings = readAppSettings();
-  const drafts = buildDeterministicBlocks(scriptText, speechRateWps);
+  const segmentation = await buildSegmentDraftsForVersion({
+    job,
+    versionId,
+    workspaceId: versionScope.workspaceId,
+    scriptText,
+    speechRateWps,
+    model
+  });
+  const drafts = segmentation.drafts;
   await prisma.job.deleteMany({ where: { block: { lessonVersionId: versionId } } });
   const assets = await prisma.asset.findMany({ where: { block: { lessonVersionId: versionId } } });
   for (const asset of assets) {
@@ -6066,6 +6654,12 @@ async function generateBlocksForVersion(options: {
           fallback_used: result.fallbackUsed,
           duration_ms: result.ms
         });
+        await notifyRunningProgress(
+          job,
+          Math.round(((i + 1) / drafts.length) * 100),
+          i + 1,
+          drafts.length
+        );
       } catch (err) {
         const created = await prisma.block.findFirst({
           where: { lessonVersionId: versionId, index: draft.index },
@@ -6103,6 +6697,12 @@ async function generateBlocksForVersion(options: {
           block_index: failedBlock.index,
           error: serializeError(err)
         });
+        await notifyRunningProgress(
+          job,
+          Math.round(((i + 1) / drafts.length) * 100),
+          i + 1,
+          drafts.length
+        );
       }
     }
 
@@ -6164,7 +6764,18 @@ async function generateBlocksForVersion(options: {
     logJobEvent("segment_retry_done", job, { failed_blocks: failed.length });
   }
 
-  return { total: drafts.length, failed, modelUsage, fallbackBlocks };
+  return {
+    total: drafts.length,
+    failed,
+    modelUsage,
+    fallbackBlocks,
+    segmentationSource: segmentation.source,
+    segmentationModel: segmentation.model,
+    segmentationFallbackReason: segmentation.fallbackReason,
+    scriptMode: segmentation.context.scriptMode,
+    speechBudgetMode: segmentation.context.speechBudget.mode,
+    textLayerMode: segmentation.context.textLayerMode
+  };
 }
 
 async function generateQwenAudioForBlocks(options: {
@@ -6793,6 +7404,12 @@ async function runJob(job: JobRecord): Promise<void> {
       logJobEvent("segment_completed", job, {
         block_count: result.total,
         failed_blocks: result.failed.length,
+        segmentation_source: result.segmentationSource,
+        segmentation_model: result.segmentationModel,
+        segmentation_fallback_reason: result.segmentationFallbackReason,
+        script_mode: result.scriptMode,
+        speech_budget_mode: result.speechBudgetMode,
+        text_layer_mode: result.textLayerMode,
         llm_model_usage: result.modelUsage,
         fallback_blocks: result.fallbackBlocks.length,
         fallback_block_indexes: result.fallbackBlocks
@@ -6853,37 +7470,44 @@ async function runJob(job: JobRecord): Promise<void> {
         throw new Error("segment_block job missing lessonVersionId or blockId");
       }
       await assertLeaseValid(job.id);
-      const version = await prisma.lessonVersion.findUnique({
-        where: { id: job.lessonVersionId }
-      });
-      if (!version) {
-        throw new Error("lesson version not found");
-      }
       const block = await prisma.block.findUnique({
         where: { id: job.blockId }
       });
       if (!block) {
         throw new Error("block not found");
       }
+      if (block.lessonVersionId !== job.lessonVersionId) {
+        throw new Error("block does not belong to job lesson version");
+      }
+      const siblingBlocks = await prisma.block.findMany({
+        where: { lessonVersionId: block.lessonVersionId },
+        orderBy: { index: "asc" },
+        select: { index: true, sourceText: true }
+      });
+      const siblingIndex = siblingBlocks.findIndex((candidate) => candidate.index === block.index);
       await clearImageAssetsForBlocks([block.id]);
       await clearFinalVideoAssetsForVersion(block.lessonVersionId, {
         reason: "segment_block_regeneration",
         job
       });
       await notifyRunningPhase(job, "generation");
-      const drafts = buildDeterministicBlocks(version.scriptText, version.speechRateWps);
-      const draft = drafts[block.index - 1];
-      if (!draft) {
-        throw new Error("block index not found in drafts");
-      }
-      const prevText = drafts[block.index - 2]?.sourceText;
-      const nextText = drafts[block.index]?.sourceText;
+      const draft: BlockDraft = {
+        index: block.index,
+        sourceText: block.sourceText,
+        wordCount: block.wordCount,
+        durationEstimateS: block.durationEstimateS
+      };
+      const prevText = siblingIndex > 0 ? siblingBlocks[siblingIndex - 1]?.sourceText : undefined;
+      const nextText =
+        siblingIndex >= 0 && siblingIndex < siblingBlocks.length - 1
+          ? siblingBlocks[siblingIndex + 1]?.sourceText
+          : undefined;
       const appSettings = readAppSettings();
       const result = await generateBlockMeta({
         job,
         block: draft,
         index: draft.index,
-        total: drafts.length,
+        total: siblingBlocks.length || block.index,
         prevText,
         nextText,
         model: appSettings.llm?.model ?? config.ollamaModel,

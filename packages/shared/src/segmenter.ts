@@ -34,12 +34,32 @@ export type LlmSegmentation = {
   blocks?: LlmBlock[];
 };
 
+export type ScriptStructureMode = "scene_blocks" | "music_storyboard";
+export type TextLayerMode = "none" | "captions" | "slide_points" | "highlights";
+export type SpeechBudget = {
+  mode: "external_tts" | "video_native_audio" | "none";
+  language?: string;
+  sourceProviderId?: string;
+  targetChars?: number;
+  maxChars?: number;
+  targetSpeechSeconds?: number;
+  maxSpeechSeconds?: number;
+  acceptedDurationsSeconds?: number[];
+};
+
+export type SegmentationPromptOptions = {
+  scriptMode?: ScriptStructureMode;
+  speechRateWps: number;
+  speechBudget?: SpeechBudget;
+  textLayerMode?: TextLayerMode;
+};
+
 export type NormalizedBlock = {
   index: number;
   sourceText: string;
   wordCount: number;
   durationEstimateS: number;
-  onScreen: OnScreen;
+  onScreen?: OnScreen;
 };
 
 export type NormalizationResult = {
@@ -286,7 +306,7 @@ function splitBulletParagraph(paragraphLines: string[], maxChars: number): strin
   return chunks;
 }
 
-function segmentationMatchesScript(blocks: NormalizedBlock[], scriptText: string): boolean {
+function segmentationMatchesScript(blocks: Array<{ sourceText: string }>, scriptText: string): boolean {
   const scriptNormalized = normalizeWhitespace(scriptText);
   const blocksNormalized = normalizeWhitespace(blocks.map((b) => b.sourceText).join(" "));
   return scriptNormalized.length > 0 && scriptNormalized === blocksNormalized;
@@ -344,7 +364,7 @@ function fallbackDirectionNotes(sourceText: string): DirectionNotes {
   };
 }
 
-function buildFallbackBlocks(scriptText: string, speechRateWps: number): BlockDraft[] {
+function buildFallbackBlocks(scriptText: string, speechRateWps: number, maxChars = 200): BlockDraft[] {
   const sections = splitTextByHorizontalRule(scriptText);
   const paragraphs = sections.flatMap((section) =>
     mergeBulletParagraphContext(splitSectionIntoParagraphLines(section))
@@ -352,8 +372,6 @@ function buildFallbackBlocks(scriptText: string, speechRateWps: number): BlockDr
   if (paragraphs.length === 0) {
     throw new Error("Script text is empty");
   }
-
-  const maxChars = 200;
 
   const blocks: BlockDraft[] = [];
   let blockIndex = 1;
@@ -440,6 +458,12 @@ export function buildBlockMetaPrompt(options: {
   const context = contextParts.length > 0 ? `\n${contextParts.join("\n\n")}` : "";
 
   return `You are a script assistant for video lessons.
+
+CRITICAL OUTPUT CONTRACT:
+- Return one raw JSON object only.
+- The first character must be { and the last character must be }.
+- Do not use Markdown, bullets outside JSON, code fences, comments, explanations, or copied instructions.
+- If uncertain, still return the JSON object using the provided block text.
 
 Task: generate on_screen, image_prompt and animation_prompt for block ${index} of ${total}.
 Use ONLY the block text as source. Do not invent facts.
@@ -528,8 +552,8 @@ export function normalizeBlockMetaResponse(
   };
 }
 
-export function buildDeterministicBlocks(scriptText: string, speechRateWps: number): BlockDraft[] {
-  return buildFallbackBlocks(scriptText, speechRateWps);
+export function buildDeterministicBlocks(scriptText: string, speechRateWps: number, maxChars = 200): BlockDraft[] {
+  return buildFallbackBlocks(scriptText, speechRateWps, maxChars);
 }
 
 export function buildFallbackMeta(sourceText: string, index: number): BlockMeta {
@@ -553,19 +577,21 @@ export function normalizeSegmentation(
   const normalized = blocks.map((block, idx) => {
     const index = idx + 1;
     const sourceText = block.source_text?.trim() ?? "";
+    if (!sourceText) {
+      throw new Error(`Segmentation block ${index} is empty`);
+    }
     const wc = sourceText ? wordCount(sourceText) : 0;
     const duration = Number.isFinite(block.duration_estimate_s as number)
       ? Number(block.duration_estimate_s)
       : speechRateWps > 0
       ? Number((wc / speechRateWps).toFixed(1))
       : 0;
-    const onScreen = block.on_screen ?? fallbackOnScreen(sourceText || scriptText, index);
     return {
       index,
       sourceText,
       wordCount: block.word_count ?? wc,
       durationEstimateS: duration,
-      onScreen
+      ...(block.on_screen ? { onScreen: block.on_screen } : {})
     };
   });
   if (!segmentationMatchesScript(normalized, scriptText)) {
@@ -574,33 +600,107 @@ export function normalizeSegmentation(
   return { blocks: normalized, usedFallback: false };
 }
 
-export function buildSegmentationPrompt(scriptText: string, speechRateWps: number): string {
-  return `Você é um sistema de análise e estruturação de conteúdo para vídeo-aulas.
+function normalizeSegmentationPromptOptions(
+  options: number | SegmentationPromptOptions
+): Required<Pick<SegmentationPromptOptions, "scriptMode" | "speechRateWps" | "textLayerMode">> & {
+  speechBudget: SpeechBudget;
+} {
+  if (typeof options === "number") {
+    return {
+      scriptMode: "scene_blocks",
+      speechRateWps: options,
+      speechBudget: { mode: "external_tts", maxChars: 200 },
+      textLayerMode: "slide_points"
+    };
+  }
+  return {
+    scriptMode: options.scriptMode ?? "scene_blocks",
+    speechRateWps: options.speechRateWps,
+    speechBudget: options.speechBudget ?? { mode: "none" },
+    textLayerMode: options.textLayerMode ?? "none"
+  };
+}
 
-Segmentar o roteiro em blocos que serão slides de um vídeo.
-- Cada bloco deve ter duração estimada alvo de 15–20 segundos.
-- Use speech_rate_wps = ${speechRateWps}.
+function buildBudgetInstructions(budget: SpeechBudget, speechRateWps: number): string {
+  const lines: string[] = [];
+  lines.push(`- speech_rate_wps = ${speechRateWps}.`);
+  lines.push(`- speech_budget.mode = ${budget.mode}.`);
+  if (budget.language) lines.push(`- language = ${budget.language}.`);
+  if (budget.sourceProviderId) lines.push(`- source_provider_id = ${budget.sourceProviderId}.`);
+  if (typeof budget.targetChars === "number") {
+    lines.push(`- target_chars_per_block = ${budget.targetChars}.`);
+  }
+  if (typeof budget.maxChars === "number") {
+    lines.push(`- max_chars_per_block = ${budget.maxChars}. Nunca ultrapasse esse limite em source_text.`);
+  }
+  if (typeof budget.targetSpeechSeconds === "number") {
+    lines.push(`- target_speech_seconds_per_block = ${budget.targetSpeechSeconds}.`);
+  }
+  if (typeof budget.maxSpeechSeconds === "number") {
+    lines.push(`- max_speech_seconds_per_block = ${budget.maxSpeechSeconds}. Nunca ultrapasse essa duracao estimada.`);
+  }
+  if (budget.acceptedDurationsSeconds && budget.acceptedDurationsSeconds.length > 0) {
+    lines.push(`- accepted_video_durations_seconds = ${budget.acceptedDurationsSeconds.join(", ")}.`);
+  }
+  if (budget.mode === "none") {
+    lines.push("- Sem fala gerada: priorize ritmo visual e cortes naturais, mantendo o texto completo.");
+  }
+  return lines.join("\n");
+}
 
-Regras:
+export function buildSegmentationPrompt(
+  scriptText: string,
+  options: number | SegmentationPromptOptions
+): string {
+  const normalized = normalizeSegmentationPromptOptions(options);
+  const scriptModeInstructions =
+    normalized.scriptMode === "music_storyboard"
+      ? `Modo do roteiro: music_storyboard.
+- Divida em visual beats: momentos visuais coerentes que podem virar imagens, clipes ou loops.
+- Um visual beat representa uma mudanca de imagem, clima, cena, assunto ou energia visual.
+- Se existir texto narrativo no roteiro, preserve esse texto literalmente em source_text; a sincronizacao musical fina fica para uma etapa posterior.`
+      : `Modo do roteiro: scene_blocks.
+- Divida em blocos de cena para narracao, imagem e/ou video.
+- Cada bloco deve representar uma ideia falavel ou cena coerente.`;
+
+  return `Você é um sistema de análise estrutural de roteiros para geração automatizada de vídeo.
+
+CONTRATO CRITICO DE SAIDA:
+- Retorne um unico objeto JSON bruto.
+- O primeiro caractere deve ser { e o ultimo deve ser }.
+- Nao use Markdown, listas fora do JSON, blocos de codigo, comentarios, explicacoes ou copia das instrucoes.
+- Se houver duvida, ainda assim retorne o objeto JSON seguindo o formato.
+
+Tarefa: segmentar o roteiro em blocos estruturais antes da geração de fala, imagem, vídeo e render.
+
+${scriptModeInstructions}
+
+Orçamento de fala/tempo:
+${buildBudgetInstructions(normalized.speechBudget, normalized.speechRateWps)}
+
+Text layer configurado: ${normalized.textLayerMode}.
+- Nao gere on_screen, captions, bullets de slide ou texto para tela nesta etapa.
+- O text layer sera decidido em fase posterior por template/render.
+
+Regras obrigatorias:
 1) Preserve a ordem do roteiro.
 2) Não invente fatos.
 3) Copie os trechos do roteiro literalmente, sem reescrever, resumir ou omitir palavras.
-4) A concatenação de source_text de todos os blocos deve ser exatamente igual ao roteiro original.
-5) Cada bloco deve ter no máximo 200 caracteres em source_text.
-6) Tente cortar em fronteiras naturais.
-7) Use on_screen com title (<=8 palavras) e bullets (2–5 itens, <=10 palavras).
+4) A concatenação de source_text de todos os blocos deve ser exatamente igual ao roteiro original depois de normalizar espaços.
+5) Tente cortar em fronteiras naturais: frases, pausas, mudancas de assunto ou mudancas visuais.
+6) Se houver limite de caracteres ou segundos, reduza o tamanho do bloco dividindo em mais blocos.
+7) Nao inclua campos que nao estao no formato pedido.
 
 Retorne APENAS JSON válido no formato:
 {
   "lesson_title": "string",
-  "speech_rate_wps": ${speechRateWps},
+  "speech_rate_wps": ${normalized.speechRateWps},
   "blocks": [
     {
       "index": 1,
       "source_text": "string",
       "word_count": 0,
-      "duration_estimate_s": 0,
-      "on_screen": {"title":"string","bullets":["string"]}
+      "duration_estimate_s": 0
     }
   ]
 }

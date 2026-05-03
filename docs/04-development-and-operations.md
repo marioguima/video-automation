@@ -189,6 +189,21 @@ tmp/worker-4111.log
 tmp/web-4273.log
 ```
 
+Logs persistidos pelo worker fora de `DATA_DIR`:
+
+```text
+logs/worker-actions.log
+logs/worker-job-events.log
+```
+
+`worker-actions.log` registra eventos operacionais gerais do worker. `worker-job-events.log`
+registra eventos JSONL por job, incluindo segmentacao, TTS, imagem, render e falhas por bloco,
+para permitir diagnostico sem depender apenas do console.
+
+Os timestamps desses arquivos devem ser gravados no horario local real do processo, com offset
+explicito, por exemplo `2026-05-02T19:22:36.452-03:00` no Brasil.
+`WORKER_LOG_DIR` pode sobrescrever esse diretorio quando for necessario.
+
 ## Fluxo de trabalho recomendado
 
 1. Ler `docs/08-roadmap-status-and-handoff.md`.
@@ -207,4 +222,3 @@ tmp/web-4273.log
 - Preferir metadata para prototipar campos ainda instaveis.
 - Criar migrations somente quando contrato estiver claro.
 - Preservar fluxo legado de curso enquanto FlowShopy evolui.
-

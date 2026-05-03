@@ -14,7 +14,7 @@ type Project = {
 
 type ContentItem = {
   id: string;
-  projectId: string;
+  projectIds: string[];
   title: string;
   kind: string;
   sourceText?: string | null;
@@ -30,7 +30,8 @@ type ContentItem = {
       lessonVersionId?: string;
     };
   } | null;
-  projectName?: string;
+  projectName?: string | null;
+  projectNames?: string[];
   destinations?: string[];
 };
 
@@ -71,7 +72,9 @@ function formatDate(value?: string): string {
 }
 
 function getUsageLabel(item: ContentItem): string {
-  return item.projectName ? 'Used in 1 project' : 'No project';
+  const count = item.projectIds.length;
+  if (count === 0) return 'No project';
+  return count === 1 ? 'Used in 1 project' : `Used in ${count} projects`;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -98,13 +101,17 @@ function getContentDestinations(item: ContentItem): string[] {
   return asStringArray(item.destinations);
 }
 
+function getItemProjectIds(item: ContentItem): string[] {
+  return item.projectIds;
+}
+
 export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed }: ContentQuickStartProps) {
   const [screen, setScreen] = useState<'list' | 'form'>('list');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [projects, setProjects] = useState<Project[]>([]);
   const [contents, setContents] = useState<ContentItem[]>([]);
   const [editingContent, setEditingContent] = useState<ContentItem | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [title, setTitle] = useState('Novo conteúdo');
   const [sourceText, setSourceText] = useState(DEFAULT_TEXT);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -120,29 +127,31 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
   const loadProjects = async (): Promise<Project[]> => {
     const data = await apiGet<Project[]>('/content-projects', { cacheMs: 0, dedupe: false });
     setProjects(data);
-    if (!selectedProjectId && data[0]) {
-      setSelectedProjectId(data[0].id);
-    }
     return data;
   };
 
   const loadContentList = async () => {
     const loadedProjects = await loadProjects();
-    const itemGroups = await Promise.all(
-      loadedProjects.map(async (project) => {
-        const items = await apiGet<ContentItem[]>(`/content-projects/${project.id}/items`, { cacheMs: 0, dedupe: false });
-        return items.map((item) => {
+    const projectById = new Map(loadedProjects.map((project) => [project.id, project]));
+    const items = await apiGet<ContentItem[]>('/content-items', { cacheMs: 0, dedupe: false });
+    setContents(
+      items
+        .map((item) => {
+          const itemProjectIds = getItemProjectIds(item);
+          const itemProjects = itemProjectIds.map((projectId) => projectById.get(projectId)).filter((project): project is Project => Boolean(project));
+          const project = itemProjects[0];
           const itemDestinations = asStringArray(item.metadata?.destinations);
-          const projectDestinations = getProjectDestinations(project);
+          const projectDestinations = itemProjects.flatMap(getProjectDestinations);
           return {
             ...item,
-            projectName: project.name,
+            projectIds: itemProjectIds,
+            projectName: item.projectName ?? project?.name ?? null,
+            projectNames: item.projectNames ?? itemProjects.map((projectItem) => projectItem.name),
             destinations: itemDestinations.length > 0 ? itemDestinations : projectDestinations
           };
-        });
-      })
+        })
+        .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
     );
-    setContents(itemGroups.flat().sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')));
   };
 
   useEffect(() => {
@@ -161,9 +170,10 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
     onInitialDraftConsumed?.();
   }, [initialDraft?.nonce]);
 
-  const resolveProjectId = async (): Promise<string> => {
-    if (!selectedProjectId) throw new Error('Create a project first, then associate the content here.');
-    return selectedProjectId;
+  const toggleSelectedProject = (projectId: string) => {
+    setSelectedProjectIds((current) =>
+      current.includes(projectId) ? current.filter((id) => id !== projectId) : [...current, projectId]
+    );
   };
 
   const saveContent = async () => {
@@ -179,27 +189,35 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
     setError(null);
     try {
       if (editingContent) {
-        if (!canEditContent(editingContent)) {
-          throw new Error('This content already started deliverable production and cannot be edited in V1.');
-        }
-        await apiPatch<ContentItem>(`/content-items/${editingContent.id}`, {
-          title,
-          sourceText,
-          metadata: {
-            aiPrompt: aiPrompt.trim() || undefined
-          }
-        });
-        setStatus('Content updated.');
+        const editable = canEditContent(editingContent);
+        await apiPatch<ContentItem>(
+          `/content-items/${editingContent.id}`,
+          editable
+            ? {
+                title,
+                sourceText,
+                projectIds: selectedProjectIds,
+                metadata: {
+                  aiPrompt: aiPrompt.trim() || undefined
+                }
+              }
+            : {
+                projectIds: selectedProjectIds
+              }
+        );
+        setStatus(editable ? 'Content updated.' : 'Project associations updated.');
       } else {
-        const projectId = await resolveProjectId();
-        const project = projects.find((projectItem) => projectItem.id === projectId);
-        const destinations = project ? getProjectDestinations(project) : [];
-        const aspectRatios = project ? getProjectAspectRatios(project) : [];
-        await apiPost<ContentItem>(`/content-projects/${projectId}/items`, {
+        const selectedProjects = selectedProjectIds
+          .map((projectId) => projects.find((projectItem) => projectItem.id === projectId))
+          .filter((project): project is Project => Boolean(project));
+        const destinations = Array.from(new Set(selectedProjects.flatMap(getProjectDestinations)));
+        const aspectRatios = Array.from(new Set(selectedProjects.flatMap(getProjectAspectRatios)));
+        await apiPost<ContentItem>('/content-items', {
           kind: 'content',
           title,
           sourceText,
           orientation: orientationFromAspectRatios(aspectRatios),
+          projectIds: selectedProjectIds,
           status: 'script',
           metadata: {
             source: 'content_production',
@@ -209,7 +227,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
             aiPrompt: aiPrompt.trim() || undefined
           }
         });
-        setStatus('Content saved and associated to project.');
+        setStatus(selectedProjectIds.length > 0 ? 'Content saved and associated to projects.' : 'Content saved without project.');
       }
       await loadContentList();
       setScreen('list');
@@ -225,6 +243,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
     setTitle('Novo conteúdo');
     setSourceText(DEFAULT_TEXT);
     setAiPrompt('');
+    setSelectedProjectIds([]);
     setError(null);
     setStatus('Ready');
     setScreen('form');
@@ -235,7 +254,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
     setTitle(item.title);
     setSourceText(item.sourceText ?? '');
     setAiPrompt(typeof item.metadata?.aiPrompt === 'string' ? item.metadata.aiPrompt : '');
-    setSelectedProjectId(item.projectId);
+    setSelectedProjectIds(getItemProjectIds(item));
     setError(null);
     setStatus('Ready');
     setScreen('form');
@@ -243,7 +262,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
 
   const filteredContents = contents.filter((item) => {
     const nameMatch = item.title.toLowerCase().includes(nameFilter.trim().toLowerCase());
-    const projectMatch = !projectFilter || item.projectId === projectFilter;
+    const projectMatch = !projectFilter || getItemProjectIds(item).includes(projectFilter);
     const destinationMatch = !destinationFilter || getContentDestinations(item).includes(destinationFilter);
     const createdAt = item.createdAt ? new Date(item.createdAt) : null;
     const from = dateFromFilter ? new Date(`${dateFromFilter}T00:00:00`) : null;
@@ -323,7 +342,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
             <div className="min-w-0 text-[10px] font-bold uppercase tracking-tight text-muted-foreground">
               <span>{formatDate(item.createdAt)}</span>
               <span className="mx-2">•</span>
-              <span title={item.projectName ?? undefined}>{getUsageLabel(item)}</span>
+              <span title={(item.projectNames ?? []).join(', ') || undefined}>{getUsageLabel(item)}</span>
             </div>
             <button
               type="button"
@@ -348,7 +367,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
           <h3 className="font-bold truncate">{item.title}</h3>
           <p className="text-xs text-muted-foreground truncate mt-1">{item.sourceText || 'No source text.'}</p>
         </div>
-        <div className="text-xs text-muted-foreground truncate" title={item.projectName ?? undefined}>{getUsageLabel(item)}</div>
+        <div className="text-xs text-muted-foreground truncate" title={(item.projectNames ?? []).join(', ') || undefined}>{getUsageLabel(item)}</div>
         <div className="flex min-w-0 flex-wrap gap-1.5">{renderDestinationBadges(item)}</div>
         <div className="text-xs font-bold uppercase text-muted-foreground">{stage}</div>
         <div className="text-xs text-muted-foreground">{formatDate(item.createdAt)}</div>
@@ -516,8 +535,8 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
             <h2 className="text-xl font-bold text-slate-800 dark:text-white">{editingContent ? 'Edit Content' : 'Create Content'}</h2>
             <p className="text-sm text-slate-500 mt-1">
               {editingContent && !canEditContent(editingContent)
-                ? 'This content already started deliverable production and is locked in V1.'
-                : 'Draft the source content and associate it with a project.'}
+                ? 'This content already started deliverable production and source editing is locked in V1.'
+                : 'Draft reusable source content.'}
             </p>
           </div>
 
@@ -574,49 +593,49 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
 
             <div className="space-y-2 md:col-span-2">
               <div className="flex items-center justify-between">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Project</label>
-                {!editingContent && (
-                  <button
-                    type="button"
-                    onClick={() => loadProjects()}
-                    title="Refresh projects"
-                    className="h-8 w-8 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-slate-400 hover:text-orange-600 inline-flex items-center justify-center transition-colors"
-                  >
-                    <RefreshCw size={14} />
-                  </button>
-                )}
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Projects</label>
+                <button
+                  type="button"
+                  onClick={() => loadProjects()}
+                  title="Refresh projects"
+                  className="h-8 w-8 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-slate-400 hover:text-orange-600 inline-flex items-center justify-center transition-colors"
+                >
+                  <RefreshCw size={14} />
+                </button>
               </div>
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <select
-                value={selectedProjectId}
-                onChange={(event) => setSelectedProjectId(event.target.value)}
-                className="w-full border rounded-[5px] h-9 px-3 bg-[hsl(var(--editor-input))] border-[hsl(var(--editor-input-border))] text-foreground"
-                disabled={projects.length === 0 || Boolean(editingContent)}
-              >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
+                  <label
+                    key={project.id}
+                    className="min-h-9 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] px-3 py-2 text-sm text-foreground flex items-center gap-2"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedProjectIds.includes(project.id)}
+                      onChange={() => toggleSelectedProject(project.id)}
+                      className="h-4 w-4 accent-orange-600"
+                    />
+                    <span className="min-w-0 truncate">{project.name}</span>
+                  </label>
                 ))}
-              </select>
+              </div>
               {projects.length === 0 && (
-                <p className="text-xs text-slate-500">No project found. Create a project in Projects before adding content.</p>
+                <p className="text-xs text-slate-500">No projects yet.</p>
               )}
             </div>
 
             <div className="md:col-span-2 pt-3 flex flex-col sm:flex-row gap-4">
-              {(!editingContent || canEditContent(editingContent)) && (
-                <button
-                  type="submit"
-                  disabled={busy || projects.length === 0}
-                  className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold rounded-[5px] flex items-center justify-center gap-3 transition-all active:scale-95 h-9"
-                >
-                  <Plus size={18} />
-                  Save Content
-                </button>
-              )}
+              <button
+                type="submit"
+                disabled={busy}
+                className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold rounded-[5px] flex items-center justify-center gap-3 transition-all active:scale-95 h-9"
+              >
+                <Plus size={18} />
+                Save Content
+              </button>
             </div>
           </form>
         </div>

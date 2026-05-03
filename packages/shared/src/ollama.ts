@@ -22,7 +22,7 @@ export async function ollamaHealth(baseUrl: string): Promise<{ ok: boolean; mode
 
 export async function ollamaChat(options: OllamaChatOptions): Promise<string> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 120000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 600000);
   const res = await fetch(`${options.baseUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -56,7 +56,6 @@ type ProjectOutput = {
 };
 
 type ProjectTtsConfig = {
-  mode?: 'external_tts';
   providerId?: string;
   provider?: string;
   language?: string;
@@ -82,22 +81,18 @@ type ProjectVisualModelConfig = {
   costTier?: string | null;
 };
 
-type ProjectVisualGenerationConfig = {
-  image?: ProjectVisualModelConfig | null;
-  video?: ProjectVisualModelConfig | null;
-};
-
 type ProjectPipelineScriptMode = 'none' | 'scene_blocks' | 'music_storyboard';
 type ProjectPipelineAudioMode = 'none' | 'tts' | 'music' | 'video_native_audio';
+type ProjectPipelineImageMode = 'none' | 'generate';
 type ProjectPipelineVideoMode = 'none' | 'editor_motion' | 'text_to_video' | 'image_to_video' | 'looped_clips';
 type ProjectPipelineRenderOutputMode = 'images_only' | 'single_video' | 'clips';
 
 type ProjectPipelineConfig = {
   version?: 1;
   script?: { mode?: ProjectPipelineScriptMode };
-  audio?: { mode?: ProjectPipelineAudioMode };
-  image?: { enabled?: boolean };
-  video?: { mode?: ProjectPipelineVideoMode };
+  audio?: { mode?: ProjectPipelineAudioMode; tts?: ProjectTtsConfig | null };
+  image?: { mode?: ProjectPipelineImageMode; model?: ProjectVisualModelConfig | null };
+  video?: { mode?: ProjectPipelineVideoMode; model?: ProjectVisualModelConfig | null };
   render?: { outputMode?: ProjectPipelineRenderOutputMode };
 };
 
@@ -115,8 +110,6 @@ type Project = {
     defaultAspectRatios?: AspectRatio[];
     defaultOutputs?: ProjectOutput[];
     pipeline?: ProjectPipelineConfig;
-    tts?: ProjectTtsConfig;
-    visualGeneration?: ProjectVisualGenerationConfig;
   } | null;
 };
 
@@ -187,7 +180,6 @@ type VisualModelOption = {
 
 type ContentItem = {
   id: string;
-  projectId: string;
   kind: string;
   title: string;
   sourceText?: string | null;
@@ -540,8 +532,8 @@ function makeTtsRouteKey(providerId: string, language: string): string {
 }
 
 function getProjectTtsRouteKey(project: Project): string {
-  const providerId = project.metadata?.tts?.providerId;
-  const language = project.metadata?.tts?.language ?? project.language;
+  const providerId = project.metadata?.pipeline?.audio?.tts?.providerId;
+  const language = project.metadata?.pipeline?.audio?.tts?.language ?? project.language;
   return providerId && language ? makeTtsRouteKey(providerId, language) : '';
 }
 
@@ -551,7 +543,6 @@ function formatTtsRouteOption(option: TtsRouteOption): string {
 
 function buildProjectTtsConfig(option: TtsRouteOption): ProjectTtsConfig {
   return {
-    mode: 'external_tts',
     providerId: option.providerId,
     provider: option.provider,
     language: option.language,
@@ -568,7 +559,7 @@ function makeVisualModelKey(providerId: string, modelId: string): string {
 }
 
 function getProjectVisualModelKey(project: Project, kind: 'image' | 'video'): string {
-  const config = kind === 'image' ? project.metadata?.visualGeneration?.image : project.metadata?.visualGeneration?.video;
+  const config = kind === 'image' ? project.metadata?.pipeline?.image?.model : project.metadata?.pipeline?.video?.model;
   return config?.providerId && config?.modelId ? makeVisualModelKey(config.providerId, config.modelId) : '';
 }
 
@@ -595,40 +586,50 @@ function buildProjectVisualModelConfig(option: VisualModelOption): ProjectVisual
 
 function getProjectPipelineConfig(project: Project): Required<ProjectPipelineConfig> {
   const pipeline = project.metadata?.pipeline;
-  const imageConfig = project.metadata?.visualGeneration?.image;
-  const videoConfig = project.metadata?.visualGeneration?.video;
-  const derivedVideoMode: ProjectPipelineVideoMode = videoConfig
-    ? imageConfig && videoConfig.kind === 'image_to_video'
-      ? 'image_to_video'
-      : 'text_to_video'
-    : 'none';
-  const videoMode = pipeline?.video?.mode ?? derivedVideoMode;
-  const imageEnabled =
-    pipeline?.image?.enabled ??
-    Boolean(imageConfig || videoMode === 'editor_motion' || videoMode === 'image_to_video');
   return {
     version: 1,
     script: { mode: pipeline?.script?.mode ?? 'scene_blocks' },
-    audio: { mode: pipeline?.audio?.mode ?? (project.metadata?.tts ? 'tts' : 'none') },
-    image: { enabled: imageEnabled },
-    video: { mode: videoMode },
-    render: { outputMode: pipeline?.render?.outputMode ?? (videoConfig ? 'single_video' : imageConfig ? 'images_only' : 'single_video') }
+    audio: {
+      mode: pipeline?.audio?.mode ?? 'none',
+      tts: pipeline?.audio?.tts ?? null
+    },
+    image: {
+      mode: pipeline?.image?.mode ?? (pipeline?.image?.model ? 'generate' : 'none'),
+      model: pipeline?.image?.model ?? null
+    },
+    video: {
+      mode: pipeline?.video?.mode ?? 'none',
+      model: pipeline?.video?.model ?? null
+    },
+    render: { outputMode: pipeline?.render?.outputMode ?? 'single_video' }
   };
 }
 
 function buildProjectPipelineConfig(options: {
   scriptMode: ProjectPipelineScriptMode;
   audioMode: ProjectPipelineAudioMode;
-  imageEnabled: boolean;
+  ttsRoute?: TtsRouteOption | null;
+  imageMode: ProjectPipelineImageMode;
+  imageModel?: VisualModelOption | null;
   videoMode: ProjectPipelineVideoMode;
+  videoModel?: VisualModelOption | null;
   renderOutputMode: ProjectPipelineRenderOutputMode;
 }): Required<ProjectPipelineConfig> {
   return {
     version: 1,
     script: { mode: options.scriptMode },
-    audio: { mode: options.audioMode },
-    image: { enabled: options.imageEnabled },
-    video: { mode: options.videoMode },
+    audio:
+      options.audioMode === 'tts' && options.ttsRoute
+        ? { mode: options.audioMode, tts: buildProjectTtsConfig(options.ttsRoute) }
+        : { mode: options.audioMode },
+    image:
+      options.imageMode === 'generate' && options.imageModel
+        ? { mode: options.imageMode, model: buildProjectVisualModelConfig(options.imageModel) }
+        : { mode: 'none' },
+    video:
+      isVideoProviderMode(options.videoMode) && options.videoModel
+        ? { mode: options.videoMode, model: buildProjectVisualModelConfig(options.videoModel) }
+        : { mode: options.videoMode },
     render: { outputMode: options.renderOutputMode }
   };
 }
@@ -799,7 +800,7 @@ export default function ContentProjects({
   const [videoModelOptions, setVideoModelOptions] = useState<VisualModelOption[]>([]);
   const [pipelineScriptMode, setPipelineScriptMode] = useState<ProjectPipelineScriptMode>('scene_blocks');
   const [pipelineAudioMode, setPipelineAudioMode] = useState<ProjectPipelineAudioMode>('tts');
-  const [pipelineImageEnabled, setPipelineImageEnabled] = useState(true);
+  const [pipelineImageMode, setPipelineImageMode] = useState<ProjectPipelineImageMode>('generate');
   const [pipelineVideoMode, setPipelineVideoMode] = useState<ProjectPipelineVideoMode>('none');
   const [pipelineRenderOutputMode, setPipelineRenderOutputMode] = useState<ProjectPipelineRenderOutputMode>('single_video');
   const [selectedTtsRouteKey, setSelectedTtsRouteKey] = useState('');
@@ -844,7 +845,7 @@ export default function ContentProjects({
 
   const pipelineUsesTts = pipelineAudioMode === 'tts';
   const pipelineImageRequired = isImageRequiredByPipeline(pipelineVideoMode, pipelineRenderOutputMode, selectedVideoModel);
-  const pipelineNeedsImageModel = pipelineImageRequired || (pipelineImageEnabled && Boolean(selectedImageModelKey));
+  const pipelineNeedsImageModel = pipelineImageRequired || pipelineImageMode === 'generate';
   const pipelineNeedsVideoModel = isVideoProviderMode(pipelineVideoMode) || pipelineAudioMode === 'video_native_audio';
   const pipelineReady =
     (!pipelineUsesTts || Boolean(selectedTtsRoute)) &&
@@ -1072,7 +1073,7 @@ export default function ContentProjects({
     setSelectedOutputIds(DEFAULT_PROJECT_OUTPUT_IDS);
     setPipelineScriptMode('scene_blocks');
     setPipelineAudioMode('tts');
-    setPipelineImageEnabled(true);
+    setPipelineImageMode('generate');
     setPipelineVideoMode('none');
     setPipelineRenderOutputMode('single_video');
     setSelectedTtsRouteKey(ttsRouteOptions[0]?.key ?? '');
@@ -1090,7 +1091,7 @@ export default function ContentProjects({
     const pipeline = getProjectPipelineConfig(project);
     setPipelineScriptMode(pipeline.script.mode ?? 'scene_blocks');
     setPipelineAudioMode(pipeline.audio.mode ?? 'none');
-    setPipelineImageEnabled(Boolean(pipeline.image.enabled));
+    setPipelineImageMode(pipeline.image.mode ?? 'none');
     setPipelineVideoMode(pipeline.video.mode ?? 'none');
     setPipelineRenderOutputMode(pipeline.render.outputMode ?? 'single_video');
     setSelectedTtsRouteKey(getProjectTtsRouteKey(project) || ttsRouteOptions[0]?.key || '');
@@ -1102,7 +1103,7 @@ export default function ContentProjects({
   const saveProject = async () => {
     if (!projectName.trim()) return;
     const imageRequired = isImageRequiredByPipeline(pipelineVideoMode, pipelineRenderOutputMode, selectedVideoModel);
-    const needsImageModel = imageRequired || (pipelineImageEnabled && Boolean(selectedImageModelKey));
+    const needsImageModel = imageRequired || pipelineImageMode === 'generate';
     const needsVideoModel = isVideoProviderMode(pipelineVideoMode) || pipelineAudioMode === 'video_native_audio';
     if (pipelineAudioMode === 'tts' && !selectedTtsRoute) {
       setError('Select a TTS route for this project.');
@@ -1139,17 +1140,13 @@ export default function ContentProjects({
       const pipeline = buildProjectPipelineConfig({
         scriptMode: pipelineScriptMode,
         audioMode: pipelineAudioMode,
-        imageEnabled: needsImageModel,
+        ttsRoute: selectedTtsRoute,
+        imageMode: needsImageModel ? 'generate' : 'none',
+        imageModel: selectedImageModel,
         videoMode: pipelineVideoMode,
+        videoModel: selectedVideoModel,
         renderOutputMode: pipelineRenderOutputMode
       });
-      const visualGeneration =
-        needsImageModel || needsVideoModel
-          ? {
-              image: needsImageModel && selectedImageModel ? buildProjectVisualModelConfig(selectedImageModel) : null,
-              video: needsVideoModel && selectedVideoModel ? buildProjectVisualModelConfig(selectedVideoModel) : null
-            }
-          : undefined;
       const payload = {
         name: projectName,
         description: projectDescription,
@@ -1160,8 +1157,6 @@ export default function ContentProjects({
           defaultAspectRatios: uniqueValues(outputFormats.map((format) => format.aspectRatio)),
           defaultOutputs: outputFormats.map(toProjectOutput),
           pipeline,
-          ...(pipelineAudioMode === 'tts' && selectedTtsRoute ? { tts: buildProjectTtsConfig(selectedTtsRoute) } : {}),
-          ...(visualGeneration ? { visualGeneration } : {}),
           product: 'flowshopy'
         }
       };
@@ -1192,7 +1187,7 @@ export default function ContentProjects({
     setBusy(true);
     setError(null);
     try {
-      await apiDelete<{ ok: boolean; deletedItems: number; deletedBackingCourses: number }>(
+      await apiDelete<{ ok: boolean; detachedItems: number; deletedItems: number; deletedBackingCourses: number }>(
         `/content-projects/${projectToDelete.id}`
       );
       setProjects((current) => current.filter((project) => project.id !== projectToDelete.id));
@@ -1200,7 +1195,7 @@ export default function ContentProjects({
       setSelectedProjectId(null);
       setDetailView('contents');
       setScreen('list');
-      setStatus(`Project deleted: ${projectToDelete.name}.`);
+      setStatus(`Project deleted: ${projectToDelete.name}. Content remains in the library.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete project.');
     } finally {
@@ -1858,7 +1853,7 @@ export default function ContentProjects({
                       onChange={(event) => {
                         const modelKey = event.target.value;
                         setSelectedImageModelKey(modelKey);
-                        setPipelineImageEnabled(Boolean(modelKey));
+                        setPipelineImageMode(modelKey ? 'generate' : 'none');
                       }}
                       className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
                     >
@@ -1891,7 +1886,7 @@ export default function ContentProjects({
                       const mode = event.target.value as ProjectPipelineVideoMode;
                       setPipelineVideoMode(mode);
                       if (mode === 'editor_motion' || mode === 'image_to_video') {
-                        setPipelineImageEnabled(true);
+                        setPipelineImageMode('generate');
                         setSelectedImageModelKey((current) => current || imageModelOptions[0]?.key || '');
                       }
                     }}
@@ -1916,7 +1911,7 @@ export default function ContentProjects({
                           const model = videoModelOptions.find((option) => option.key === modelKey);
                           setSelectedVideoModelKey(modelKey);
                           if (pipelineVideoMode === 'looped_clips' && model?.kind === 'image_to_video') {
-                            setPipelineImageEnabled(true);
+                            setPipelineImageMode('generate');
                             setSelectedImageModelKey((current) => current || imageModelOptions[0]?.key || '');
                           }
                         }}
@@ -1944,7 +1939,7 @@ export default function ContentProjects({
                     const outputMode = event.target.value as ProjectPipelineRenderOutputMode;
                     setPipelineRenderOutputMode(outputMode);
                     if (outputMode === 'images_only') {
-                      setPipelineImageEnabled(true);
+                      setPipelineImageMode('generate');
                       setSelectedImageModelKey((current) => current || imageModelOptions[0]?.key || '');
                     }
                   }}
@@ -2160,27 +2155,27 @@ export default function ContentProjects({
                         <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
                           Video {PIPELINE_VIDEO_LABELS[selectedProjectPipeline.video.mode ?? 'none']}
                         </Badge>
-                        {selectedProjectPipeline.image.enabled && (
+                        {selectedProjectPipeline.image.mode === 'generate' && (
                           <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
                             Image pipeline
                           </Badge>
                         )}
+                        {selectedProjectPipeline.audio.tts?.providerId && selectedProjectPipeline.audio.tts?.language && (
+                          <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+                            TTS {selectedProjectPipeline.audio.tts.providerId} / {selectedProjectPipeline.audio.tts.language}
+                          </Badge>
+                        )}
+                        {selectedProjectPipeline.image.model?.providerId && selectedProjectPipeline.image.model?.modelId && (
+                          <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+                            Image {selectedProjectPipeline.image.model.providerId} / {selectedProjectPipeline.image.model.modelId}
+                          </Badge>
+                        )}
+                        {selectedProjectPipeline.video.model?.providerId && selectedProjectPipeline.video.model?.modelId && (
+                          <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
+                            Video {selectedProjectPipeline.video.model.providerId} / {selectedProjectPipeline.video.model.modelId}
+                          </Badge>
+                        )}
                       </>
-                    )}
-                    {selectedProject.metadata?.tts?.providerId && selectedProject.metadata?.tts?.language && (
-                      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
-                        TTS {selectedProject.metadata.tts.providerId} / {selectedProject.metadata.tts.language}
-                      </Badge>
-                    )}
-                    {selectedProject.metadata?.visualGeneration?.image?.providerId && selectedProject.metadata?.visualGeneration?.image?.modelId && (
-                      <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
-                        Image {selectedProject.metadata.visualGeneration.image.providerId} / {selectedProject.metadata.visualGeneration.image.modelId}
-                      </Badge>
-                    )}
-                    {selectedProject.metadata?.visualGeneration?.video?.providerId && selectedProject.metadata?.visualGeneration?.video?.modelId && (
-                      <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
-                        Video {selectedProject.metadata.visualGeneration.video.providerId} / {selectedProject.metadata.visualGeneration.video.modelId}
-                      </Badge>
                     )}
                     {selectedProjectVideoFormats > 0 && (
                       <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
@@ -2367,7 +2362,7 @@ export default function ContentProjects({
         <ConfirmDialog
           open={isDeleteDialogOpen && Boolean(selectedProject)}
           title="Delete project?"
-          description={`This will permanently delete "${selectedProject?.name ?? 'this project'}", its content items, and generated backing data. This cannot be undone.`}
+          description={`This will delete "${selectedProject?.name ?? 'this project'}" and detach its content items. The content and generated backing data will remain available.`}
           confirmLabel="Delete project"
           onCancel={() => setIsDeleteDialogOpen(false)}
           onConfirm={deleteProject}
