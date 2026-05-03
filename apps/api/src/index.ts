@@ -17,13 +17,13 @@ import type { WebSocket } from "ws";
 
 import {
   buildDeterministicBlocks,
-  buildFallbackMeta,
   ensureAppSettingsFile,
   ensureDataDir,
   getConfig,
   getMissingAppSettingsSecrets,
   loadRootEnv,
   normalizeLlmProvider,
+  normalizeLlmRouting,
   readAppSettingsFile,
   resolveLlmProviders,
   sanitizeNarratedScriptText,
@@ -4253,7 +4253,8 @@ fastify.get(
       theme: current.theme ?? null,
       llm: {
         provider,
-        providers
+        providers,
+        routing: normalizeLlmRouting(current.llm)
       },
       comfy: {
         baseUrl: current.comfy?.baseUrl ?? config.comfyuiBaseUrl,
@@ -4320,7 +4321,10 @@ fastify.patch(
         providers[providerKey] = {
           ...(providers[providerKey] ?? {}),
           baseUrl: providerSettings.baseUrl ?? providers[providerKey]?.baseUrl,
-          model: providerSettings.model ?? providers[providerKey]?.model,
+          model:
+            providerSettings.model !== undefined
+              ? (providerSettings.model.trim() || undefined)
+              : providers[providerKey]?.model,
           timeoutMs: timeout !== undefined ? Math.trunc(timeout) : providers[providerKey]?.timeoutMs
         };
         if (providerKey !== "ollama") {
@@ -4328,17 +4332,16 @@ fastify.patch(
             providerSettings.apiKey !== undefined ? providerSettings.apiKey.trim() : providers[providerKey]?.apiKey ?? "";
         }
       }
-      const activeSettings = providers[provider] ?? {};
-      const activeApiKey = activeSettings.apiKey?.trim() ?? "";
-      if (provider === "gemini" && !activeApiKey) {
-        return reply.code(400).send({ error: "Gemini API key is required when Gemini is selected" });
-      }
-      if (provider === "openai" && !activeApiKey) {
-        return reply.code(400).send({ error: "OpenAI API key is required when OpenAI is selected" });
-      }
       next.llm = {
         provider,
-        providers
+        providers,
+        routing: normalizeLlmRouting({
+          ...current.llm,
+          routing: {
+            ...(current.llm?.routing ?? {}),
+            ...(body.llm.routing ?? {})
+          }
+        })
       };
     }
     if (body.comfy) {
@@ -6090,7 +6093,7 @@ async function ensureContentItemBacking(
   return backing;
 }
 
-async function seedBlocksForLessonVersion(versionId: string, workspaceId: string, replaceExisting: boolean): Promise<number> {
+async function estimateBlocksForLessonVersion(versionId: string, workspaceId: string): Promise<number> {
   const version = await prisma.lessonVersion.findFirst({
     where: { id: versionId, workspaceId }
   });
@@ -6098,35 +6101,6 @@ async function seedBlocksForLessonVersion(versionId: string, workspaceId: string
     throw new Error("lesson version not found");
   }
   const drafts = buildDeterministicBlocks(version.scriptText, version.speechRateWps);
-  if (replaceExisting) {
-    await prisma.block.deleteMany({ where: { lessonVersionId: versionId, workspaceId } });
-  } else {
-    const existingCount = await prisma.block.count({ where: { lessonVersionId: versionId, workspaceId } });
-    if (existingCount > 0) return existingCount;
-  }
-  if (drafts.length === 0) return 0;
-  await prisma.block.createMany({
-    data: drafts.map((draft) => {
-      const fallbackMeta = buildFallbackMeta(draft.sourceText, draft.index);
-      return {
-        workspaceId,
-        lessonVersionId: versionId,
-        index: draft.index,
-        sourceText: draft.sourceText,
-      ttsText: sanitizeNarratedScriptText(draft.sourceText),
-      wordCount: draft.wordCount,
-      durationEstimateS: draft.durationEstimateS,
-      status: "segmentation_pending",
-      segmentError: null,
-      segmentMs: null,
-      onScreenJson: JSON.stringify(fallbackMeta.onScreen),
-      imagePromptJson: JSON.stringify(fallbackMeta.imagePrompt),
-      animationPromptJson: JSON.stringify(fallbackMeta.animationPrompt),
-      directionNotesJson: JSON.stringify(fallbackMeta.directionNotes),
-      soundEffectPromptJson: null
-      };
-    })
-  });
   return drafts.length;
 }
 
@@ -6638,11 +6612,7 @@ fastify.post(
     const requestId = body?.requestId?.trim() || `content-${itemId}-${Date.now()}`;
     const backing = await ensureContentItemBacking(itemId, auth.scope.workspaceId);
     await invalidateFinalVideoForLessonVersion(backing.lessonVersionId, "content_item_segment_requested");
-    const blocksCount = await seedBlocksForLessonVersion(
-      backing.lessonVersionId,
-      auth.scope.workspaceId,
-      Boolean(body?.purge)
-    );
+    const blocksCount = await estimateBlocksForLessonVersion(backing.lessonVersionId, auth.scope.workspaceId);
 
     const existingByRequest = await prisma.job.findFirst({
       where: { requestId },
@@ -6650,6 +6620,18 @@ fastify.post(
     });
     if (existingByRequest) {
       return reply.code(200).send({ itemId, backing, blocksCount, job: existingByRequest });
+    }
+
+    if (body?.purge) {
+      await prisma.job.deleteMany({
+        where: { block: { lessonVersionId: backing.lessonVersionId, workspaceId: auth.scope.workspaceId } }
+      });
+      await prisma.asset.deleteMany({
+        where: { block: { lessonVersionId: backing.lessonVersionId, workspaceId: auth.scope.workspaceId } }
+      });
+      await prisma.block.deleteMany({
+        where: { lessonVersionId: backing.lessonVersionId, workspaceId: auth.scope.workspaceId }
+      });
     }
 
     const job = await prisma.job.create({
@@ -9350,44 +9332,6 @@ fastify.post(
     const requestId = body?.requestId?.trim() || null;
     const purge = Boolean(body?.purge);
     let queueChanged = false;
-    const seedDeterministicDraftBlocks = async (replaceExisting: boolean): Promise<number> => {
-      const drafts = buildDeterministicBlocks(version.scriptText, version.speechRateWps);
-      if (replaceExisting) {
-        await prisma.block.deleteMany({
-          where: { lessonVersionId: versionId }
-        });
-      } else {
-        const existingCount = await prisma.block.count({
-          where: { lessonVersionId: versionId }
-        });
-        if (existingCount > 0) return existingCount;
-      }
-      if (drafts.length === 0) return 0;
-      await prisma.block.createMany({
-        data: drafts.map((draft) => {
-          const fallbackMeta = buildFallbackMeta(draft.sourceText, draft.index);
-          return {
-            workspaceId: version.workspaceId,
-            lessonVersionId: versionId,
-            index: draft.index,
-            sourceText: draft.sourceText,
-            ttsText: sanitizeNarratedScriptText(draft.sourceText),
-            wordCount: draft.wordCount,
-            durationEstimateS: draft.durationEstimateS,
-            status: "segmentation_pending",
-            segmentError: null,
-            segmentMs: null,
-            onScreenJson: JSON.stringify(fallbackMeta.onScreen),
-            imagePromptJson: JSON.stringify(fallbackMeta.imagePrompt),
-            animationPromptJson: JSON.stringify(fallbackMeta.animationPrompt),
-            directionNotesJson: JSON.stringify(fallbackMeta.directionNotes),
-            soundEffectPromptJson: null
-          };
-        })
-      });
-      return drafts.length;
-    };
-
     if (requestId) {
       const existingByRequest = await prisma.job.findFirst({
         where: { requestId },
@@ -9503,7 +9447,6 @@ fastify.post(
         if (queueChanged) {
           await notifyWorkerQueueChanged("segment_autoqueue_existing_created", version.workspaceId, clientId);
         }
-        await seedDeterministicDraftBlocks(false);
         return reply.code(200).send(existing);
       }
     }
@@ -9517,8 +9460,6 @@ fastify.post(
       });
       await prisma.block.deleteMany({ where: { lessonVersionId: versionId } });
     }
-    await seedDeterministicDraftBlocks(purge);
-
     const job = await prisma.job.create({
       data: {
         workspaceId: version.workspaceId,

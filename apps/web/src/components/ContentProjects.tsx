@@ -1258,7 +1258,7 @@ export default function ContentProjects({
         )
       );
       await updateItem(item, { status: 'scenes', metadata: { productionStage: 'scenes', backing: data.backing } });
-      setStatus(`Scenes queued: ${response.blocksCount} draft blocks.`);
+      setStatus(`Scenes queued. Estimated scenes: ${response.blocksCount}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate scenes.');
     } finally {

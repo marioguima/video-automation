@@ -19,6 +19,7 @@ import {
   normalizeSegmentation,
   sanitizeNarratedScriptText,
   geminiChat,
+  openAiCompatibleChat,
   ollamaChat,
   ollamaHealth,
   ensureDataDir,
@@ -5780,18 +5781,61 @@ function resolveLlmSettings(): {
   baseUrl: string;
   apiKey: string;
   timeoutMs: number;
+  fallbackModel: string | null;
+} {
+  return resolveLlmSettingsForStage("default");
+}
+
+type LlmStage = "default" | "segment_structure" | "segment_block";
+
+const DEFAULT_GEMINI_MODEL = "gemma-4-26b-a4b-it";
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+
+function resolveDefaultProviderModel(provider: "ollama" | "gemini" | "openai"): string {
+  if (provider === "gemini") return DEFAULT_GEMINI_MODEL;
+  if (provider === "openai") return DEFAULT_OPENAI_MODEL;
+  return config.ollamaModel;
+}
+
+function resolveImplicitFallbackModel(provider: "ollama" | "gemini" | "openai", model: string): string | null {
+  return provider === "gemini" && model !== GEMINI_FALLBACK_MODEL ? GEMINI_FALLBACK_MODEL : null;
+}
+
+function resolveLlmSettingsForStage(stage: LlmStage): {
+  provider: "ollama" | "gemini" | "openai";
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+  timeoutMs: number;
+  fallbackModel: string | null;
 } {
   const appSettings = readAppSettings();
   const llmSettings = appSettings.llm ?? {};
   const provider = normalizeLlmProvider(llmSettings.provider);
   const providerSettings = resolveLlmProviderSettings(provider, llmSettings);
   const fallbackSettings = resolveLlmProviderSettings(provider, undefined);
+  const defaultModel = providerSettings.model ?? fallbackSettings.model ?? resolveDefaultProviderModel(provider);
+  const routing = llmSettings.routing ?? {};
+  const stageModel =
+    stage === "segment_structure"
+      ? routing.segmentStructureModel?.trim()
+      : stage === "segment_block"
+        ? routing.segmentBlockModel?.trim()
+        : "";
+  const stageFallbackModel =
+    stage === "segment_structure"
+      ? routing.segmentStructureFallbackModel?.trim()
+      : stage === "segment_block"
+        ? routing.segmentBlockFallbackModel?.trim()
+        : "";
+  const model = stageModel || defaultModel;
   return {
     provider,
-    model: providerSettings.model ?? fallbackSettings.model ?? config.ollamaModel,
+    model,
     baseUrl: providerSettings.baseUrl ?? fallbackSettings.baseUrl ?? config.ollamaBaseUrl,
     apiKey: provider === "ollama" ? "" : (providerSettings.apiKey ?? ""),
-    timeoutMs: providerSettings.timeoutMs ?? config.ollamaTimeoutMs
+    timeoutMs: providerSettings.timeoutMs ?? config.ollamaTimeoutMs,
+    fallbackModel: stageFallbackModel || resolveImplicitFallbackModel(provider, model)
   };
 }
 
@@ -5801,11 +5845,12 @@ async function configuredLlmChat(options: {
   temperature?: number;
   keepAlive?: string | number;
   modelOverride?: string;
+  stage?: LlmStage;
   job?: JobRecord;
   blockIndex?: number;
   attempt?: string;
 }): Promise<{ content: string; provider: string; model: string; baseUrl: string; timeoutMs: number }> {
-  const settings = resolveLlmSettings();
+  const settings = resolveLlmSettingsForStage(options.stage ?? "default");
   const model = options.modelOverride?.trim() || settings.model;
   if (settings.provider === "gemini") {
     await waitForGeminiRateLimit({
@@ -5826,7 +5871,16 @@ async function configuredLlmChat(options: {
     return { content, ...settings, model };
   }
   if (settings.provider === "openai") {
-    throw new Error("OpenAI provider is configurable but not implemented in the worker yet");
+    const content = await openAiCompatibleChat({
+      baseUrl: settings.baseUrl,
+      apiKey: settings.apiKey,
+      model,
+      messages: [{ role: "user", content: options.prompt }],
+      format: options.format,
+      temperature: options.temperature,
+      timeoutMs: settings.timeoutMs
+    });
+    return { content, ...settings, model };
   }
   const content = await ollamaChat({
     baseUrl: settings.baseUrl,
@@ -6107,10 +6161,9 @@ async function buildSegmentDraftsForVersion(options: {
 }): Promise<SegmentDraftsResult> {
   const { job, versionId, workspaceId, scriptText, speechRateWps } = options;
   const context = await resolveProjectSegmentationContext({ job, versionId, workspaceId });
-  const llmSettings = resolveLlmSettings();
+  const llmSettings = resolveLlmSettingsForStage("segment_structure");
   const activeModel = llmSettings.model || options.model;
-  const fallbackModel =
-    llmSettings.provider === "gemini" && activeModel !== GEMINI_FALLBACK_MODEL ? GEMINI_FALLBACK_MODEL : null;
+  const fallbackModel = llmSettings.fallbackModel;
   const prompt = buildSegmentationPrompt(scriptText, {
     scriptMode: context.scriptMode,
     speechRateWps,
@@ -6154,6 +6207,7 @@ async function buildSegmentDraftsForVersion(options: {
         prompt,
         format: "json",
         temperature: 0.1,
+        stage: "segment_structure",
         modelOverride: model,
         job,
         attempt: `segment_structure_${attempt}`
@@ -6288,13 +6342,12 @@ async function generateBlockMeta(options: {
   releaseAfter?: boolean;
 }): Promise<{ meta: BlockMeta; ms: number; provider: string; model: string; fallbackUsed: boolean }> {
   const { job, block, index, total, prevText, nextText, model } = options;
-  const initialLlmSettings = resolveLlmSettings();
+  const initialLlmSettings = resolveLlmSettingsForStage("segment_block");
   const baseUrl = initialLlmSettings.baseUrl;
   const timeoutMs = initialLlmSettings.timeoutMs;
   const activeModel = initialLlmSettings.model || model;
   const activeProvider = initialLlmSettings.provider;
-  const fallbackModel =
-    activeProvider === "gemini" && activeModel !== GEMINI_FALLBACK_MODEL ? GEMINI_FALLBACK_MODEL : null;
+  const fallbackModel = initialLlmSettings.fallbackModel;
   const prompt = buildBlockMetaPrompt({
     index,
     total,
@@ -6335,6 +6388,7 @@ async function generateBlockMeta(options: {
         format: "json",
         temperature: 0.2,
         keepAlive: options.keepAlive,
+        stage: "segment_block",
         modelOverride: attemptModel,
         job,
         blockIndex: block.index,
@@ -7348,7 +7402,8 @@ async function runJob(job: JobRecord): Promise<void> {
       if (!version) {
         throw new Error("lesson version not found");
       }
-      const llmSettings = resolveLlmSettings();
+      const llmSettings = resolveLlmSettingsForStage("segment_structure");
+      const blockLlmSettings = resolveLlmSettingsForStage("segment_block");
       const { provider, model, baseUrl, timeoutMs } = llmSettings;
       let modelsCount: number | null = null;
       if (provider === "ollama") {
@@ -7356,15 +7411,30 @@ async function runJob(job: JobRecord): Promise<void> {
         if (!health.ok) {
           throw new Error(`Ollama unreachable at ${baseUrl}`);
         }
-        if (!health.models.includes(model)) {
+        const requiredModels = Array.from(
+          new Set(
+            [
+              model,
+              llmSettings.fallbackModel,
+              blockLlmSettings.model,
+              blockLlmSettings.fallbackModel
+            ].filter((candidate): candidate is string => Boolean(candidate && candidate.trim()))
+          )
+        );
+        const missingModels = requiredModels.filter((candidate) => !health.models.includes(candidate));
+        if (missingModels.length > 0) {
           throw new Error(
-            `Ollama model '${model}' is not available at ${baseUrl}. Available: ${health.models.join(", ")}`
+            `Ollama models unavailable at ${baseUrl}: ${missingModels.join(", ")}. Available: ${health.models.join(", ")}`
           );
         }
         modelsCount = health.models.length;
       } else if (provider === "gemini") {
         if (!llmSettings.apiKey.trim()) {
           throw new Error("Gemini API key is required when Gemini is selected in System Settings");
+        }
+      } else if (provider === "openai") {
+        if (!llmSettings.apiKey.trim()) {
+          throw new Error("API key is required when OpenAI-compatible provider is selected in System Settings");
         }
       } else {
         throw new Error(`LLM provider '${provider}' is not implemented in worker segmentation`);
@@ -7383,6 +7453,9 @@ async function runJob(job: JobRecord): Promise<void> {
       await notifyRunningPhase(job, "generation");
       logJobEvent("segment_started", job, {
         model,
+        fallback_model: llmSettings.fallbackModel,
+        block_model: blockLlmSettings.model,
+        block_fallback_model: blockLlmSettings.fallbackModel,
         provider,
         base_url: baseUrl,
         timeout_ms: timeoutMs
@@ -7390,6 +7463,9 @@ async function runJob(job: JobRecord): Promise<void> {
       logWorkerAction("segment_llm_preflight_ok", {
         job_id: job.id,
         model,
+        fallback_model: llmSettings.fallbackModel,
+        block_model: blockLlmSettings.model,
+        block_fallback_model: blockLlmSettings.fallbackModel,
         provider,
         base_url: baseUrl,
         models_count: modelsCount

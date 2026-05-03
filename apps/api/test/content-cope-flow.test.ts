@@ -219,7 +219,7 @@ test("content project flow rejects project kind classification", async () => {
   assert.equal((listRes.json() as { error: string }).error, "project kind is not supported");
 });
 
-test("content project flow creates technical backing and deterministic blocks", async () => {
+test("content project flow creates technical backing and queues LLM scene generation", async () => {
   const projectRes = await app.inject({
     method: "POST",
     url: "/content-projects",
@@ -316,41 +316,7 @@ test("content project flow creates technical backing and deterministic blocks", 
     blocks: Array<{ id: string; sourceText: string; status?: string; animationPromptJson?: string | null }>;
   };
   assert.equal(blocksBody.backing.lessonVersionId, item.backing.lessonVersionId);
-  assert.equal(blocksBody.blocks.length, segmentBody.blocksCount);
-  assert.ok(blocksBody.blocks[0]?.sourceText.length > 0);
-
-  const blockId = blocksBody.blocks[0]?.id;
-  assert.ok(blockId);
-  const animationPatchRes = await app.inject({
-    method: "PATCH",
-    url: `/blocks/${blockId}`,
-    headers: { cookie: sessionCookie },
-    payload: {
-      animationPrompt: {
-        prompt: "Slow push-in over the generated COPE planning scene.",
-        motion: "subtle parallax and gentle ambient movement",
-        camera: "slow push-in",
-        duration_hint: "4-6 seconds"
-      },
-      directionNotes: {
-        notes: "Use the scene to show planning continuity between formats."
-      },
-      soundEffectPrompt: {
-        prompt: "Soft interface confirmation tone under the transition.",
-        timing: "at the start of the scene",
-        avoid: "loud impacts"
-      }
-    }
-  });
-  assert.equal(animationPatchRes.statusCode, 200);
-  const patchedBlock = animationPatchRes.json() as {
-    animationPromptJson?: string | null;
-    directionNotesJson?: string | null;
-    soundEffectPromptJson?: string | null;
-  };
-  assert.ok(patchedBlock.animationPromptJson?.includes("Slow push-in"));
-  assert.ok(patchedBlock.directionNotesJson?.includes("planning continuity"));
-  assert.ok(patchedBlock.soundEffectPromptJson?.includes("confirmation tone"));
+  assert.equal(blocksBody.blocks.length, 0);
 });
 
 test("content project flow deletes project while preserving content and technical backing", async () => {

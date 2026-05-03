@@ -81,12 +81,13 @@ function applyWorkspaceLayers234MigrationIfNeeded(rootDir: string, db: Database.
 
 function applyCopeContentProjectsMigrationIfNeeded(rootDir: string, db: Database.Database): void {
   const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('ContentProject', 'ContentItem')")
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('ContentProject', 'ContentItem', 'ContentProjectItem')")
     .all() as Array<{ name: string }>;
   const hasContentProject = tables.some((row) => row.name === "ContentProject");
   const hasContentItem = tables.some((row) => row.name === "ContentItem");
+  const hasContentProjectItem = tables.some((row) => row.name === "ContentProjectItem");
   const hasLegacyProjectKind = hasContentProject && hasColumn(db, "ContentProject", "kind");
-  if (hasContentProject && hasContentItem && !hasLegacyProjectKind) {
+  if (hasContentProject && hasContentItem && hasContentProjectItem && !hasLegacyProjectKind) {
     return;
   }
   const migrationPath = path.join(
@@ -102,53 +103,13 @@ function applyCopeContentProjectsMigrationIfNeeded(rootDir: string, db: Database
     throw new Error(`COPE content migration file not found at ${migrationPath}`);
   }
   const migrationSql = fs.readFileSync(migrationPath, "utf8");
-  if (hasContentItem || hasContentProject) {
+  if (hasContentItem || hasContentProject || hasContentProjectItem) {
     db.exec("PRAGMA foreign_keys = OFF");
+    if (hasContentProjectItem) db.exec('DROP TABLE "ContentProjectItem"');
     if (hasContentItem) db.exec('DROP TABLE "ContentItem"');
     if (hasContentProject) db.exec('DROP TABLE "ContentProject"');
     db.exec("PRAGMA foreign_keys = ON");
   }
-  db.exec(migrationSql);
-}
-
-function applyContentProjectItemLinksMigrationIfNeeded(rootDir: string, db: Database.Database): void {
-  const hasLinkTable = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ContentProjectItem'")
-    .get() as { name: string } | undefined;
-  if (hasLinkTable) return;
-  const migrationPath = path.join(
-    rootDir,
-    "packages",
-    "db",
-    "prisma",
-    "migrations",
-    "20260502213000_add_content_project_item_links",
-    "migration.sql"
-  );
-  if (!fs.existsSync(migrationPath)) {
-    throw new Error(`Content project item links migration file not found at ${migrationPath}`);
-  }
-  const migrationSql = fs.readFileSync(migrationPath, "utf8");
-  db.exec(migrationSql);
-}
-
-function applyRemoveContentItemProjectIdMigrationIfNeeded(rootDir: string, db: Database.Database): void {
-  if (!hasColumn(db, "ContentItem", "projectId")) {
-    return;
-  }
-  const migrationPath = path.join(
-    rootDir,
-    "packages",
-    "db",
-    "prisma",
-    "migrations",
-    "20260502223000_remove_content_item_project_id",
-    "migration.sql"
-  );
-  if (!fs.existsSync(migrationPath)) {
-    throw new Error(`Content item projectId removal migration file not found at ${migrationPath}`);
-  }
-  const migrationSql = fs.readFileSync(migrationPath, "utf8");
   db.exec(migrationSql);
 }
 
@@ -204,8 +165,6 @@ function cloneAndResetDatabase(rootDir: string, targetDbPath: string): void {
     applyWorkspaceLayer1MigrationIfNeeded(rootDir, db);
     applyWorkspaceLayers234MigrationIfNeeded(rootDir, db);
     applyCopeContentProjectsMigrationIfNeeded(rootDir, db);
-    applyContentProjectItemLinksMigrationIfNeeded(rootDir, db);
-    applyRemoveContentItemProjectIdMigrationIfNeeded(rootDir, db);
     applyBlockAnimationPromptMigrationIfNeeded(rootDir, db);
     applyBlockSceneNotesAndSoundEffectMigrationIfNeeded(rootDir, db);
 

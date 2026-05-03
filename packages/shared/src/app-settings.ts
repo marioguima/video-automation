@@ -8,6 +8,13 @@ export type LlmProviderSettings = {
   timeoutMs?: number;
 };
 
+export type LlmRoutingSettings = {
+  segmentStructureModel?: string;
+  segmentStructureFallbackModel?: string;
+  segmentBlockModel?: string;
+  segmentBlockFallbackModel?: string;
+};
+
 export type TtsProviderKind =
   | "xtts"
   | "chatterbox"
@@ -113,6 +120,7 @@ export type AppSettings = {
   llm?: {
     provider?: string;
     providers?: Record<string, LlmProviderSettings | undefined>;
+    routing?: LlmRoutingSettings;
     // Legacy flat fields are accepted for migration only.
     baseUrl?: string;
     model?: string;
@@ -176,22 +184,20 @@ const FALLBACK_TEMPLATE: AppSettings = {
     providers: {
       ollama: {
         baseUrl: "http://127.0.0.1:11434",
-        model: "llama3.2:3b",
         timeoutMs: 600000
       },
       gemini: {
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-        model: "gemma-4-26b-a4b-it",
         apiKey: "",
         timeoutMs: 600000
       },
       openai: {
         baseUrl: "https://api.openai.com/v1",
-        model: "gpt-4o-mini",
         apiKey: "",
         timeoutMs: 600000
       }
-    }
+    },
+    routing: {}
   },
   comfy: {
     baseUrl: "http://127.0.0.1:8188",
@@ -418,6 +424,28 @@ export function resolveLlmProviders(settings: AppSettings["llm"] | undefined, te
     }
   }
   return providers;
+}
+
+function normalizeOptionalRoutingValue(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+export function normalizeLlmRouting(settings: AppSettings["llm"] | undefined): LlmRoutingSettings {
+  return {
+    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentStructureModel)
+      ? { segmentStructureModel: normalizeOptionalRoutingValue(settings?.routing?.segmentStructureModel) }
+      : {}),
+    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentStructureFallbackModel)
+      ? { segmentStructureFallbackModel: normalizeOptionalRoutingValue(settings?.routing?.segmentStructureFallbackModel) }
+      : {}),
+    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentBlockModel)
+      ? { segmentBlockModel: normalizeOptionalRoutingValue(settings?.routing?.segmentBlockModel) }
+      : {}),
+    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentBlockFallbackModel)
+      ? { segmentBlockFallbackModel: normalizeOptionalRoutingValue(settings?.routing?.segmentBlockFallbackModel) }
+      : {})
+  };
 }
 
 export function resolveLlmProviderSettings(
@@ -726,7 +754,8 @@ function normalizeAppSettings(settings: AppSettings, template: AppSettings): App
     ...merged,
     llm: {
       provider,
-      providers: resolveLlmProviders(merged.llm, template)
+      providers: resolveLlmProviders(merged.llm, template),
+      routing: normalizeLlmRouting(merged.llm)
     },
     tts: normalizeTtsSettings(merged.tts, template.tts),
     visualGeneration: normalizeVisualGenerationSettings(merged.visualGeneration, template.visualGeneration)

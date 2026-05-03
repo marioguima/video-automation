@@ -1,5 +1,8 @@
 const runtimeHost = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
-export const API_BASE = import.meta.env.VITE_API_BASE ?? `http://${runtimeHost}:4010`;
+export const API_BASE =
+  import.meta.env.VITE_API_BASE ??
+  import.meta.env.API_BASE_URL ??
+  `http://${runtimeHost}:4010`;
 
 const inflight = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { ts: number; data: unknown }>();
