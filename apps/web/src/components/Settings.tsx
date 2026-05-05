@@ -18,44 +18,101 @@ import { Theme } from '../types';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
 import ConfirmDialog from './ui/confirm-dialog';
 
-type LLMProvider = 'ollama' | 'gemini' | 'openai';
+type LlmProviderBase = 'ollama' | 'gemini' | 'openai';
 type TtsProvider = 'xtts' | 'chatterbox' | 'qwen' | 'elevenlabs' | 'fish_speech' | 'f5_tts' | 'gpt_sovits' | 'openai' | 'custom';
 type VisualProvider = 'comfyui' | 'veo_extension' | 'vertex_veo' | 'custom';
 type VisualModelKind = 'text_to_image' | 'image_to_image' | 'text_to_video' | 'image_to_video';
 type LlmProviderConfig = {
+  provider: LlmProviderBase;
+  label: string;
   baseUrl: string;
   timeoutSeconds: string;
   apiKey: string;
 };
-type LlmRoutingConfig = {
-  segmentStructureModel: string;
-  segmentStructureFallbackModel: string;
-  segmentBlockModel: string;
-  segmentBlockFallbackModel: string;
+type LlmStageStrategyConfig = {
+  providerId: string;
+  model: string;
+  fallbackModel: string;
 };
-const DEFAULT_LLM_CONFIGS: Record<LLMProvider, LlmProviderConfig> = {
+type LlmStageConfig = {
+  priorities: LlmStageStrategyConfig[];
+};
+type LlmStagesConfig = {
+  structure: LlmStageConfig;
+  block: LlmStageConfig;
+};
+type LlmEffectiveChainEntry = {
+  providerId: string;
+  provider: LlmProviderBase;
+  providerLabel: string;
+  model: string;
+  fallbackModel: string | null;
+  baseUrl: string;
+  timeoutMs: number;
+};
+type LlmEffectiveConfig = {
+  structureChain: LlmEffectiveChainEntry[];
+  blockChain: LlmEffectiveChainEntry[];
+  structurePrimary: LlmEffectiveChainEntry | null;
+  blockPrimary: LlmEffectiveChainEntry | null;
+  structureAttempts: number;
+  blockAttempts: number;
+};
+const DEFAULT_LLM_CONFIGS: Record<string, LlmProviderConfig> = {
   ollama: {
+    provider: 'ollama',
+    label: 'Ollama local',
     baseUrl: 'http://127.0.0.1:11434',
     timeoutSeconds: '600',
     apiKey: ''
   },
   gemini: {
+    provider: 'gemini',
+    label: 'Google Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     timeoutSeconds: '600',
     apiKey: ''
   },
   openai: {
+    provider: 'openai',
+    label: 'OpenAI API',
     baseUrl: 'https://api.openai.com/v1',
     timeoutSeconds: '600',
     apiKey: ''
   }
 };
-const DEFAULT_LLM_ROUTING_CONFIG: LlmRoutingConfig = {
-  segmentStructureModel: '',
-  segmentStructureFallbackModel: '',
-  segmentBlockModel: '',
-  segmentBlockFallbackModel: ''
+const DEFAULT_LLM_STRATEGY: LlmStageStrategyConfig = {
+  providerId: 'ollama',
+  model: '',
+  fallbackModel: ''
 };
+const DEFAULT_LLM_STAGES: LlmStagesConfig = {
+  structure: { priorities: [{ ...DEFAULT_LLM_STRATEGY }] },
+  block: { priorities: [{ ...DEFAULT_LLM_STRATEGY }] }
+};
+
+function resolveDefaultLlmModelForProvider(provider: LlmProviderBase): string {
+  if (provider === 'gemini') return 'gemma-4-26b-a4b-it';
+  if (provider === 'openai') return 'gpt-4o-mini';
+  return 'llama3.2:3b';
+}
+
+function createDefaultLlmProviderConfig(base: LlmProviderBase, providerId?: string): LlmProviderConfig {
+  const preset = DEFAULT_LLM_CONFIGS[base];
+  return {
+    ...preset,
+    provider: base,
+    label: providerId ?? preset.label
+  };
+}
+
+function slugifyProviderId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 type TtsProviderConfig = {
   provider: TtsProvider;
@@ -265,9 +322,8 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
   ];
 
   // LLM State
-  const [llmProvider, setLlmProvider] = useState<LLMProvider>('ollama');
-  const [llmConfigs, setLlmConfigs] = useState<Record<LLMProvider, LlmProviderConfig>>(DEFAULT_LLM_CONFIGS);
-  const [llmRouting, setLlmRouting] = useState<LlmRoutingConfig>(DEFAULT_LLM_ROUTING_CONFIG);
+  const [llmProviderConfigs, setLlmProviderConfigs] = useState<Record<string, LlmProviderConfig>>(DEFAULT_LLM_CONFIGS);
+  const [llmStages, setLlmStages] = useState<LlmStagesConfig>(DEFAULT_LLM_STAGES);
 
   // ComfyUI State
   const [comfyUiUrl, setComfyUiUrl] = useState('http://127.0.0.1:8188');
@@ -328,26 +384,169 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     return null;
   };
 
-  const activeLlmConfig = llmConfigs[llmProvider];
-  const updateLlmConfig = (provider: LLMProvider, patch: Partial<LlmProviderConfig>) => {
-    setLlmConfigs((current) => ({
+  const activeLlmEffective = useMemo<LlmEffectiveConfig>(() => {
+    const resolveChain = (stage: LlmStageConfig): LlmEffectiveChainEntry[] =>
+      stage.priorities
+        .map((strategy) => {
+          const providerConfig =
+            llmProviderConfigs[strategy.providerId] ??
+            createDefaultLlmProviderConfig('ollama', strategy.providerId || 'ollama');
+          return {
+            providerId: strategy.providerId,
+            provider: providerConfig.provider,
+            providerLabel: providerConfig.label.trim() || strategy.providerId,
+            model: strategy.model.trim() || resolveDefaultLlmModelForProvider(providerConfig.provider),
+            fallbackModel: strategy.fallbackModel.trim() || null,
+            baseUrl: providerConfig.baseUrl.trim(),
+            timeoutMs: Math.trunc(Number(providerConfig.timeoutSeconds) * 1000)
+          };
+        })
+        .filter((item) => item.providerId.trim().length > 0)
+        .map((item) => ({
+          providerId: item.providerId,
+          provider: item.provider,
+          providerLabel: item.providerLabel,
+          model: item.model,
+          fallbackModel: item.fallbackModel,
+          baseUrl: item.baseUrl,
+          timeoutMs: item.timeoutMs
+        }));
+    const structureChain = resolveChain(llmStages.structure);
+    const blockChain = resolveChain(llmStages.block);
+    return {
+      structureChain,
+      blockChain,
+      structurePrimary: structureChain[0] ?? null,
+      blockPrimary: blockChain[0] ?? null,
+      structureAttempts: structureChain.reduce((total, item) => total + (item.fallbackModel ? 2 : 1), 0),
+      blockAttempts: blockChain.reduce((total, item) => total + (item.fallbackModel ? 2 : 1), 0)
+    };
+  }, [llmProviderConfigs, llmStages]);
+  const updateLlmConfig = (providerId: string, patch: Partial<LlmProviderConfig>) => {
+    setLlmProviderConfigs((current) => ({
       ...current,
-      [provider]: {
-        ...current[provider],
+      [providerId]: {
+        ...(current[providerId] ?? createDefaultLlmProviderConfig('ollama', providerId)),
         ...patch
       }
     }));
   };
 
-  const updateLlmRouting = (patch: Partial<LlmRoutingConfig>) => {
-    setLlmRouting((current) => ({
-      ...current,
-      ...patch
+  const addLlmProviderConfig = (base: LlmProviderBase) => {
+    setLlmProviderConfigs((current) => {
+      let suffix = 1;
+      let providerId: string = base;
+      while (current[providerId]) {
+        suffix += 1;
+        providerId = `${base}-${suffix}`;
+      }
+      return {
+        ...current,
+        [providerId]: createDefaultLlmProviderConfig(base, providerId)
+      };
+    });
+  };
+
+  const renameLlmProviderConfig = (providerId: string, nextProviderIdRaw: string) => {
+    const nextProviderId = slugifyProviderId(nextProviderIdRaw);
+    if (!nextProviderId || nextProviderId === providerId) return;
+    setLlmProviderConfigs((current) => {
+      if (current[nextProviderId]) return current;
+      const entry = current[providerId];
+      if (!entry) return current;
+      const next = { ...current };
+      delete next[providerId];
+      next[nextProviderId] = { ...entry, label: entry.label || nextProviderId };
+      return next;
+    });
+    setLlmStages((current) => ({
+      structure: {
+        priorities: current.structure.priorities.map((strategy) =>
+          strategy.providerId === providerId ? { ...strategy, providerId: nextProviderId } : strategy
+        )
+      },
+      block: {
+        priorities: current.block.priorities.map((strategy) =>
+          strategy.providerId === providerId ? { ...strategy, providerId: nextProviderId } : strategy
+        )
+      }
     }));
   };
 
-  const selectLlmProvider = (provider: LLMProvider) => {
-    setLlmProvider(provider);
+  const removeLlmProviderConfig = (providerId: string) => {
+    const remainingProviderIds = Object.keys(llmProviderConfigs).filter((id) => id !== providerId);
+    const fallbackProviderId = remainingProviderIds[0] ?? 'ollama';
+    setLlmProviderConfigs((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return Object.keys(next).length > 0 ? next : { ollama: createDefaultLlmProviderConfig('ollama', 'ollama') };
+    });
+    setLlmStages((current) => ({
+      structure: {
+        priorities: current.structure.priorities.map((strategy) =>
+          strategy.providerId === providerId ? { ...strategy, providerId: fallbackProviderId } : strategy
+        )
+      },
+      block: {
+        priorities: current.block.priorities.map((strategy) =>
+          strategy.providerId === providerId ? { ...strategy, providerId: fallbackProviderId } : strategy
+        )
+      }
+    }));
+  };
+
+  const updateLlmStageStrategy = (
+    stage: 'structure' | 'block',
+    index: number,
+    patch: Partial<LlmStageStrategyConfig>
+  ) => {
+    setLlmStages((current) => ({
+      ...current,
+      [stage]: {
+        priorities: current[stage].priorities.map((strategy, strategyIndex) =>
+          strategyIndex === index ? { ...strategy, ...patch } : strategy
+        )
+      }
+    }));
+  };
+
+  const addLlmStageStrategy = (stage: 'structure' | 'block') => {
+    setLlmStages((current) => ({
+      ...current,
+      [stage]: {
+        priorities: [...current[stage].priorities, { ...DEFAULT_LLM_STRATEGY }]
+      }
+    }));
+  };
+
+  const removeLlmStageStrategy = (stage: 'structure' | 'block', index: number) => {
+    setLlmStages((current) => {
+      const nextPriorities = current[stage].priorities.filter((_, strategyIndex) => strategyIndex !== index);
+      return {
+        ...current,
+        [stage]: {
+          priorities: nextPriorities.length > 0 ? nextPriorities : [{ ...DEFAULT_LLM_STRATEGY }]
+        }
+      };
+    });
+  };
+
+  const moveLlmStageStrategy = (stage: 'structure' | 'block', index: number, direction: -1 | 1) => {
+    setLlmStages((current) => {
+      const nextPriorities = [...current[stage].priorities];
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= nextPriorities.length) {
+        return current;
+      }
+      const [entry] = nextPriorities.splice(index, 1);
+      nextPriorities.splice(targetIndex, 0, entry);
+      return {
+        ...current,
+        [stage]: {
+          priorities: nextPriorities
+        }
+      };
+    });
   };
 
   const parseTtsLanguages = (value: string): string[] => {
@@ -410,23 +609,18 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     apiGet<{
       theme?: { family?: string; mode?: string };
       llm?: {
-        provider?: LLMProvider;
-        providers?: Partial<Record<LLMProvider, {
+        providers?: Record<string, {
+          provider?: LlmProviderBase;
+          displayName?: string;
           baseUrl?: string;
           apiKey?: string;
           timeoutMs?: number;
-        }>>;
-        routing?: {
-          segmentStructureModel?: string;
-          segmentStructureFallbackModel?: string;
-          segmentBlockModel?: string;
-          segmentBlockFallbackModel?: string;
+        }>;
+        stages?: {
+          structure?: { priorities?: Array<{ providerId?: string; provider?: string; model?: string; fallbackModel?: string }> };
+          block?: { priorities?: Array<{ providerId?: string; provider?: string; model?: string; fallbackModel?: string }> };
         };
-        // Legacy fields are read only for old local settings.
-        baseUrl?: string;
-        model?: string;
-        apiKeys?: { gemini?: string; openai?: string };
-        timeoutMs?: number;
+        effective?: LlmEffectiveConfig;
       };
       comfy?: {
         baseUrl?: string;
@@ -483,53 +677,47 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       memory?: { idleUnloadMs?: number };
     }>('/settings')
       .then((data) => {
-        if (data.llm?.provider) setLlmProvider(data.llm.provider);
-        setLlmConfigs((current) => {
-          const next: Record<LLMProvider, LlmProviderConfig> = {
-            ollama: { ...current.ollama },
-            gemini: { ...current.gemini },
-            openai: { ...current.openai }
-          };
-          (['ollama', 'gemini', 'openai'] as const).forEach((provider) => {
-            const providerSettings = data.llm?.providers?.[provider];
-            if (!providerSettings) return;
-            next[provider] = {
-              ...next[provider],
-              baseUrl: providerSettings.baseUrl ?? next[provider].baseUrl,
+        setLlmProviderConfigs(() => {
+          const next: Record<string, LlmProviderConfig> = {};
+          const providerIds = Array.from(
+            new Set([...Object.keys(DEFAULT_LLM_CONFIGS), ...Object.keys(data.llm?.providers ?? {})])
+          );
+          providerIds.forEach((providerId) => {
+            const providerSettings = data.llm?.providers?.[providerId];
+            const base = providerSettings?.provider ?? (providerId === 'gemini' || providerId === 'openai' ? providerId : 'ollama');
+            const preset = createDefaultLlmProviderConfig(base, providerId);
+            next[providerId] = {
+              ...preset,
+              provider: base,
+              label: providerSettings?.displayName ?? preset.label,
+              baseUrl: providerSettings?.baseUrl ?? preset.baseUrl,
               timeoutSeconds:
-                providerSettings.timeoutMs !== undefined
+                providerSettings?.timeoutMs !== undefined
                   ? String(Math.round(providerSettings.timeoutMs / 1000))
-                  : next[provider].timeoutSeconds,
-              apiKey: provider === 'ollama' ? '' : providerSettings.apiKey ?? next[provider].apiKey
+                  : preset.timeoutSeconds,
+              apiKey: base === 'ollama' ? '' : providerSettings?.apiKey ?? preset.apiKey
             };
           });
-
-          const provider = data.llm?.provider;
-          if (provider && !data.llm?.providers?.[provider]) {
-            next[provider] = {
-              ...next[provider],
-              baseUrl: data.llm?.baseUrl ?? next[provider].baseUrl,
-              timeoutSeconds:
-                data.llm?.timeoutMs !== undefined
-                  ? String(Math.round(data.llm.timeoutMs / 1000))
-                  : next[provider].timeoutSeconds,
-              apiKey:
-                provider === 'gemini'
-                  ? data.llm?.apiKeys?.gemini ?? next[provider].apiKey
-                  : provider === 'openai'
-                    ? data.llm?.apiKeys?.openai ?? next[provider].apiKey
-                    : ''
-            };
-          }
           return next;
         });
-        setLlmRouting({
-          segmentStructureModel: data.llm?.routing?.segmentStructureModel ?? '',
-          segmentStructureFallbackModel: data.llm?.routing?.segmentStructureFallbackModel ?? '',
-          segmentBlockModel: data.llm?.routing?.segmentBlockModel ?? '',
-          segmentBlockFallbackModel: data.llm?.routing?.segmentBlockFallbackModel ?? ''
+        setLlmStages({
+          structure: {
+            priorities:
+              data.llm?.stages?.structure?.priorities?.map((strategy) => ({
+                providerId: strategy.providerId ?? strategy.provider ?? 'ollama',
+                model: strategy.model ?? '',
+                fallbackModel: strategy.fallbackModel ?? ''
+              })) ?? [{ ...DEFAULT_LLM_STRATEGY }]
+          },
+          block: {
+            priorities:
+              data.llm?.stages?.block?.priorities?.map((strategy) => ({
+                providerId: strategy.providerId ?? strategy.provider ?? 'ollama',
+                model: strategy.model ?? '',
+                fallbackModel: strategy.fallbackModel ?? ''
+              })) ?? [{ ...DEFAULT_LLM_STRATEGY }]
+          }
         });
-
         if (data.comfy?.baseUrl) setComfyUiUrl(data.comfy.baseUrl);
         if (data.comfy?.promptTimeoutMs) setComfyPromptTimeoutMs(String(data.comfy.promptTimeoutMs));
         if (data.comfy?.generationTimeoutMs) setComfyGenerationTimeoutMs(String(data.comfy.generationTimeoutMs));
@@ -654,7 +842,6 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     const promptMs = Number(comfyPromptTimeoutMs);
     const generationMs = Number(comfyGenerationTimeoutMs);
     const viewMs = Number(comfyViewTimeoutMs);
-    const llmTimeoutMs = Number(activeLlmConfig.timeoutSeconds) * 1000;
     const idleUnloadMsValue = Number(idleUnloadMs);
     if (!Number.isFinite(promptMs) || promptMs <= 0) {
       setIsSaving(false);
@@ -671,10 +858,56 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       setSettingsError('Comfy view timeout must be a positive number.');
       return;
     }
-    if (!Number.isFinite(llmTimeoutMs) || llmTimeoutMs <= 0) {
-      setIsSaving(false);
-      setSettingsError('LLM timeout must be a positive number.');
-      return;
+    const llmProvidersPayload: Record<string, {
+      provider: LlmProviderBase;
+      displayName: string;
+      baseUrl?: string;
+      apiKey?: string;
+      timeoutMs: number;
+    }> = {};
+    for (const [providerId, config] of Object.entries(llmProviderConfigs)) {
+      const timeoutMs = Number(config.timeoutSeconds) * 1000;
+      if (!providerId.trim()) {
+        setIsSaving(false);
+        setSettingsError('Each LLM provider needs a valid ID.');
+        return;
+      }
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        setIsSaving(false);
+        setSettingsError(`LLM timeout for ${providerId} must be a positive number.`);
+        return;
+      }
+      if (!config.baseUrl.trim()) {
+        setIsSaving(false);
+        setSettingsError(`LLM base URL for ${providerId} is required.`);
+        return;
+      }
+      if (config.provider !== 'ollama' && !config.apiKey.trim()) {
+        setIsSaving(false);
+        setSettingsError(`LLM API key for ${providerId} is required when base is ${config.provider}.`);
+        return;
+      }
+      llmProvidersPayload[providerId] = {
+        provider: config.provider,
+        displayName: config.label.trim() || providerId,
+        baseUrl: config.baseUrl.trim(),
+        apiKey: config.provider === 'ollama' ? undefined : config.apiKey.trim(),
+        timeoutMs: Math.trunc(timeoutMs)
+      };
+    }
+    for (const stageName of ['structure', 'block'] as const) {
+      for (const [index, strategy] of llmStages[stageName].priorities.entries()) {
+        if (!strategy.providerId.trim()) {
+          setIsSaving(false);
+          setSettingsError(`LLM priority ${index + 1} in ${stageName} must reference a provider ID.`);
+          return;
+        }
+        if (!llmProvidersPayload[strategy.providerId]) {
+          setIsSaving(false);
+          setSettingsError(`LLM priority ${index + 1} in ${stageName} references unknown provider ${strategy.providerId}.`);
+          return;
+        }
+      }
     }
     const ttsProvidersPayload: Record<string, {
       provider: TtsProvider;
@@ -858,31 +1091,22 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       await apiPatch('/settings', {
         theme: { family: currentFamily, mode: currentMode },
         llm: {
-          provider: llmProvider,
-          providers: {
-            ollama: {
-              baseUrl: llmConfigs.ollama.baseUrl.trim(),
-              model: '',
-              timeoutMs: Math.trunc(Number(llmConfigs.ollama.timeoutSeconds) * 1000)
+          providers: llmProvidersPayload,
+          stages: {
+            structure: {
+              priorities: llmStages.structure.priorities.map((strategy) => ({
+                providerId: strategy.providerId,
+                model: strategy.model.trim() || undefined,
+                fallbackModel: strategy.fallbackModel.trim() || undefined
+              }))
             },
-            gemini: {
-              baseUrl: llmConfigs.gemini.baseUrl.trim(),
-              model: '',
-              apiKey: llmConfigs.gemini.apiKey.trim(),
-              timeoutMs: Math.trunc(Number(llmConfigs.gemini.timeoutSeconds) * 1000)
-            },
-            openai: {
-              baseUrl: llmConfigs.openai.baseUrl.trim(),
-              model: '',
-              apiKey: llmConfigs.openai.apiKey.trim(),
-              timeoutMs: Math.trunc(Number(llmConfigs.openai.timeoutSeconds) * 1000)
+            block: {
+              priorities: llmStages.block.priorities.map((strategy) => ({
+                providerId: strategy.providerId,
+                model: strategy.model.trim() || undefined,
+                fallbackModel: strategy.fallbackModel.trim() || undefined
+              }))
             }
-          },
-          routing: {
-            segmentStructureModel: llmRouting.segmentStructureModel.trim() || undefined,
-            segmentStructureFallbackModel: llmRouting.segmentStructureFallbackModel.trim() || undefined,
-            segmentBlockModel: llmRouting.segmentBlockModel.trim() || undefined,
-            segmentBlockFallbackModel: llmRouting.segmentBlockFallbackModel.trim() || undefined
           }
         },
         comfy: {
@@ -1247,163 +1471,232 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
             </div>
 
             <div className="p-8 space-y-8">
-              {/* Provider Selection */}
-              <div className="space-y-3">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">AI Provider</label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {(['ollama', 'gemini', 'openai'] as const).map((provider) => (
-                    <div 
-                      key={provider}
-                      onClick={() => selectLlmProvider(provider)}
-                      className={`cursor-pointer rounded-[5px] p-4 border-2 transition-all flex items-center gap-3 ${
-                        llmProvider === provider 
-                          ? 'border-orange-500 bg-orange-50 dark:bg-orange-500/5' 
-                          : 'border-slate-100 dark:border-slate-800 hover:border-orange-500/30'
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                        llmProvider === provider ? 'border-orange-600' : 'border-slate-300 dark:border-slate-600'
-                      }`}>
-                        {llmProvider === provider && <div className="w-2.5 h-2.5 rounded-full bg-orange-600" />}
+              {/* Provider Catalog */}
+              <div className="space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Provider Catalog</label>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Cadastre instancias LLM reutilizaveis. Cada uma tem um `providerId`, uma base (`ollama`, `gemini` ou `openai-compatible`) e sua propria URL, API key e timeout.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(['ollama', 'gemini', 'openai'] as const).map((base) => (
+                      <button
+                        key={base}
+                        type="button"
+                        onClick={() => addLlmProviderConfig(base)}
+                        className="px-3 h-8 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-orange-600 transition-all"
+                      >
+                        Add {base}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  {Object.entries(llmProviderConfigs).map(([providerId, config]) => (
+                    <div key={providerId} className="border border-border rounded-[5px] bg-[hsl(var(--secondary))]/25 p-4 space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-bold text-foreground">{config.label}</h3>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Base `{config.provider}` {config.provider === 'openai' ? 'para Groq, OpenRouter, Anthropic compativel, OpenAI e outros endpoints compatíveis.' : config.provider === 'gemini' ? 'para Google Gemini.' : 'para Ollama local.'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeLlmProviderConfig(providerId)}
+                          className="h-8 px-3 rounded-[5px] border border-red-400/30 bg-red-500/5 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-500/10 transition-all"
+                        >
+                          Remove
+                        </button>
                       </div>
-                      <span className="font-bold capitalize text-slate-700 dark:text-slate-200">{provider}</span>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Provider ID</label>
+                          <input
+                            value={providerId}
+                            onChange={(e) => renameLlmProviderConfig(providerId, e.target.value)}
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Label</label>
+                          <input
+                            value={config.label}
+                            onChange={(e) => updateLlmConfig(providerId, { label: e.target.value })}
+                            placeholder="Groq prod, OpenRouter cheap, Ollama local..."
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Base</label>
+                          <select
+                            value={config.provider}
+                            onChange={(e) => updateLlmConfig(providerId, { provider: e.target.value as LlmProviderBase })}
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                          >
+                            <option value="ollama">ollama</option>
+                            <option value="gemini">gemini</option>
+                            <option value="openai">openai-compatible</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Timeout (Seconds)</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={config.timeoutSeconds}
+                            onChange={(e) => updateLlmConfig(providerId, { timeoutSeconds: e.target.value })}
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                          />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API Base URL</label>
+                          <input
+                            value={config.baseUrl}
+                            onChange={(e) => updateLlmConfig(providerId, { baseUrl: e.target.value })}
+                            className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                          />
+                          <p className="text-[10px] text-slate-400">
+                            {config.provider === 'openai'
+                              ? 'Use aqui a URL do endpoint compativel. Ex.: OpenAI, Groq, OpenRouter, Together, Anthropic compat via gateway.'
+                              : config.provider === 'gemini'
+                                ? 'Use a base da Gemini API.'
+                                : 'Use a URL do Ollama que atende /api/generate.'}
+                          </p>
+                        </div>
+                        {config.provider !== 'ollama' && (
+                          <div className="space-y-2 md:col-span-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API Key</label>
+                              {config.provider === 'gemini' && (
+                                <a
+                                  href="https://aistudio.google.com/apikey"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-[11px] font-bold text-orange-600 hover:text-orange-500 transition-colors"
+                                >
+                                  Create Gemini API key
+                                  <ExternalLink size={12} />
+                                </a>
+                              )}
+                            </div>
+                            <input
+                              type="password"
+                              value={config.apiKey}
+                              onChange={(e) => updateLlmConfig(providerId, { apiKey: e.target.value })}
+                              placeholder={config.provider === 'gemini' ? 'Google Gemini API key' : 'OpenAI-compatible API key'}
+                              className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Provider Specific Settings */}
-              {llmProvider === 'ollama' && (
-                <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Server URL</label>
-                      <input 
-                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                        value={activeLlmConfig.baseUrl}
-                        onChange={(e) => updateLlmConfig('ollama', { baseUrl: e.target.value })}
-                      />
-                      <p className="text-[10px] text-slate-400">Default: http://127.0.0.1:11434</p>
-                    </div>
-
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Timeout (Seconds)</label>
-                       <input 
-                        type="number"
-                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
-                        value={activeLlmConfig.timeoutSeconds}
-                        onChange={(e) => updateLlmConfig('ollama', { timeoutSeconds: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {(llmProvider === 'gemini' || llmProvider === 'openai') && (
-                <div className="animate-in fade-in slide-in-from-top-2 duration-300 space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Timeout (Seconds)</label>
-                      <input
-                        type="number"
-                        value={activeLlmConfig.timeoutSeconds}
-                        onChange={(e) => updateLlmConfig(llmProvider, { timeoutSeconds: e.target.value })}
-                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API Base URL</label>
-                    <input
-                      value={activeLlmConfig.baseUrl}
-                      onChange={(e) => updateLlmConfig(llmProvider, { baseUrl: e.target.value })}
-                      className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                    />
-                    <p className="text-[10px] text-slate-400">
-                      {llmProvider === 'openai'
-                        ? 'Supports OpenAI-compatible endpoints such as OpenAI and Groq.'
-                        : 'Saved in the runtime settings file after Save Changes.'}
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
-                        {llmProvider === 'gemini' ? 'Gemini API Key' : 'OpenAI API Key'}
-                      </label>
-                      {llmProvider === 'gemini' && (
-                        <a
-                          href="https://aistudio.google.com/apikey"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 text-[11px] font-bold text-orange-600 hover:text-orange-500 transition-colors"
-                        >
-                          Create Gemini API key
-                          <ExternalLink size={12} />
-                        </a>
-                      )}
-                    </div>
-                    <input
-                      type="password"
-                      value={activeLlmConfig.apiKey}
-                      onChange={(e) => updateLlmConfig(llmProvider, { apiKey: e.target.value })}
-                      placeholder={`Enter your ${llmProvider === 'gemini' ? 'Google Gemini' : 'OpenAI or Groq'} API Key`}
-                      className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                    />
-                    {llmProvider === 'gemini' && (
-                      <p className="text-[10px] text-slate-400">
-                        Opens Google AI Studio, where Gemini API keys are created and managed.
-                      </p>
-                    )}
-                  </div>
-
-                </div>
-              )}
-
               <div className="rounded-[5px] border border-border bg-[hsl(var(--secondary))]/25 p-4 space-y-4">
                 <div>
-                  <h3 className="text-sm font-bold text-foreground">Segmentation Routing</h3>
+                  <h3 className="text-sm font-bold text-foreground">Stage Strategies</h3>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Optional stage-specific overrides. Leave blank to use the provider default model.
+                    A configuracao parte do objetivo. `struct` analisa o roteiro inteiro e `blocks` analisa cada bloco produzido nessa primeira etapa.
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-2">
+                    Effective now: structure attempts `{activeLlmEffective.structureAttempts}` | block attempts `{activeLlmEffective.blockAttempts}`
                   </p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Structure Model</label>
-                    <input
-                      value={llmRouting.segmentStructureModel}
-                      onChange={(e) => updateLlmRouting({ segmentStructureModel: e.target.value })}
-                      placeholder="Provider default"
-                      className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                    />
+                {([
+                  { key: 'structure' as const, title: 'Struct' },
+                  { key: 'block' as const, title: 'Blocks' }
+                ]).map((stage) => (
+                  <div key={stage.key} className="space-y-3 rounded-[5px] border border-border/70 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-foreground">{stage.title}</h4>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Priority order is executed from top to bottom, including fallback models before moving to the next provider.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addLlmStageStrategy(stage.key)}
+                        className="px-3 h-8 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-orange-600 transition-all"
+                      >
+                        Add Priority
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {llmStages[stage.key].priorities.map((strategy, index) => (
+                        <div key={`${stage.key}-${index}`} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end rounded-[5px] border border-border/60 p-3">
+                          <div className="md:col-span-2 space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Priority</label>
+                            <div className="h-9 flex items-center px-3 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-sm text-foreground">
+                              {index + 1}
+                            </div>
+                          </div>
+                          <div className="md:col-span-2 space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Provider ID</label>
+                            <select
+                              value={strategy.providerId}
+                              onChange={(e) => updateLlmStageStrategy(stage.key, index, { providerId: e.target.value })}
+                              className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                            >
+                              {Object.entries(llmProviderConfigs).map(([providerId, providerConfig]) => (
+                                <option key={providerId} value={providerId}>
+                                  {providerId} · {providerConfig.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="md:col-span-3 space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Primary Model</label>
+                            <input
+                              value={strategy.model}
+                              onChange={(e) => updateLlmStageStrategy(stage.key, index, { model: e.target.value })}
+                              placeholder="Provider default"
+                              className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                            />
+                          </div>
+                          <div className="md:col-span-3 space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Fallback Model</label>
+                            <input
+                              value={strategy.fallbackModel}
+                              onChange={(e) => updateLlmStageStrategy(stage.key, index, { fallbackModel: e.target.value })}
+                              placeholder="Optional"
+                              className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                            />
+                          </div>
+                          <div className="md:col-span-2 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => moveLlmStageStrategy(stage.key, index, -1)}
+                              className="flex-1 h-9 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-orange-600 transition-all"
+                            >
+                              Up
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveLlmStageStrategy(stage.key, index, 1)}
+                              className="flex-1 h-9 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-orange-600 transition-all"
+                            >
+                              Down
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeLlmStageStrategy(stage.key, index)}
+                              className="flex-1 h-9 rounded-[5px] border border-red-400/30 bg-red-500/5 text-[10px] font-bold uppercase tracking-widest text-red-500 hover:bg-red-500/10 transition-all"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Structure Fallback</label>
-                    <input
-                      value={llmRouting.segmentStructureFallbackModel}
-                      onChange={(e) => updateLlmRouting({ segmentStructureFallbackModel: e.target.value })}
-                      placeholder="Optional fallback model"
-                      className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Block Meta Model</label>
-                    <input
-                      value={llmRouting.segmentBlockModel}
-                      onChange={(e) => updateLlmRouting({ segmentBlockModel: e.target.value })}
-                      placeholder="Provider default"
-                      className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Block Meta Fallback</label>
-                    <input
-                      value={llmRouting.segmentBlockFallbackModel}
-                      onChange={(e) => updateLlmRouting({ segmentBlockFallbackModel: e.target.value })}
-                      placeholder="Optional fallback model"
-                      className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
-                    />
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>

@@ -22,6 +22,7 @@ import {
   openAiCompatibleChat,
   ollamaChat,
   ollamaHealth,
+  resolveDefaultLlmModel,
   ensureDataDir,
   getConfig,
   resolveProjectRoot,
@@ -40,6 +41,7 @@ import {
   normalizeLlmProvider,
   readAppSettingsFile,
   resolveLlmProviderSettings,
+  resolveLlmStageConfig,
   writeAppSettingsFile,
   type AppSettings,
   type BlockDraft,
@@ -2878,33 +2880,27 @@ async function handleWorkerCommandRequest(
           total: totalBlocks
         };
       })(),
-      (async () => {
-        if (!segmentJob) return idleState();
-        let expectedTotal = totalBlocks;
-        try {
-          expectedTotal = buildDeterministicBlocks(version.scriptText, version.speechRateWps).length;
-        } catch {
-          expectedTotal = totalBlocks;
-        }
-        const generatedCount = await prisma.block.count({
-          where: {
-            lessonVersionId: versionId,
-            status: { in: ["segmentation_done", "segment_error"] },
+        (async () => {
+          if (!segmentJob) return idleState();
+          const generatedCount = await prisma.block.count({
+            where: {
+              lessonVersionId: versionId,
+              status: { in: ["segmentation_done", "segment_error"] },
             OR: [
               { createdAt: { gte: segmentJob.createdAt } },
               { updatedAt: { gte: segmentJob.createdAt } }
             ]
           }
         });
-        return {
-          active: true,
-          jobId: segmentJob.id,
-          status: segmentJob.status,
-          phase: toPhase(segmentJob.status),
-          current: generatedCount,
-          total: expectedTotal
-        };
-      })(),
+          return {
+            active: true,
+            jobId: segmentJob.id,
+            status: segmentJob.status,
+            phase: toPhase(segmentJob.status),
+            current: generatedCount,
+            total: totalBlocks
+          };
+        })(),
       (async () => {
         if (!slidesJob) return idleState();
         const whereBase = {
@@ -3670,7 +3666,12 @@ function applyAgentIntegrationConfigSnapshot(
     return;
   }
   const current = readAppSettings();
-  const provider = normalizeLlmProvider(current.llm?.provider);
+  const provider =
+    resolveLlmStageConfig("structure", current.llm).priorities?.[0]?.providerId ??
+    resolveLlmStageConfig("structure", current.llm).priorities?.[0]?.provider ??
+    resolveLlmStageConfig("block", current.llm).priorities?.[0]?.providerId ??
+    resolveLlmStageConfig("block", current.llm).priorities?.[0]?.provider ??
+    "ollama";
   const currentProviderSettings = resolveLlmProviderSettings(provider, current.llm);
   const nextLlmBaseUrl =
     typeof integrationConfig.llmBaseUrl === "string" &&
@@ -3680,7 +3681,6 @@ function applyAgentIntegrationConfigSnapshot(
   const next: AppSettings = {
     ...current,
     llm: {
-      provider,
       providers: {
         ...(current.llm?.providers ?? {}),
         [provider]: {
@@ -5674,8 +5674,6 @@ async function markJobFailure(job: JobRecord, err: unknown, durationMs: number):
 }
 
 async function ensureMemoryForImageGeneration(job: JobRecord): Promise<void> {
-  const llmSettings = resolveLlmSettings();
-
   logJobEvent("model_switch_prepare", job, {
     target: "image",
     action: "unload_tts_llm"
@@ -5687,13 +5685,14 @@ async function ensureMemoryForImageGeneration(job: JobRecord): Promise<void> {
       force: true
     })
   ];
-  if (llmSettings.provider === "ollama") {
+  const ollamaProviderSettings = resolveLlmProviderSettings("ollama", readAppSettings().llm);
+  for (const model of resolveOllamaSegmentationModels()) {
     unloadTasks.push(
       requestOllamaUnload({
         job,
-        model: llmSettings.model,
-        baseUrl: llmSettings.baseUrl,
-        timeoutMs: llmSettings.timeoutMs,
+        model,
+        baseUrl: ollamaProviderSettings.baseUrl ?? config.ollamaBaseUrl,
+        timeoutMs: ollamaProviderSettings.timeoutMs ?? config.ollamaTimeoutMs,
         reason: "switch_to_image"
       })
     );
@@ -5702,7 +5701,6 @@ async function ensureMemoryForImageGeneration(job: JobRecord): Promise<void> {
 }
 
 async function ensureMemoryForTtsGeneration(job: JobRecord): Promise<void> {
-  const llmSettings = resolveLlmSettings();
   const comfyBaseUrl = getComfyBaseUrlFromSettings();
   logJobEvent("model_switch_prepare", job, {
     target: "tts",
@@ -5717,13 +5715,14 @@ async function ensureMemoryForTtsGeneration(job: JobRecord): Promise<void> {
       reason: "switch_to_tts"
     })
   ];
-  if (llmSettings.provider === "ollama") {
+  const ollamaProviderSettings = resolveLlmProviderSettings("ollama", readAppSettings().llm);
+  for (const model of resolveOllamaSegmentationModels()) {
     unloadTasks.push(
       requestOllamaUnload({
         job,
-        model: llmSettings.model,
-        baseUrl: llmSettings.baseUrl,
-        timeoutMs: llmSettings.timeoutMs,
+        model,
+        baseUrl: ollamaProviderSettings.baseUrl ?? config.ollamaBaseUrl,
+        timeoutMs: ollamaProviderSettings.timeoutMs ?? config.ollamaTimeoutMs,
         reason: "switch_to_tts"
       })
     );
@@ -5735,8 +5734,6 @@ async function releaseAllGenerationModels(options: {
   reason: string;
   job?: JobRecord;
 }): Promise<void> {
-  const llmSettings = resolveLlmSettings();
-
   const unloadTasks: Promise<void>[] = [
     releaseXttsResources({
       job: options.job,
@@ -5750,13 +5747,14 @@ async function releaseAllGenerationModels(options: {
       reason: options.reason
     })
   ];
-  if (llmSettings.provider === "ollama") {
+  const ollamaProviderSettings = resolveLlmProviderSettings("ollama", readAppSettings().llm);
+  for (const model of resolveOllamaSegmentationModels()) {
     unloadTasks.push(
       requestOllamaUnload({
         job: options.job,
-        model: llmSettings.model,
-        baseUrl: llmSettings.baseUrl,
-        timeoutMs: llmSettings.timeoutMs,
+        model,
+        baseUrl: ollamaProviderSettings.baseUrl ?? config.ollamaBaseUrl,
+        timeoutMs: ollamaProviderSettings.timeoutMs ?? config.ollamaTimeoutMs,
         reason: options.reason
       })
     );
@@ -5775,68 +5773,75 @@ function markGenerationActivity(model: "tts" | "image", job: JobRecord): void {
   });
 }
 
-function resolveLlmSettings(): {
-  provider: "ollama" | "gemini" | "openai";
+type LlmStage = "segment_structure" | "segment_block";
+type LlmProviderKind = "ollama" | "gemini" | "openai";
+
+type LlmStageAttempt = {
+  stage: LlmStage;
+  stageKey: "structure" | "block";
+  priority: number;
+  strategyIndex: number;
+  variant: "primary" | "fallback";
+  providerId: string;
+  provider: LlmProviderKind;
+  providerLabel: string;
   model: string;
   baseUrl: string;
   apiKey: string;
   timeoutMs: number;
-  fallbackModel: string | null;
-} {
-  return resolveLlmSettingsForStage("default");
-}
+  configuredFallbackModel: string | null;
+};
 
-type LlmStage = "default" | "segment_structure" | "segment_block";
-
-const DEFAULT_GEMINI_MODEL = "gemma-4-26b-a4b-it";
-const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
-
-function resolveDefaultProviderModel(provider: "ollama" | "gemini" | "openai"): string {
-  if (provider === "gemini") return DEFAULT_GEMINI_MODEL;
-  if (provider === "openai") return DEFAULT_OPENAI_MODEL;
-  return config.ollamaModel;
-}
-
-function resolveImplicitFallbackModel(provider: "ollama" | "gemini" | "openai", model: string): string | null {
-  return provider === "gemini" && model !== GEMINI_FALLBACK_MODEL ? GEMINI_FALLBACK_MODEL : null;
-}
-
-function resolveLlmSettingsForStage(stage: LlmStage): {
-  provider: "ollama" | "gemini" | "openai";
-  model: string;
-  baseUrl: string;
-  apiKey: string;
-  timeoutMs: number;
-  fallbackModel: string | null;
-} {
+function resolveLlmStageAttempts(stage: LlmStage): LlmStageAttempt[] {
   const appSettings = readAppSettings();
   const llmSettings = appSettings.llm ?? {};
-  const provider = normalizeLlmProvider(llmSettings.provider);
-  const providerSettings = resolveLlmProviderSettings(provider, llmSettings);
-  const fallbackSettings = resolveLlmProviderSettings(provider, undefined);
-  const defaultModel = providerSettings.model ?? fallbackSettings.model ?? resolveDefaultProviderModel(provider);
-  const routing = llmSettings.routing ?? {};
-  const stageModel =
-    stage === "segment_structure"
-      ? routing.segmentStructureModel?.trim()
-      : stage === "segment_block"
-        ? routing.segmentBlockModel?.trim()
-        : "";
-  const stageFallbackModel =
-    stage === "segment_structure"
-      ? routing.segmentStructureFallbackModel?.trim()
-      : stage === "segment_block"
-        ? routing.segmentBlockFallbackModel?.trim()
-        : "";
-  const model = stageModel || defaultModel;
-  return {
-    provider,
-    model,
-    baseUrl: providerSettings.baseUrl ?? fallbackSettings.baseUrl ?? config.ollamaBaseUrl,
-    apiKey: provider === "ollama" ? "" : (providerSettings.apiKey ?? ""),
-    timeoutMs: providerSettings.timeoutMs ?? config.ollamaTimeoutMs,
-    fallbackModel: stageFallbackModel || resolveImplicitFallbackModel(provider, model)
-  };
+  const stageKey = stage === "segment_structure" ? "structure" : "block";
+  const stageConfig = resolveLlmStageConfig(stageKey, llmSettings);
+  const attempts: LlmStageAttempt[] = [];
+  for (const [strategyIndex, strategy] of (stageConfig.priorities ?? []).entries()) {
+    const providerId = (strategy.providerId ?? strategy.provider ?? "ollama").trim() || "ollama";
+    const providerSettings = resolveLlmProviderSettings(providerId, llmSettings);
+    const provider = normalizeLlmProvider(providerSettings.provider ?? providerId);
+    const model = strategy.model?.trim() || resolveDefaultLlmModel(provider, config.ollamaModel);
+    const fallbackModel = strategy.fallbackModel?.trim() || null;
+    const baseAttempt = {
+      stage,
+      stageKey,
+      priority: strategyIndex + 1,
+      strategyIndex,
+      providerId,
+      provider,
+      providerLabel: providerSettings.displayName?.trim() || providerId,
+      baseUrl: providerSettings.baseUrl ?? config.ollamaBaseUrl,
+      apiKey: provider === "ollama" ? "" : (providerSettings.apiKey ?? ""),
+      timeoutMs: providerSettings.timeoutMs ?? config.ollamaTimeoutMs,
+      configuredFallbackModel: fallbackModel
+    } satisfies Omit<LlmStageAttempt, "variant" | "model">;
+    attempts.push({
+      ...baseAttempt,
+      variant: "primary",
+      model
+    });
+    if (fallbackModel && fallbackModel !== model) {
+      attempts.push({
+        ...baseAttempt,
+        variant: "fallback",
+        model: fallbackModel
+      });
+    }
+  }
+  return attempts;
+}
+
+function resolveOllamaSegmentationModels(): string[] {
+  return Array.from(
+    new Set(
+      [resolveLlmStageAttempts("segment_structure"), resolveLlmStageAttempts("segment_block")]
+        .flat()
+        .filter((settings) => settings.provider === "ollama")
+        .map((settings) => settings.model)
+    )
+  );
 }
 
 async function configuredLlmChat(options: {
@@ -5844,20 +5849,18 @@ async function configuredLlmChat(options: {
   format?: "json";
   temperature?: number;
   keepAlive?: string | number;
-  modelOverride?: string;
-  stage?: LlmStage;
+  attempt: LlmStageAttempt;
   job?: JobRecord;
   blockIndex?: number;
-  attempt?: string;
 }): Promise<{ content: string; provider: string; model: string; baseUrl: string; timeoutMs: number }> {
-  const settings = resolveLlmSettingsForStage(options.stage ?? "default");
-  const model = options.modelOverride?.trim() || settings.model;
+  const settings = options.attempt;
+  const model = settings.model;
   if (settings.provider === "gemini") {
     await waitForGeminiRateLimit({
       job: options.job,
       model,
       blockIndex: options.blockIndex,
-      attempt: options.attempt
+      attempt: `${settings.stage}_${settings.priority}_${settings.variant}`
     });
     const content = await geminiChat({
       baseUrl: settings.baseUrl,
@@ -6132,6 +6135,17 @@ function resolveHeuristicMaxChars(budget: SpeechBudget, speechRateWps: number): 
   return Math.max(40, Math.min(...candidates));
 }
 
+function resolveHeuristicMaxWords(budget: SpeechBudget, speechRateWps: number): number | undefined {
+  if (
+    typeof budget.maxSpeechSeconds === "number" &&
+    budget.maxSpeechSeconds > 0 &&
+    speechRateWps > 0
+  ) {
+    return Math.max(1, Math.floor(budget.maxSpeechSeconds * speechRateWps));
+  }
+  return undefined;
+}
+
 function validateSegmentDraftsAgainstBudget(drafts: BlockDraft[], budget: SpeechBudget): void {
   for (const draft of drafts) {
     if (typeof budget.maxChars === "number" && budget.maxChars > 0 && draft.sourceText.length > budget.maxChars) {
@@ -6161,9 +6175,7 @@ async function buildSegmentDraftsForVersion(options: {
 }): Promise<SegmentDraftsResult> {
   const { job, versionId, workspaceId, scriptText, speechRateWps } = options;
   const context = await resolveProjectSegmentationContext({ job, versionId, workspaceId });
-  const llmSettings = resolveLlmSettingsForStage("segment_structure");
-  const activeModel = llmSettings.model || options.model;
-  const fallbackModel = llmSettings.fallbackModel;
+  const attempts = resolveLlmStageAttempts("segment_structure");
   const prompt = buildSegmentationPrompt(scriptText, {
     scriptMode: context.scriptMode,
     speechRateWps,
@@ -6181,44 +6193,49 @@ async function buildSegmentDraftsForVersion(options: {
     speech_budget_mode: context.speechBudget.mode,
     speech_budget_max_chars: context.speechBudget.maxChars ?? null,
     speech_budget_max_seconds: context.speechBudget.maxSpeechSeconds ?? null,
-    model: activeModel,
-    provider: llmSettings.provider,
-    fallback_model: fallbackModel,
+    attempt_count: attempts.length,
+    strategy_chain: attempts.map((attempt) => ({
+      priority: attempt.priority,
+      variant: attempt.variant,
+      provider: attempt.provider,
+      model: attempt.model,
+      base_url: attempt.baseUrl,
+      timeout_ms: attempt.timeoutMs
+    })),
     prompt_chars: prompt.length
   });
-
-  const runAttempt = async (
-    attempt: "primary" | "fallback",
-    model: string
-  ): Promise<SegmentDraftsResult> => {
+  const failures: Array<Record<string, unknown>> = [];
+  for (const attempt of attempts) {
     const startedAt = Date.now();
     let content = "";
     try {
       logWorkerAction("segment_structure_llm_request_started", {
         job_id: job.id,
-        attempt,
-        model,
-        provider: llmSettings.provider,
-        base_url: llmSettings.baseUrl,
-        timeout_ms: llmSettings.timeoutMs,
+        stage: attempt.stageKey,
+        priority: attempt.priority,
+        variant: attempt.variant,
+        provider: attempt.provider,
+        model: attempt.model,
+        base_url: attempt.baseUrl,
+        timeout_ms: attempt.timeoutMs,
         chars: prompt.length
       });
       const result = await configuredLlmChat({
         prompt,
         format: "json",
         temperature: 0.1,
-        stage: "segment_structure",
-        modelOverride: model,
-        job,
-        attempt: `segment_structure_${attempt}`
+        attempt,
+        job
       });
       content = result.content;
       const durationMs = Date.now() - startedAt;
       logWorkerAction("segment_structure_llm_request_completed", {
         job_id: job.id,
-        attempt,
-        model: result.model,
+        stage: attempt.stageKey,
+        priority: attempt.priority,
+        variant: attempt.variant,
         provider: result.provider,
+        model: result.model,
         base_url: result.baseUrl,
         duration_ms: durationMs,
         response_chars: content.length
@@ -6227,7 +6244,7 @@ async function buildSegmentDraftsForVersion(options: {
         stage: "segment_structure",
         provider: result.provider,
         model: result.model,
-        attempt,
+        attempt: `${attempt.priority}:${attempt.variant}`,
         status: "success",
         timeout: false,
         durationMs,
@@ -6245,87 +6262,74 @@ async function buildSegmentDraftsForVersion(options: {
       }));
       validateSegmentDraftsAgainstBudget(drafts, context.speechBudget);
       logJobEvent("segment_structure_llm_completed", job, {
-        attempt,
+        priority: attempt.priority,
+        variant: attempt.variant,
         provider: result.provider,
         model: result.model,
         block_count: drafts.length,
-        duration_ms: Date.now() - startedAt
+        duration_ms: durationMs
       });
       return {
         drafts,
-        source: attempt === "primary" ? "llm_primary" : "llm_fallback",
+        source: attempt.priority === 1 && attempt.variant === "primary" ? "llm_primary" : "llm_fallback",
         provider: result.provider,
         model: result.model,
-        fallbackReason: attempt === "fallback" ? "primary_failed" : null,
+        fallbackReason: attempt.priority === 1 && attempt.variant === "primary" ? null : "earlier_attempt_failed",
         context
       };
     } catch (err) {
       const durationMs = Date.now() - startedAt;
       const error = serializeError(err);
-      if (!content) {
-        recordLlmTimingSample({
-          stage: "segment_structure",
-          provider: llmSettings.provider,
-          model,
-          attempt,
-          status: "failure",
-          timeout: isLikelyTimeoutError(err),
-          durationMs,
-          timeoutMs: llmSettings.timeoutMs,
-          promptChars: prompt.length,
-          error
-        });
-      }
+      recordLlmTimingSample({
+        stage: "segment_structure",
+        provider: attempt.provider,
+        model: attempt.model,
+        attempt: `${attempt.priority}:${attempt.variant}`,
+        status: "failure",
+        timeout: isLikelyTimeoutError(err),
+        durationMs,
+        timeoutMs: attempt.timeoutMs,
+        promptChars: prompt.length,
+        responseChars: content.length || undefined,
+        error
+      });
       logJobEvent("segment_structure_llm_failed", job, {
-        attempt,
-        provider: llmSettings.provider,
-        model,
+        priority: attempt.priority,
+        variant: attempt.variant,
+        provider: attempt.provider,
+        model: attempt.model,
         error,
         raw_len: content.length,
         raw_preview: content ? (content.length > 400 ? `${content.slice(0, 400)}...` : content) : null,
         duration_ms: durationMs
       });
-      throw err;
-    }
-  };
-
-  let primaryError: unknown = null;
-  try {
-    return await runAttempt("primary", activeModel);
-  } catch (err) {
-    primaryError = err;
-  }
-
-  if (fallbackModel) {
-    logJobEvent("segment_structure_llm_fallback_started", job, {
-      from_model: activeModel,
-      to_model: fallbackModel,
-      reason: serializeError(primaryError)
-    });
-    try {
-      return await runAttempt("fallback", fallbackModel);
-    } catch {
-      // Fall through to deterministic heuristic.
+      failures.push({
+        priority: attempt.priority,
+        variant: attempt.variant,
+        provider: attempt.provider,
+        model: attempt.model,
+        error
+      });
     }
   }
 
   const heuristicMaxChars = resolveHeuristicMaxChars(context.speechBudget, speechRateWps);
-  const drafts = buildDeterministicBlocks(scriptText, speechRateWps, heuristicMaxChars);
+  const heuristicMaxWords = resolveHeuristicMaxWords(context.speechBudget, speechRateWps);
+  const drafts = buildDeterministicBlocks(scriptText, speechRateWps, heuristicMaxChars, heuristicMaxWords);
   validateSegmentDraftsAgainstBudget(drafts, context.speechBudget);
   logJobEvent("segment_structure_heuristic_used", job, {
-    reason: serializeError(primaryError),
-    provider: llmSettings.provider,
-    model: activeModel,
-    fallback_model: fallbackModel,
+    reason: failures.length > 0 ? failures : "no_stage_attempts_configured",
+    stage_attempts_failed: failures.length,
     block_count: drafts.length,
-    max_chars: heuristicMaxChars
+    max_chars: heuristicMaxChars,
+    max_words: heuristicMaxWords ?? null
   });
   return {
     drafts,
     source: "heuristic",
-    provider: llmSettings.provider,
+    provider: failures[0]?.provider ? String(failures[0].provider) : "heuristic",
     model: null,
-    fallbackReason: serializeError(primaryError),
+    fallbackReason: failures.length > 0 ? JSON.stringify(failures) : "no_stage_attempts_configured",
     context
   };
 }
@@ -6341,13 +6345,8 @@ async function generateBlockMeta(options: {
   keepAlive?: string | number;
   releaseAfter?: boolean;
 }): Promise<{ meta: BlockMeta; ms: number; provider: string; model: string; fallbackUsed: boolean }> {
-  const { job, block, index, total, prevText, nextText, model } = options;
-  const initialLlmSettings = resolveLlmSettingsForStage("segment_block");
-  const baseUrl = initialLlmSettings.baseUrl;
-  const timeoutMs = initialLlmSettings.timeoutMs;
-  const activeModel = initialLlmSettings.model || model;
-  const activeProvider = initialLlmSettings.provider;
-  const fallbackModel = initialLlmSettings.fallbackModel;
+  const { job, block, index, total, prevText, nextText } = options;
+  const attempts = resolveLlmStageAttempts("segment_block");
   const prompt = buildBlockMetaPrompt({
     index,
     total,
@@ -6358,217 +6357,174 @@ async function generateBlockMeta(options: {
   const startedAt = Date.now();
   logJobEvent("segment_block_meta_started", job, {
     block_index: block.index,
-    model: activeModel,
-    fallback_model: fallbackModel,
-    provider: activeProvider,
-    base_url: baseUrl,
-    timeout_ms: timeoutMs,
+    attempt_count: attempts.length,
+    strategy_chain: attempts.map((attempt) => ({
+      priority: attempt.priority,
+      variant: attempt.variant,
+      provider: attempt.provider,
+      model: attempt.model,
+      base_url: attempt.baseUrl,
+      timeout_ms: attempt.timeoutMs
+    })),
     chars: prompt.length,
     keep_alive: options.keepAlive ?? null
   });
-  let content: string;
-  let generationSucceeded = false;
-  let unloadedOnTimeout = false;
-
-  const runAttempt = async (attempt: "primary" | "fallback", attemptModel: string) => {
-    const attemptStartedAt = Date.now();
-    logWorkerAction("segment_block_llm_request_started", {
-      job_id: job.id,
-      block_index: block.index,
-      attempt,
-      model: attemptModel,
-      provider: activeProvider,
-      base_url: baseUrl,
-      timeout_ms: timeoutMs,
-      chars: prompt.length
-    });
-    try {
-      const llmResult = await configuredLlmChat({
-        prompt,
-        format: "json",
-        temperature: 0.2,
-        keepAlive: options.keepAlive,
-        stage: "segment_block",
-        modelOverride: attemptModel,
-        job,
-        blockIndex: block.index,
-        attempt
-      });
-      const durationMs = Date.now() - attemptStartedAt;
-      logWorkerAction("segment_block_llm_request_completed", {
-        job_id: job.id,
-        block_index: block.index,
-        attempt,
-        model: llmResult.model,
-        provider: llmResult.provider,
-        base_url: llmResult.baseUrl,
-        duration_ms: durationMs,
-        response_chars: llmResult.content.length
-      });
-      recordLlmTimingSample({
-        stage: "segment_block",
-        provider: llmResult.provider,
-        model: llmResult.model,
-        attempt,
-        blockIndex: block.index,
-        status: "success",
-        timeout: false,
-        durationMs,
-        timeoutMs: llmResult.timeoutMs,
-        promptChars: prompt.length,
-        responseChars: llmResult.content.length
-      });
-      return llmResult;
-    } catch (err) {
-      const durationMs = Date.now() - attemptStartedAt;
-      recordLlmTimingSample({
-        stage: "segment_block",
-        provider: activeProvider,
-        model: attemptModel,
-        attempt,
-        blockIndex: block.index,
-        status: "failure",
-        timeout: isLikelyTimeoutError(err),
-        durationMs,
-        timeoutMs,
-        promptChars: prompt.length,
-        error: serializeError(err)
-      });
-      throw err;
-    }
-  };
-
-  const parseAttempt = (
-    llmResult: { content: string; provider: string; model: string; baseUrl: string; timeoutMs: number },
-    attempt: "primary" | "fallback",
-    fallbackUsed: boolean
-  ) => {
-    content = llmResult.content;
-    try {
-      const meta = normalizeBlockMetaResponse(content, block.sourceText, block.index);
-      logJobEvent("segment_block_meta_completed", job, {
-        block_index: block.index,
-        attempt,
-        provider: llmResult.provider,
-        model: llmResult.model,
-        fallback_used: fallbackUsed,
-        duration_ms: Date.now() - startedAt
-      });
-      generationSucceeded = true;
-      return {
-        meta,
-        ms: Date.now() - startedAt,
-        provider: llmResult.provider,
-        model: llmResult.model,
-        fallbackUsed
-      };
-    } catch (err) {
-      const preview = content.length > 400 ? `${content.slice(0, 400)}...` : content;
-      logJobEvent("segment_block_meta_invalid", job, {
-        block_index: block.index,
-        attempt,
-        provider: llmResult.provider,
-        model: llmResult.model,
-        error: serializeError(err),
-        raw_len: content.length,
-        raw_preview: preview
-      });
-      throw err;
-    }
-  };
-
+  const failures: Array<Record<string, unknown>> = [];
+  let successfulAttempt: LlmStageAttempt | null = null;
   try {
-    let primaryResult: Awaited<ReturnType<typeof runAttempt>>;
-    try {
-      primaryResult = await runAttempt("primary", activeModel);
-    } catch (err) {
-      logWorkerAction("segment_block_llm_request_failed", {
-        job_id: job.id,
-        block_index: block.index,
-        attempt: "primary",
-        model: activeModel,
-        provider: activeProvider,
-        base_url: baseUrl,
-        duration_ms: Date.now() - startedAt,
-        error: serializeError(err)
-      });
-      if (activeProvider === "ollama" && isLikelyTimeoutError(err)) {
-        await requestOllamaUnload({
-          job,
-          model: activeModel,
-          baseUrl,
-          timeoutMs,
-          reason: "timeout"
-        });
-        unloadedOnTimeout = true;
-      }
-      throw err;
-    }
-
-    try {
-      return parseAttempt(primaryResult, "primary", false);
-    } catch (err) {
-      if (!fallbackModel) {
-        throw err;
-      }
-      logJobEvent("segment_block_llm_fallback_started", job, {
-        block_index: block.index,
-        from_model: activeModel,
-        to_model: fallbackModel,
-        reason: "invalid_structured_output",
-        error: serializeError(err)
-      });
-      logWorkerAction("segment_block_llm_fallback_started", {
-        job_id: job.id,
-        block_index: block.index,
-        from_model: activeModel,
-        to_model: fallbackModel,
-        reason: "invalid_structured_output",
-        error: serializeError(err)
-      });
-
-      let fallbackResult: Awaited<ReturnType<typeof runAttempt>>;
+    for (const attempt of attempts) {
+      const attemptStartedAt = Date.now();
+      let content = "";
       try {
-        fallbackResult = await runAttempt("fallback", fallbackModel);
-      } catch (fallbackErr) {
+        logWorkerAction("segment_block_llm_request_started", {
+          job_id: job.id,
+          block_index: block.index,
+          priority: attempt.priority,
+          variant: attempt.variant,
+          model: attempt.model,
+          provider: attempt.provider,
+          base_url: attempt.baseUrl,
+          timeout_ms: attempt.timeoutMs,
+          chars: prompt.length
+        });
+        const llmResult = await configuredLlmChat({
+          prompt,
+          format: "json",
+          temperature: 0.2,
+          keepAlive: options.keepAlive,
+          attempt,
+          job,
+          blockIndex: block.index
+        });
+        content = llmResult.content;
+        const durationMs = Date.now() - attemptStartedAt;
+        logWorkerAction("segment_block_llm_request_completed", {
+          job_id: job.id,
+          block_index: block.index,
+          priority: attempt.priority,
+          variant: attempt.variant,
+          model: llmResult.model,
+          provider: llmResult.provider,
+          base_url: llmResult.baseUrl,
+          duration_ms: durationMs,
+          response_chars: llmResult.content.length
+        });
+        recordLlmTimingSample({
+          stage: "segment_block",
+          provider: llmResult.provider,
+          model: llmResult.model,
+          attempt: `${attempt.priority}:${attempt.variant}`,
+          blockIndex: block.index,
+          status: "success",
+          timeout: false,
+          durationMs,
+          timeoutMs: llmResult.timeoutMs,
+          promptChars: prompt.length,
+          responseChars: llmResult.content.length
+        });
+        const meta = normalizeBlockMetaResponse(content, block.sourceText, block.index);
+        successfulAttempt = attempt;
+        logJobEvent("segment_block_meta_completed", job, {
+          block_index: block.index,
+          priority: attempt.priority,
+          variant: attempt.variant,
+          provider: llmResult.provider,
+          model: llmResult.model,
+          duration_ms: Date.now() - startedAt
+        });
+        return {
+          meta,
+          ms: Date.now() - startedAt,
+          provider: llmResult.provider,
+          model: llmResult.model,
+          fallbackUsed: !(attempt.priority === 1 && attempt.variant === "primary")
+        };
+      } catch (err) {
+        const durationMs = Date.now() - attemptStartedAt;
+        const error = serializeError(err);
+        recordLlmTimingSample({
+          stage: "segment_block",
+          provider: attempt.provider,
+          model: attempt.model,
+          attempt: `${attempt.priority}:${attempt.variant}`,
+          blockIndex: block.index,
+          status: "failure",
+          timeout: isLikelyTimeoutError(err),
+          durationMs,
+          timeoutMs: attempt.timeoutMs,
+          promptChars: prompt.length,
+          responseChars: content.length || undefined,
+          error
+        });
         logWorkerAction("segment_block_llm_request_failed", {
           job_id: job.id,
           block_index: block.index,
-          attempt: "fallback",
-          model: fallbackModel,
-          provider: activeProvider,
-          base_url: baseUrl,
-          duration_ms: Date.now() - startedAt,
-          error: serializeError(fallbackErr)
+          priority: attempt.priority,
+          variant: attempt.variant,
+          model: attempt.model,
+          provider: attempt.provider,
+          base_url: attempt.baseUrl,
+          duration_ms: durationMs,
+          error
         });
-        throw fallbackErr;
+        logJobEvent("segment_block_meta_attempt_failed", job, {
+          block_index: block.index,
+          priority: attempt.priority,
+          variant: attempt.variant,
+          provider: attempt.provider,
+          model: attempt.model,
+          error,
+          raw_len: content.length,
+          raw_preview: content ? (content.length > 400 ? `${content.slice(0, 400)}...` : content) : null
+        });
+        failures.push({
+          priority: attempt.priority,
+          variant: attempt.variant,
+          provider: attempt.provider,
+          model: attempt.model,
+          error
+        });
+        if (attempt.provider === "ollama" && isLikelyTimeoutError(err)) {
+          await requestOllamaUnload({
+            job,
+            model: attempt.model,
+            baseUrl: attempt.baseUrl,
+            timeoutMs: attempt.timeoutMs,
+            reason: "block_meta_attempt_timeout"
+          }).catch(() => undefined);
+        }
       }
-      const parsedFallback = parseAttempt(fallbackResult, "fallback", true);
-      logJobEvent("segment_block_llm_fallback_completed", job, {
-        block_index: block.index,
-        from_model: activeModel,
-        to_model: parsedFallback.model
-      });
-      return parsedFallback;
     }
+    throw new Error("all_stage_attempts_failed");
   } catch (err) {
     logJobEvent("segment_block_meta_failed", job, {
       block_index: block.index,
-      provider: activeProvider,
-      model: activeModel,
-      fallback_model: fallbackModel,
-      error: serializeError(err)
+      error: serializeError(err),
+      failures
     });
-    throw err;
+    const fallback = buildFallbackMeta(block.sourceText, block.index);
+    logJobEvent("segment_block_meta_fallback_used", job, {
+      block_index: block.index,
+      reason: failures
+    });
+    return {
+      meta: fallback,
+      ms: Date.now() - startedAt,
+      provider: attempts[0]?.provider ?? "fallback",
+      model: attempts[0]?.model ?? "fallback",
+      fallbackUsed: true
+    };
   } finally {
-    if (activeProvider === "ollama" && options.releaseAfter && !unloadedOnTimeout) {
-      await requestOllamaUnload({
-        job,
-        model: activeModel,
-        baseUrl,
-        timeoutMs,
-        reason: generationSucceeded ? "completed" : "failed"
-      });
+    if (options.releaseAfter) {
+      for (const attempt of attempts.filter((item) => item.provider === "ollama")) {
+        await requestOllamaUnload({
+          job,
+          model: attempt.model,
+          baseUrl: attempt.baseUrl,
+          timeoutMs: attempt.timeoutMs,
+          reason: successfulAttempt ? "completed" : "failed"
+        }).catch(() => undefined);
+      }
     }
   }
 }
@@ -7402,42 +7358,49 @@ async function runJob(job: JobRecord): Promise<void> {
       if (!version) {
         throw new Error("lesson version not found");
       }
-      const llmSettings = resolveLlmSettingsForStage("segment_structure");
-      const blockLlmSettings = resolveLlmSettingsForStage("segment_block");
-      const { provider, model, baseUrl, timeoutMs } = llmSettings;
-      let modelsCount: number | null = null;
-      if (provider === "ollama") {
-        const health = await ollamaHealth(baseUrl);
-        if (!health.ok) {
-          throw new Error(`Ollama unreachable at ${baseUrl}`);
+      const structureAttempts = resolveLlmStageAttempts("segment_structure");
+      const blockAttempts = resolveLlmStageAttempts("segment_block");
+      const stageAttempts = [
+        ...structureAttempts.map((attempt) => ({ stage: "segment_structure", attempt })),
+        ...blockAttempts.map((attempt) => ({ stage: "segment_block", attempt }))
+      ] as const;
+      const ollamaHealthByBaseUrl = new Map<string, Awaited<ReturnType<typeof ollamaHealth>>>();
+      const ollamaModelsCountByBaseUrl = new Map<string, number>();
+      for (const stageEntry of stageAttempts) {
+        const stageProvider = stageEntry.attempt.provider;
+        if (stageProvider === "ollama") {
+          const healthKey = stageEntry.attempt.baseUrl;
+          let health = ollamaHealthByBaseUrl.get(healthKey);
+          if (!health) {
+            health = await ollamaHealth(stageEntry.attempt.baseUrl);
+            ollamaHealthByBaseUrl.set(healthKey, health);
+          }
+          if (!health.ok) {
+            throw new Error(`Ollama unreachable at ${stageEntry.attempt.baseUrl} for ${stageEntry.stage}`);
+          }
+          const requiredModels = [stageEntry.attempt.model];
+          const missingModels = requiredModels.filter((candidate) => !health.models.includes(candidate));
+          if (missingModels.length > 0) {
+            throw new Error(
+              `Ollama models unavailable at ${stageEntry.attempt.baseUrl} for ${stageEntry.stage}: ${missingModels.join(", ")}. Available: ${health.models.join(", ")}`
+            );
+          }
+          ollamaModelsCountByBaseUrl.set(stageEntry.attempt.baseUrl, health.models.length);
+          continue;
         }
-        const requiredModels = Array.from(
-          new Set(
-            [
-              model,
-              llmSettings.fallbackModel,
-              blockLlmSettings.model,
-              blockLlmSettings.fallbackModel
-            ].filter((candidate): candidate is string => Boolean(candidate && candidate.trim()))
-          )
-        );
-        const missingModels = requiredModels.filter((candidate) => !health.models.includes(candidate));
-        if (missingModels.length > 0) {
-          throw new Error(
-            `Ollama models unavailable at ${baseUrl}: ${missingModels.join(", ")}. Available: ${health.models.join(", ")}`
-          );
+        if (stageProvider === "gemini") {
+          if (!stageEntry.attempt.apiKey.trim()) {
+            throw new Error(`Gemini API key is required for ${stageEntry.stage} priority ${stageEntry.attempt.priority}`);
+          }
+          continue;
         }
-        modelsCount = health.models.length;
-      } else if (provider === "gemini") {
-        if (!llmSettings.apiKey.trim()) {
-          throw new Error("Gemini API key is required when Gemini is selected in System Settings");
+        if (stageProvider === "openai") {
+          if (!stageEntry.attempt.apiKey.trim()) {
+            throw new Error(`API key is required for OpenAI-compatible ${stageEntry.stage} priority ${stageEntry.attempt.priority}`);
+          }
+          continue;
         }
-      } else if (provider === "openai") {
-        if (!llmSettings.apiKey.trim()) {
-          throw new Error("API key is required when OpenAI-compatible provider is selected in System Settings");
-        }
-      } else {
-        throw new Error(`LLM provider '${provider}' is not implemented in worker segmentation`);
+        throw new Error(`LLM provider '${stageProvider}' is not implemented in worker segmentation`);
       }
       const existingBlocks = await prisma.block.findMany({
         where: { lessonVersionId: version.id },
@@ -7452,30 +7415,38 @@ async function runJob(job: JobRecord): Promise<void> {
       });
       await notifyRunningPhase(job, "generation");
       logJobEvent("segment_started", job, {
-        model,
-        fallback_model: llmSettings.fallbackModel,
-        block_model: blockLlmSettings.model,
-        block_fallback_model: blockLlmSettings.fallbackModel,
-        provider,
-        base_url: baseUrl,
-        timeout_ms: timeoutMs
+        structure_attempts: structureAttempts.map((attempt) => ({
+          priority: attempt.priority,
+          variant: attempt.variant,
+          provider: attempt.provider,
+          model: attempt.model,
+          base_url: attempt.baseUrl,
+          timeout_ms: attempt.timeoutMs
+        })),
+        block_attempts: blockAttempts.map((attempt) => ({
+          priority: attempt.priority,
+          variant: attempt.variant,
+          provider: attempt.provider,
+          model: attempt.model,
+          base_url: attempt.baseUrl,
+          timeout_ms: attempt.timeoutMs
+        }))
       });
       logWorkerAction("segment_llm_preflight_ok", {
         job_id: job.id,
-        model,
-        fallback_model: llmSettings.fallbackModel,
-        block_model: blockLlmSettings.model,
-        block_fallback_model: blockLlmSettings.fallbackModel,
-        provider,
-        base_url: baseUrl,
-        models_count: modelsCount
+        structure_attempts: structureAttempts,
+        block_attempts: blockAttempts,
+        ollama_health: Array.from(ollamaModelsCountByBaseUrl.entries()).map(([baseUrl, modelsCount]) => ({
+          base_url: baseUrl,
+          models_count: modelsCount
+        }))
       });
       const result = await generateBlocksForVersion({
         job,
         versionId: version.id,
         scriptText: version.scriptText,
         speechRateWps: version.speechRateWps,
-        model
+        model: structureAttempts[0]?.model ?? resolveDefaultLlmModel("ollama", config.ollamaModel)
       });
       logJobEvent("segment_completed", job, {
         block_count: result.total,
@@ -7578,7 +7549,6 @@ async function runJob(job: JobRecord): Promise<void> {
         siblingIndex >= 0 && siblingIndex < siblingBlocks.length - 1
           ? siblingBlocks[siblingIndex + 1]?.sourceText
           : undefined;
-      const appSettings = readAppSettings();
       const result = await generateBlockMeta({
         job,
         block: draft,
@@ -7586,7 +7556,7 @@ async function runJob(job: JobRecord): Promise<void> {
         total: siblingBlocks.length || block.index,
         prevText,
         nextText,
-        model: appSettings.llm?.model ?? config.ollamaModel,
+        model: resolveLlmStageAttempts("segment_block")[0]?.model ?? resolveDefaultLlmModel("ollama", config.ollamaModel),
         releaseAfter: false
       });
       await prisma.block.update({

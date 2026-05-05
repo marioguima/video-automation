@@ -3157,7 +3157,7 @@ const Editor: React.FC<EditorProps> = ({
       );
       setIsSegmenting(true);
       setSegmentPhase('waiting');
-      setSegmentProgress({ current: 0, total: blocks.length });
+      setSegmentProgress(null);
       if (purge) {
         setBlocks([]);
         setActiveBlockId('');

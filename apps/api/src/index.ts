@@ -22,10 +22,13 @@ import {
   getConfig,
   getMissingAppSettingsSecrets,
   loadRootEnv,
+  normalizeLlmStages,
+  resolveDefaultLlmModel,
   normalizeLlmProvider,
-  normalizeLlmRouting,
   readAppSettingsFile,
+  resolveLlmProviderSettings,
   resolveLlmProviders,
+  resolveLlmStageConfig,
   sanitizeNarratedScriptText,
   writeAppSettingsFile,
   loadVoiceIndex,
@@ -1182,10 +1185,15 @@ function getConnectedAgentForWorkspace(
 
 function getAgentIntegrationConfigSnapshot(): AgentIntegrationConfigSnapshot {
   const current = readAppSettings();
-  const provider = normalizeLlmProvider(current.llm?.provider);
   const llmProviders = resolveLlmProviders(current.llm);
+  const firstStrategyProvider =
+    resolveLlmStageConfig("structure", current.llm).priorities?.[0]?.providerId ??
+    resolveLlmStageConfig("structure", current.llm).priorities?.[0]?.provider ??
+    resolveLlmStageConfig("block", current.llm).priorities?.[0]?.providerId ??
+    resolveLlmStageConfig("block", current.llm).priorities?.[0]?.provider ??
+    "ollama";
   return {
-    llmBaseUrl: (llmProviders[provider]?.baseUrl ?? config.ollamaBaseUrl).trim(),
+    llmBaseUrl: (llmProviders[firstStrategyProvider]?.baseUrl ?? config.ollamaBaseUrl).trim(),
     comfyuiBaseUrl: (current.comfy?.baseUrl ?? config.comfyuiBaseUrl).trim(),
     ttsBaseUrl: (current.tts?.baseUrl ?? config.xttsApiBaseUrl).trim()
   };
@@ -4229,6 +4237,35 @@ fastify.get(
   }
 );
 
+function resolveStageChainForSettings(
+  llm: AppSettings["llm"] | undefined,
+  stage: "structure" | "block"
+): Array<{
+  providerId: string;
+  provider: "ollama" | "gemini" | "openai";
+  providerLabel: string;
+  model: string;
+  fallbackModel: string | null;
+  baseUrl: string;
+  timeoutMs: number;
+}> {
+  const stageConfig = resolveLlmStageConfig(stage, llm);
+  return (stageConfig.priorities ?? []).map((strategy) => {
+    const providerId = (strategy.providerId ?? strategy.provider ?? "ollama").trim() || "ollama";
+    const providerSettings = resolveLlmProviderSettings(providerId, llm);
+    const provider = normalizeLlmProvider(providerSettings.provider ?? providerId);
+    return {
+      providerId,
+      provider,
+      providerLabel: providerSettings.displayName?.trim() || providerId,
+      model: strategy.model?.trim() || resolveDefaultLlmModel(provider, config.ollamaModel),
+      fallbackModel: strategy.fallbackModel?.trim() || null,
+      baseUrl: providerSettings.baseUrl ?? config.ollamaBaseUrl,
+      timeoutMs: providerSettings.timeoutMs ?? config.ollamaTimeoutMs
+    };
+  });
+}
+
 fastify.get(
   "/settings",
   {
@@ -4240,8 +4277,10 @@ fastify.get(
   },
   async () => {
     const current = readAppSettings();
-    const provider = normalizeLlmProvider(current.llm?.provider);
     const providers = resolveLlmProviders(current.llm);
+    const stages = normalizeLlmStages(current.llm);
+    const structureChain = resolveStageChainForSettings(current.llm, "structure");
+    const blockChain = resolveStageChainForSettings(current.llm, "block");
     const workflows = listComfyWorkflowFiles();
     const selectedWorkflow =
       current.comfy?.workflowFile && workflows.includes(current.comfy.workflowFile)
@@ -4252,9 +4291,16 @@ fastify.get(
     return {
       theme: current.theme ?? null,
       llm: {
-        provider,
         providers,
-        routing: normalizeLlmRouting(current.llm)
+        stages,
+        effective: {
+          structureChain,
+          blockChain,
+          structurePrimary: structureChain[0] ?? null,
+          blockPrimary: blockChain[0] ?? null,
+          structureAttempts: structureChain.reduce((total, item) => total + (item.fallbackModel ? 2 : 1), 0),
+          blockAttempts: blockChain.reduce((total, item) => total + (item.fallbackModel ? 2 : 1), 0)
+        }
       },
       comfy: {
         baseUrl: current.comfy?.baseUrl ?? config.comfyuiBaseUrl,
@@ -4266,6 +4312,17 @@ fastify.get(
         availableWorkflows: workflows
       },
       tts: {
+        provider: current.tts?.provider,
+        defaultProviderId: current.tts?.defaultProviderId,
+        defaultLanguage: current.tts?.defaultLanguage ?? current.tts?.language ?? null,
+        baseUrl: current.tts?.baseUrl,
+        timeoutUs: current.tts?.timeoutUs,
+        language: current.tts?.language ?? null,
+        defaultVoiceId: current.tts?.defaultVoiceId ?? null,
+        targetChars: current.tts?.targetChars,
+        maxChars: current.tts?.maxChars,
+        targetSpeechSeconds: current.tts?.targetSpeechSeconds,
+        maxSpeechSeconds: current.tts?.maxSpeechSeconds,
         providers: current.tts?.providers ?? {},
         languageRoutes: current.tts?.languageRoutes ?? {}
       },
@@ -4307,12 +4364,9 @@ fastify.patch(
       };
     }
     if (body.llm) {
-      const provider = (body.llm.provider ?? current.llm?.provider ?? "ollama").trim().toLowerCase();
-      if (!["ollama", "gemini", "openai"].includes(provider)) {
-        return reply.code(400).send({ error: "llm.provider must be one of: ollama, gemini, openai" });
-      }
+      const llmBody = body.llm;
       const providers = resolveLlmProviders(current.llm);
-      for (const [providerKey, providerSettings] of Object.entries(body.llm.providers ?? {})) {
+      for (const [providerKey, providerSettings] of Object.entries(llmBody.providers ?? {})) {
         if (!providerSettings) continue;
         const timeout = providerSettings.timeoutMs;
         if (timeout !== undefined && (!Number.isFinite(timeout) || timeout <= 0)) {
@@ -4320,28 +4374,33 @@ fastify.patch(
         }
         providers[providerKey] = {
           ...(providers[providerKey] ?? {}),
+          provider: providerSettings.provider ?? providers[providerKey]?.provider ?? normalizeLlmProvider(providerKey),
+          displayName: providerSettings.displayName ?? providers[providerKey]?.displayName ?? providerKey,
           baseUrl: providerSettings.baseUrl ?? providers[providerKey]?.baseUrl,
-          model:
-            providerSettings.model !== undefined
-              ? (providerSettings.model.trim() || undefined)
-              : providers[providerKey]?.model,
           timeoutMs: timeout !== undefined ? Math.trunc(timeout) : providers[providerKey]?.timeoutMs
         };
-        if (providerKey !== "ollama") {
+        if ((providers[providerKey].provider ?? "ollama") !== "ollama") {
           providers[providerKey].apiKey =
             providerSettings.apiKey !== undefined ? providerSettings.apiKey.trim() : providers[providerKey]?.apiKey ?? "";
         }
       }
-      next.llm = {
-        provider,
-        providers,
-        routing: normalizeLlmRouting({
-          ...current.llm,
-          routing: {
-            ...(current.llm?.routing ?? {}),
-            ...(body.llm.routing ?? {})
+      const nextStages = llmBody.stages ?? current.llm?.stages;
+      for (const stageName of ["structure", "block"] as const) {
+        for (const [index, strategy] of (nextStages?.[stageName]?.priorities ?? []).entries()) {
+          const providerId = (strategy?.providerId ?? strategy?.provider ?? "").trim();
+          if (!providerId) {
+            return reply.code(400).send({ error: `llm.stages.${stageName}.priorities.${index}.providerId is required` });
           }
-        })
+          if (!providers[providerId]) {
+            return reply.code(400).send({
+              error: `llm.stages.${stageName}.priorities.${index}.providerId must reference a configured LLM provider`
+            });
+          }
+        }
+      }
+      next.llm = {
+        providers,
+        stages: nextStages
       };
     }
     if (body.comfy) {
@@ -4547,6 +4606,23 @@ fastify.patch(
       }
 
       next.tts = {
+        provider: body.tts.provider ?? current.tts?.provider,
+        defaultProviderId: body.tts.defaultProviderId ?? current.tts?.defaultProviderId,
+        defaultLanguage: body.tts.defaultLanguage ?? current.tts?.defaultLanguage,
+        baseUrl: body.tts.baseUrl ?? current.tts?.baseUrl,
+        timeoutUs: normalizePositiveInteger(body.tts.timeoutUs) ?? current.tts?.timeoutUs,
+        language: body.tts.language ?? current.tts?.language,
+        defaultVoiceId: body.tts.defaultVoiceId ?? current.tts?.defaultVoiceId,
+        targetChars: normalizePositiveInteger(body.tts.targetChars) ?? current.tts?.targetChars,
+        maxChars: normalizePositiveInteger(body.tts.maxChars) ?? current.tts?.maxChars,
+        targetSpeechSeconds:
+          body.tts.targetSpeechSeconds !== undefined
+            ? body.tts.targetSpeechSeconds
+            : current.tts?.targetSpeechSeconds,
+        maxSpeechSeconds:
+          body.tts.maxSpeechSeconds !== undefined
+            ? body.tts.maxSpeechSeconds
+            : current.tts?.maxSpeechSeconds,
         providers,
         languageRoutes
       };

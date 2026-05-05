@@ -14,6 +14,7 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
+    "verify:segmentation": "pnpm --filter @vizlec/api typecheck && pnpm --filter @vizlec/worker typecheck && pnpm --filter @vizlec/web typecheck && pnpm --filter @vizlec/api exec -- tsx --test test/settings-llm-routing.test.ts test/agent-control-ws-integration-health.test.ts test/content-cope-flow.test.ts && pnpm --filter @vizlec/worker exec -- tsx --test test/segmenter-budget.test.ts",
     "verify:critical": "pnpm --filter @vizlec/api typecheck && pnpm --filter @vizlec/web typecheck && pnpm --filter @vizlec/api run test:one -- test/correlation-id-traceability.test.ts",
     "setup:hooks": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-hooks.ps1",
     "db:migrate": "node scripts/prisma-migrate.cjs"

@@ -178,19 +178,42 @@ function mergeBulletParagraphContext(paragraphs: string[][]): string[][] {
   return merged;
 }
 
-function splitTextByLimit(text: string, maxChars: number): string[] {
+function fitsChunkLimits(text: string, maxChars: number, maxWords?: number): boolean {
+  if (text.length > maxChars) return false;
+  if (typeof maxWords === "number" && maxWords > 0 && wordCount(text) > maxWords) return false;
+  return true;
+}
+
+function splitTextByLimit(text: string, maxChars: number, maxWords?: number): string[] {
   const normalized = normalizeWhitespace(text);
   if (!normalized) return [];
 
   const chunks: string[] = [];
-  let start = 0;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  let wordStart = 0;
 
-  while (start < normalized.length) {
-    const maxEnd = Math.min(start + maxChars, normalized.length);
+  while (wordStart < words.length) {
+    let wordEnd = words.length;
+    if (typeof maxWords === "number" && maxWords > 0) {
+      wordEnd = Math.min(wordEnd, wordStart + maxWords);
+    }
+    let candidate = words.slice(wordStart, wordEnd).join(" ");
+    while (candidate.length > maxChars && wordEnd > wordStart + 1) {
+      wordEnd -= 1;
+      candidate = words.slice(wordStart, wordEnd).join(" ");
+    }
+    if (candidate.length <= maxChars) {
+      chunks.push(candidate);
+      wordStart = wordEnd;
+      continue;
+    }
+
+    const remaining = words.slice(wordStart).join(" ");
+    const maxEnd = Math.min(maxChars, remaining.length);
     let end = -1;
 
-    for (let i = maxEnd - 1; i >= start; i -= 1) {
-      const char = normalized[i];
+    for (let i = maxEnd - 1; i >= 0; i -= 1) {
+      const char = remaining[i];
       if (char === "." || char === ",") {
         end = i + 1;
         break;
@@ -198,32 +221,31 @@ function splitTextByLimit(text: string, maxChars: number): string[] {
     }
 
     if (end === -1) {
-      const space = normalized.lastIndexOf(" ", maxEnd);
-      if (space > start) {
+      const space = remaining.lastIndexOf(" ", maxEnd);
+      if (space > 0) {
         end = space;
       } else {
         end = maxEnd;
       }
     }
 
-    const chunk = normalized.slice(start, end).trim();
-    if (chunk.length > 0) {
-      chunks.push(chunk);
+    const chunk = remaining.slice(0, end).trim();
+    if (!chunk.length) {
+      chunks.push(remaining.slice(0, maxChars).trim());
+      wordStart += 1;
+      continue;
     }
-
-    start = end;
-    while (start < normalized.length && normalized[start] === " ") {
-      start += 1;
-    }
+    chunks.push(chunk);
+    wordStart += wordCount(chunk);
   }
 
   return chunks;
 }
 
-function splitBulletParagraph(paragraphLines: string[], maxChars: number): string[] {
+function splitBulletParagraph(paragraphLines: string[], maxChars: number, maxWords?: number): string[] {
   const hasBullet = paragraphLines.some((line) => BULLET_LINE_RE.test(line));
   if (!hasBullet) {
-    return splitTextByLimit(paragraphLines.join(" "), maxChars);
+    return splitTextByLimit(paragraphLines.join(" "), maxChars, maxWords);
   }
 
   const prefaceLines: string[] = [];
@@ -261,7 +283,7 @@ function splitBulletParagraph(paragraphLines: string[], maxChars: number): strin
   }
 
   if (bullets.length === 0) {
-    return splitTextByLimit(paragraphLines.join(" "), maxChars);
+    return splitTextByLimit(paragraphLines.join(" "), maxChars, maxWords);
   }
 
   const chunks: string[] = [];
@@ -280,25 +302,25 @@ function splitBulletParagraph(paragraphLines: string[], maxChars: number): strin
 
   for (const bullet of bullets) {
     if (currentParts.length === 0) {
-      if (bullet.length <= maxChars) {
+      if (fitsChunkLimits(bullet, maxChars, maxWords)) {
         currentParts = [bullet];
       } else {
-        chunks.push(...splitTextByLimit(bullet, maxChars));
+        chunks.push(...splitTextByLimit(bullet, maxChars, maxWords));
       }
       continue;
     }
 
     const candidate = normalizeWhitespace([...currentParts, bullet].join(" "));
-    if (candidate.length <= maxChars) {
+    if (fitsChunkLimits(candidate, maxChars, maxWords)) {
       currentParts.push(bullet);
       continue;
     }
 
     flushCurrent();
-    if (bullet.length <= maxChars) {
+    if (fitsChunkLimits(bullet, maxChars, maxWords)) {
       currentParts = [bullet];
     } else {
-      chunks.push(...splitTextByLimit(bullet, maxChars));
+      chunks.push(...splitTextByLimit(bullet, maxChars, maxWords));
     }
   }
 
@@ -364,7 +386,7 @@ function fallbackDirectionNotes(sourceText: string): DirectionNotes {
   };
 }
 
-function buildFallbackBlocks(scriptText: string, speechRateWps: number, maxChars = 200): BlockDraft[] {
+function buildFallbackBlocks(scriptText: string, speechRateWps: number, maxChars = 200, maxWords?: number): BlockDraft[] {
   const sections = splitTextByHorizontalRule(scriptText);
   const paragraphs = sections.flatMap((section) =>
     mergeBulletParagraphContext(splitSectionIntoParagraphLines(section))
@@ -377,7 +399,7 @@ function buildFallbackBlocks(scriptText: string, speechRateWps: number, maxChars
   let blockIndex = 1;
 
   for (const paragraphLines of paragraphs) {
-    const chunks = splitBulletParagraph(paragraphLines, maxChars);
+    const chunks = splitBulletParagraph(paragraphLines, maxChars, maxWords);
     for (const chunk of chunks) {
       const wc = wordCount(chunk);
       const duration = speechRateWps > 0 ? Number((wc / speechRateWps).toFixed(1)) : 0;
@@ -552,8 +574,13 @@ export function normalizeBlockMetaResponse(
   };
 }
 
-export function buildDeterministicBlocks(scriptText: string, speechRateWps: number, maxChars = 200): BlockDraft[] {
-  return buildFallbackBlocks(scriptText, speechRateWps, maxChars);
+export function buildDeterministicBlocks(
+  scriptText: string,
+  speechRateWps: number,
+  maxChars = 200,
+  maxWords?: number
+): BlockDraft[] {
+  return buildFallbackBlocks(scriptText, speechRateWps, maxChars, maxWords);
 }
 
 export function buildFallbackMeta(sourceText: string, index: number): BlockMeta {

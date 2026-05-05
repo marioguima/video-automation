@@ -125,11 +125,11 @@ test(
   });
   assert.equal(settingsRes.statusCode, 200);
   const originalSettings = settingsRes.json() as {
-    llm?: { baseUrl?: string };
+    llm?: { providers?: { ollama?: { baseUrl?: string } } };
     comfy?: { baseUrl?: string };
     tts?: { baseUrl?: string };
   };
-  const originalLlmBaseUrl = String(originalSettings.llm?.baseUrl ?? "");
+  const originalLlmBaseUrl = String(originalSettings.llm?.providers?.ollama?.baseUrl ?? "");
   const originalComfyBaseUrl = String(originalSettings.comfy?.baseUrl ?? "");
   const originalTtsBaseUrl = String(originalSettings.tts?.baseUrl ?? "");
   let settingsOverridden = false;
@@ -142,7 +142,11 @@ test(
       url: "/settings",
       headers: { cookie },
       payload: {
-        llm: { baseUrl: "http://127.0.0.1:11435" },
+        llm: {
+          providers: {
+            ollama: { baseUrl: "http://127.0.0.1:11435" }
+          }
+        },
         comfy: { baseUrl: "http://127.0.0.1:8189" },
         tts: { baseUrl: "http://127.0.0.1:8021" }
       }

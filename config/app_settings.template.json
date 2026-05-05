@@ -4,28 +4,47 @@
     "mode": "dark"
   },
   "llm": {
-    "provider": "ollama",
     "providers": {
       "ollama": {
+        "provider": "ollama",
+        "displayName": "Ollama local",
         "baseUrl": "http://127.0.0.1:11434",
         "timeoutMs": 600000
       },
       "gemini": {
+        "provider": "gemini",
+        "displayName": "Google Gemini",
         "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
         "apiKey": "",
         "timeoutMs": 600000
       },
       "openai": {
+        "provider": "openai",
+        "displayName": "OpenAI API",
         "baseUrl": "https://api.openai.com/v1",
         "apiKey": "",
         "timeoutMs": 600000
       }
     },
-    "routing": {
-      "segmentStructureModel": "",
-      "segmentStructureFallbackModel": "",
-      "segmentBlockModel": "",
-      "segmentBlockFallbackModel": ""
+    "stages": {
+      "structure": {
+        "priorities": [
+          {
+            "providerId": "ollama",
+            "model": "",
+            "fallbackModel": ""
+          }
+        ]
+      },
+      "block": {
+        "priorities": [
+          {
+            "providerId": "ollama",
+            "model": "",
+            "fallbackModel": ""
+          }
+        ]
+      }
     }
   },
   "comfy": {

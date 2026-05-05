@@ -1,18 +1,32 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export type LlmProviderBase = "ollama" | "gemini" | "openai";
+
 export type LlmProviderSettings = {
+  provider?: LlmProviderBase;
+  displayName?: string;
   baseUrl?: string;
-  model?: string;
   apiKey?: string;
   timeoutMs?: number;
 };
 
-export type LlmRoutingSettings = {
-  segmentStructureModel?: string;
-  segmentStructureFallbackModel?: string;
-  segmentBlockModel?: string;
-  segmentBlockFallbackModel?: string;
+export type LlmStageKey = "structure" | "block";
+
+export type LlmStageStrategySettings = {
+  providerId?: string;
+  provider?: string;
+  model?: string;
+  fallbackModel?: string;
+};
+
+export type LlmStageConfig = {
+  priorities?: LlmStageStrategySettings[];
+};
+
+export type LlmStagesSettings = {
+  structure?: LlmStageConfig;
+  block?: LlmStageConfig;
 };
 
 export type TtsProviderKind =
@@ -118,17 +132,8 @@ const VISUAL_MODEL_KINDS = [
 export type AppSettings = {
   theme?: { family?: string; mode?: string };
   llm?: {
-    provider?: string;
     providers?: Record<string, LlmProviderSettings | undefined>;
-    routing?: LlmRoutingSettings;
-    // Legacy flat fields are accepted for migration only.
-    baseUrl?: string;
-    model?: string;
-    apiKeys?: {
-      gemini?: string;
-      openai?: string;
-    };
-    timeoutMs?: number;
+    stages?: LlmStagesSettings;
   };
   comfy?: {
     baseUrl?: string;
@@ -180,24 +185,36 @@ type EnsureAppSettingsFileOptions = LegacySettingsOptions & {
 const FALLBACK_TEMPLATE: AppSettings = {
   theme: { family: "premium", mode: "dark" },
   llm: {
-    provider: "ollama",
     providers: {
       ollama: {
+        provider: "ollama",
+        displayName: "Ollama local",
         baseUrl: "http://127.0.0.1:11434",
         timeoutMs: 600000
       },
       gemini: {
+        provider: "gemini",
+        displayName: "Google Gemini",
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
         apiKey: "",
         timeoutMs: 600000
       },
       openai: {
+        provider: "openai",
+        displayName: "OpenAI API",
         baseUrl: "https://api.openai.com/v1",
         apiKey: "",
         timeoutMs: 600000
       }
     },
-    routing: {}
+    stages: {
+      structure: {
+        priorities: [{ providerId: "ollama", model: "", fallbackModel: "" }]
+      },
+      block: {
+        priorities: [{ providerId: "ollama", model: "", fallbackModel: "" }]
+      }
+    }
   },
   comfy: {
     baseUrl: "http://127.0.0.1:8188",
@@ -379,46 +396,52 @@ function hasMeaningfulProviderApiKey(provider: string, settings: LlmProviderSett
   return Boolean(settings?.apiKey?.trim());
 }
 
-export function normalizeLlmProvider(raw: string | undefined): "ollama" | "gemini" | "openai" {
+export function normalizeLlmProvider(raw: string | undefined): LlmProviderBase {
   const provider = (raw ?? "ollama").trim().toLowerCase();
   return provider === "gemini" || provider === "openai" ? provider : "ollama";
+}
+
+function normalizeLlmProviderForId(providerId: string, raw: string | undefined): LlmProviderBase {
+  const providerFromId = providerId.trim().toLowerCase();
+  if (providerFromId === "ollama" || providerFromId === "gemini" || providerFromId === "openai") {
+    return providerFromId;
+  }
+  return normalizeLlmProvider(raw);
+}
+
+export function resolveDefaultLlmModel(provider: LlmProviderBase, ollamaModel = "llama3.2:3b"): string {
+  if (provider === "gemini") return "gemma-4-26b-a4b-it";
+  if (provider === "openai") return "gpt-4o-mini";
+  return ollamaModel;
 }
 
 export function resolveLlmProviders(settings: AppSettings["llm"] | undefined, template: AppSettings = FALLBACK_TEMPLATE): Record<string, LlmProviderSettings> {
   const templateProviders = template.llm?.providers ?? FALLBACK_TEMPLATE.llm?.providers ?? {};
   const providers: Record<string, LlmProviderSettings> = {};
 
-  for (const [provider, providerSettings] of Object.entries(templateProviders)) {
-    providers[provider] = { ...(providerSettings ?? {}) };
+  for (const [providerId, providerSettings] of Object.entries(templateProviders)) {
+    providers[providerId] = { ...(providerSettings ?? {}) };
   }
-  for (const [provider, providerSettings] of Object.entries(settings?.providers ?? {})) {
-    providers[provider] = {
-      ...(providers[provider] ?? {}),
+  for (const [providerId, providerSettings] of Object.entries(settings?.providers ?? {})) {
+    providers[providerId] = {
+      ...(providers[providerId] ?? {}),
       ...(providerSettings ?? {})
     };
   }
-
-  const activeProvider = normalizeLlmProvider(settings?.provider ?? template.llm?.provider);
-  providers[activeProvider] = {
-    ...(providers[activeProvider] ?? {}),
-    ...(settings?.baseUrl ? { baseUrl: settings.baseUrl } : {}),
-    ...(settings?.model ? { model: settings.model } : {}),
-    ...(settings?.timeoutMs !== undefined ? { timeoutMs: settings.timeoutMs } : {})
-  };
-  if (settings?.apiKeys?.gemini && !hasMeaningfulProviderApiKey("gemini", providers.gemini)) {
-    providers.gemini = { ...(providers.gemini ?? {}), apiKey: settings.apiKeys.gemini };
-  }
-  if (settings?.apiKeys?.openai && !hasMeaningfulProviderApiKey("openai", providers.openai)) {
-    providers.openai = { ...(providers.openai ?? {}), apiKey: settings.apiKeys.openai };
-  }
-
-  for (const [provider, providerSettings] of Object.entries(providers)) {
+  for (const [providerId, providerSettings] of Object.entries(providers)) {
+    const provider = normalizeLlmProviderForId(providerId, providerSettings.provider);
     if (provider === "ollama") {
       const { apiKey: _ignored, ...withoutApiKey } = providerSettings;
-      providers[provider] = withoutApiKey;
+      providers[providerId] = {
+        ...withoutApiKey,
+        provider,
+        displayName: withoutApiKey.displayName ?? providerId
+      };
     } else {
-      providers[provider] = {
+      providers[providerId] = {
         ...providerSettings,
+        provider,
+        displayName: providerSettings.displayName ?? providerId,
         apiKey: providerSettings.apiKey ?? ""
       };
     }
@@ -431,29 +454,51 @@ function normalizeOptionalRoutingValue(value: string | undefined): string | unde
   return normalized ? normalized : undefined;
 }
 
-export function normalizeLlmRouting(settings: AppSettings["llm"] | undefined): LlmRoutingSettings {
+function normalizeLlmStrategy(strategy: LlmStageStrategySettings | undefined): LlmStageStrategySettings | null {
+  if (!strategy) return null;
+  const providerId = (strategy.providerId ?? strategy.provider ?? "").trim();
+  if (!providerId) return null;
   return {
-    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentStructureModel)
-      ? { segmentStructureModel: normalizeOptionalRoutingValue(settings?.routing?.segmentStructureModel) }
-      : {}),
-    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentStructureFallbackModel)
-      ? { segmentStructureFallbackModel: normalizeOptionalRoutingValue(settings?.routing?.segmentStructureFallbackModel) }
-      : {}),
-    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentBlockModel)
-      ? { segmentBlockModel: normalizeOptionalRoutingValue(settings?.routing?.segmentBlockModel) }
-      : {}),
-    ...(normalizeOptionalRoutingValue(settings?.routing?.segmentBlockFallbackModel)
-      ? { segmentBlockFallbackModel: normalizeOptionalRoutingValue(settings?.routing?.segmentBlockFallbackModel) }
+    providerId,
+    ...(normalizeOptionalRoutingValue(strategy.model) ? { model: normalizeOptionalRoutingValue(strategy.model) } : {}),
+    ...(normalizeOptionalRoutingValue(strategy.fallbackModel)
+      ? { fallbackModel: normalizeOptionalRoutingValue(strategy.fallbackModel) }
       : {})
   };
 }
 
+function normalizeLlmStageConfig(stage: LlmStageConfig | undefined): LlmStageConfig {
+  const priorities = (stage?.priorities ?? [])
+    .map((strategy) => normalizeLlmStrategy(strategy))
+    .filter((strategy): strategy is LlmStageStrategySettings => Boolean(strategy));
+  return priorities.length > 0 ? { priorities } : { priorities: [] };
+}
+
+export function normalizeLlmStages(
+  settings: AppSettings["llm"] | undefined,
+  template: AppSettings = FALLBACK_TEMPLATE
+): LlmStagesSettings {
+  const merged = deepMerge(template.llm?.stages ?? {}, settings?.stages ?? {});
+  return {
+    structure: normalizeLlmStageConfig(merged.structure),
+    block: normalizeLlmStageConfig(merged.block)
+  };
+}
+
+export function resolveLlmStageConfig(
+  stage: LlmStageKey,
+  settings: AppSettings["llm"] | undefined,
+  template: AppSettings = FALLBACK_TEMPLATE
+): LlmStageConfig {
+  return normalizeLlmStages(settings, template)[stage] ?? { priorities: [] };
+}
+
 export function resolveLlmProviderSettings(
-  provider: string,
+  providerId: string,
   settings: AppSettings["llm"] | undefined,
   template: AppSettings = FALLBACK_TEMPLATE
 ): LlmProviderSettings {
-  return resolveLlmProviders(settings, template)[provider] ?? {};
+  return resolveLlmProviders(settings, template)[providerId] ?? {};
 }
 
 export function normalizeTtsProvider(raw: string | undefined): TtsProviderKind {
@@ -650,6 +695,17 @@ export function normalizeTtsSettings(
   }
 
   return {
+    provider,
+    defaultProviderId,
+    defaultLanguage: language ?? null,
+    baseUrl: providers[defaultProviderId]?.baseUrl ?? template?.baseUrl,
+    timeoutUs: providers[defaultProviderId]?.timeoutUs ?? template?.timeoutUs,
+    language: providers[defaultProviderId]?.language ?? language ?? null,
+    defaultVoiceId: providers[defaultProviderId]?.defaultVoiceId ?? null,
+    targetChars: normalizeOptionalPositiveNumber(providers[defaultProviderId]?.targetChars),
+    maxChars: normalizeOptionalPositiveNumber(providers[defaultProviderId]?.maxChars),
+    targetSpeechSeconds: normalizeOptionalPositiveNumber(providers[defaultProviderId]?.targetSpeechSeconds),
+    maxSpeechSeconds: normalizeOptionalPositiveNumber(providers[defaultProviderId]?.maxSpeechSeconds),
     providers,
     languageRoutes
   };
@@ -749,13 +805,12 @@ export function normalizeVisualGenerationSettings(
 
 function normalizeAppSettings(settings: AppSettings, template: AppSettings): AppSettings {
   const merged = deepMerge(template, settings);
-  const provider = normalizeLlmProvider(merged.llm?.provider ?? template.llm?.provider);
+  const providers = resolveLlmProviders(merged.llm, template);
   return {
     ...merged,
     llm: {
-      provider,
-      providers: resolveLlmProviders(merged.llm, template),
-      routing: normalizeLlmRouting(merged.llm)
+      providers,
+      stages: normalizeLlmStages(merged.llm, template)
     },
     tts: normalizeTtsSettings(merged.tts, template.tts),
     visualGeneration: normalizeVisualGenerationSettings(merged.visualGeneration, template.visualGeneration)
@@ -845,15 +900,23 @@ export function ensureAppSettingsFile(options: EnsureAppSettingsFileOptions): {
 }
 
 export function getMissingAppSettingsSecrets(settings: AppSettings): AppSettingsSecretIssue[] {
-  const provider = normalizeLlmProvider(settings.llm?.provider);
-  if (provider === "ollama") return [];
-  const providerSettings = resolveLlmProviderSettings(provider, settings.llm);
-  if (providerSettings.apiKey?.trim()) return [];
-  return [
-    {
-      provider,
-      field: "apiKey",
-      message: `${provider} API key is required when ${provider} is selected`
+  const issues: AppSettingsSecretIssue[] = [];
+  const stages = normalizeLlmStages(settings.llm);
+  const referencedProviders = new Set<string>();
+  for (const stage of [stages.structure, stages.block]) {
+    for (const strategy of stage?.priorities ?? []) {
+      if (strategy.providerId) referencedProviders.add(strategy.providerId);
     }
-  ];
+  }
+  for (const providerId of referencedProviders) {
+    const providerSettings = resolveLlmProviderSettings(providerId, settings.llm);
+    if ((providerSettings.provider ?? "ollama") === "ollama") continue;
+    if (providerSettings.apiKey?.trim()) continue;
+    issues.push({
+      provider: providerId,
+      field: "apiKey",
+      message: `${providerId} API key is required by one or more LLM stage strategies`
+    });
+  }
+  return issues;
 }

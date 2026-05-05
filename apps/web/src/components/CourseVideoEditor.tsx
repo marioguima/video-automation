@@ -3071,7 +3071,7 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
       });
       setIsSegmenting(true);
       setSegmentPhase('waiting');
-      setSegmentProgress({ current: 0, total: blocks.length });
+      setSegmentProgress(null);
       if (purge) {
         setBlocks([]);
         setActiveBlockId('');
