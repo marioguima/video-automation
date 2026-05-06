@@ -1586,13 +1586,25 @@ async function ensureSlideTemplates(): Promise<void> {
       kind: "text",
       fileName: "slide_text_v0.png"
     },
-    {
-      id: "slide-image-v1",
-      label: "Imagem (v1)",
-      kind: "image",
-      fileName: "slide_image_v1.png"
-    }
-  ];
+      {
+        id: "slide-image-v1",
+        label: "Imagem (v1)",
+        kind: "image",
+        fileName: "slide_image_v1.png"
+      },
+      {
+        id: "slide-image-clean-v1",
+        label: "Imagem limpa (v1)",
+        kind: "image",
+        fileName: "slide_image_clean_v1.png"
+      },
+      {
+        id: "slide-image-focus-v1",
+        label: "Imagem foco (v1)",
+        kind: "image",
+        fileName: "slide_image_focus_v1.png"
+      }
+    ];
   for (const template of defaults) {
     await prisma.slideTemplate.upsert({
       where: { id: template.id },

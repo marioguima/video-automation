@@ -54,7 +54,12 @@ import {
 } from "@vizlec/shared";
 import { createPrismaClient } from "@vizlec/db";
 
-import { renderImageSlidePng, renderTextSlidePng } from "./slideRenderer.js";
+import {
+  renderImageCleanSlidePng,
+  renderImageFocusSlidePng,
+  renderImageSlidePng,
+  renderTextSlidePng
+} from "./slideRenderer.js";
 import {
   buildInventoryDelta,
   collectAudioInventorySnapshot,
@@ -117,6 +122,25 @@ type SlideTemplateRecord = {
   fileName: string;
   isActive: boolean;
 };
+
+function templateUsesOnScreen(template: SlideTemplateRecord): boolean {
+  return template.id === "slide-text-v0" || template.id === "slide-image-v1" || template.kind === "text";
+}
+
+async function resolveLessonVersionOnScreenRequirement(options: {
+  preferredTemplateId?: string | null;
+  fallbackTextLayerMode?: TextLayerMode;
+}): Promise<boolean> {
+  const { preferredTemplateId, fallbackTextLayerMode } = options;
+  const templateId = preferredTemplateId?.trim();
+  if (templateId) {
+    const template = await resolveSlideTemplateById(templateId);
+    if (template?.isActive) {
+      return templateUsesOnScreen(template);
+    }
+  }
+  return fallbackTextLayerMode !== "none";
+}
 
 type ComfyWorkflowNode = {
   inputs?: Record<string, unknown>;
@@ -4753,6 +4777,65 @@ async function resolveTemplateForImageJob(job: JobRecord): Promise<SlideTemplate
   return resolveAnyActiveSlideTemplate();
 }
 
+async function renderSlideTemplatePng(options: {
+  template: SlideTemplateRecord;
+  blockId: string;
+  imagePath: string | null;
+  imageSource: string;
+  onScreen: OnScreen | null;
+  bullets: string[];
+  outputPath: string;
+}): Promise<{ imageLoaded: boolean | null; imageSource: string }> {
+  const { template, blockId, imagePath, onScreen, bullets, outputPath } = options;
+  let imageSource = options.imageSource;
+  const imageDataUrl = imagePath ? await loadImageDataUrl(imagePath) : null;
+  let imageUrl = imageDataUrl;
+  if (!imageUrl && imagePath) {
+    imageUrl = `http://127.0.0.1:${config.apiPort}/blocks/${blockId}/image/raw?v=${Date.now()}`;
+    imageSource = "api_raw";
+  } else if (imageUrl) {
+    imageSource = "asset_data_url";
+  }
+  if (!imageUrl && imagePath) {
+    imageUrl = pathToFileURL(imagePath).toString();
+    imageSource = "asset_file_url";
+  }
+
+  const renderWithCurrentUrl = async (url: string | null | undefined): Promise<boolean | null> => {
+    if (template.id === "slide-image-clean-v1") {
+      return renderImageCleanSlidePng({ imageUrl: url }, outputPath);
+    }
+    if (template.id === "slide-image-focus-v1") {
+      return renderImageFocusSlidePng({ imageUrl: url }, outputPath);
+    }
+    if (template.kind === "image") {
+      return renderImageSlidePng({ title: onScreen?.title ?? "", bullets, imageUrl: url }, outputPath);
+    }
+    if (template.kind === "text") {
+      return renderTextSlidePng({ title: onScreen?.title ?? "", bullets, imageUrl: url }, outputPath);
+    }
+    throw new Error(`Unsupported template kind: ${template.kind}`);
+  };
+
+  let imageLoaded = await renderWithCurrentUrl(imageUrl);
+  if (!imageLoaded && imagePath) {
+    const fileRetryUrl = pathToFileURL(imagePath).toString();
+    imageLoaded = await renderWithCurrentUrl(fileRetryUrl);
+    if (imageLoaded) {
+      imageSource = "asset_file_url_retry";
+    }
+  }
+  if (!imageLoaded && imagePath) {
+    const retryUrl = `http://127.0.0.1:${config.apiPort}/blocks/${blockId}/image/raw?v=${Date.now()}`;
+    imageLoaded = await renderWithCurrentUrl(retryUrl);
+    if (imageLoaded) {
+      imageSource = "api_raw_retry";
+    }
+  }
+
+  return { imageLoaded, imageSource };
+}
+
 function findFirstImageFile(dirPath: string): string | null {
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -4876,16 +4959,16 @@ async function renderSlideForSingleBlock(options: {
   moduleId: string;
   lessonId: string;
   versionId: string;
-}): Promise<void> {
-  const { job, template, block, courseId, moduleId, lessonId, versionId } = options;
-  const onScreen = parseOnScreenJson(block.onScreenJson);
-  if (!onScreen) {
-    throw new Error(`block ${block.index} missing onScreenJson`);
-  }
-  const bullets = (onScreen.bullets ?? []).filter(Boolean).slice(0, 5);
-  const slideDir = blockSlideDir(courseId, moduleId, lessonId, versionId, block.index);
-  ensureDir(slideDir);
-  const outputPath = path.join(slideDir, template.fileName);
+  }): Promise<void> {
+    const { job, template, block, courseId, moduleId, lessonId, versionId } = options;
+    const onScreen = templateUsesOnScreen(template) ? parseOnScreenJson(block.onScreenJson) : null;
+    if (templateUsesOnScreen(template) && !onScreen) {
+      throw new Error(`block ${block.index} missing onScreenJson`);
+    }
+    const bullets = (onScreen?.bullets ?? []).filter(Boolean).slice(0, 5);
+    const slideDir = blockSlideDir(courseId, moduleId, lessonId, versionId, block.index);
+    ensureDir(slideDir);
+    const outputPath = path.join(slideDir, template.fileName);
 
   let imagePath: string | null = null;
   let imageSource = "none";
@@ -4899,80 +4982,18 @@ async function renderSlideForSingleBlock(options: {
     if (imageAsset?.path && fs.existsSync(imageAsset.path)) {
       imagePath = imageAsset.path;
       imageSource = "asset";
+      }
     }
-  }
 
-  if (template.kind === "image") {
-    const imageDataUrl = imagePath ? await loadImageDataUrl(imagePath) : null;
-    let imageUrl = imageDataUrl;
-    if (!imageUrl && imagePath) {
-      imageUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-      imageSource = "api_raw";
-    } else if (imageUrl) {
-      imageSource = "asset_data_url";
-    }
-    if (!imageUrl && imagePath) {
-      imageUrl = pathToFileURL(imagePath).toString();
-      imageSource = "asset_file_url";
-    }
-    imageLoaded = await renderImageSlidePng(
-      { title: onScreen.title, bullets, imageUrl },
+    ({ imageLoaded, imageSource } = await renderSlideTemplatePng({
+      template,
+      blockId: block.id,
+      imagePath,
+      imageSource,
+      onScreen,
+      bullets,
       outputPath
-    );
-    if (!imageLoaded && imagePath) {
-      const fileRetryUrl = pathToFileURL(imagePath).toString();
-      imageLoaded = await renderImageSlidePng(
-        { title: onScreen.title, bullets, imageUrl: fileRetryUrl },
-        outputPath
-      );
-      if (imageLoaded) {
-        imageSource = "asset_file_url_retry";
-      }
-    }
-    if (!imageLoaded && imagePath) {
-      const retryUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-      imageLoaded = await renderImageSlidePng(
-        { title: onScreen.title, bullets, imageUrl: retryUrl },
-        outputPath
-      );
-      if (imageLoaded) {
-        imageSource = "api_raw_retry";
-      }
-    }
-  } else if (template.kind === "text") {
-    const imageDataUrl = imagePath ? await loadImageDataUrl(imagePath) : null;
-    let imageUrl = imageDataUrl;
-    if (!imageUrl && imagePath) {
-      imageUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-      imageSource = "api_raw";
-    } else if (imageUrl) {
-      imageSource = "asset_data_url";
-    }
-    if (!imageUrl && imagePath) {
-      imageUrl = pathToFileURL(imagePath).toString();
-      imageSource = "asset_file_url";
-    }
-    imageLoaded = await renderTextSlidePng({ title: onScreen.title, bullets, imageUrl }, outputPath);
-    if (!imageLoaded && imagePath) {
-      const fileRetryUrl = pathToFileURL(imagePath).toString();
-      imageLoaded = await renderTextSlidePng(
-        { title: onScreen.title, bullets, imageUrl: fileRetryUrl },
-        outputPath
-      );
-      if (imageLoaded) {
-        imageSource = "asset_file_url_retry";
-      }
-    }
-    if (!imageLoaded && imagePath) {
-      const retryUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-      imageLoaded = await renderTextSlidePng({ title: onScreen.title, bullets, imageUrl: retryUrl }, outputPath);
-      if (imageLoaded) {
-        imageSource = "api_raw_retry";
-      }
-    }
-  } else {
-    throw new Error(`Unsupported template kind: ${template.kind}`);
-  }
+    }));
 
   await prisma.asset.deleteMany({
     where: { blockId: block.id, kind: "slide_png", templateId: template.id }
@@ -5055,12 +5076,13 @@ async function renderSlidesForTemplate(options: {
   });
   await notifyRunningPhase(job, "generation");
 
-  let failures = 0;
-  for (const block of blocks) {
-    await assertLeaseValid(job.id);
-    const onScreen =
-      parseOnScreenJson(block.onScreenJson) ?? buildFallbackMeta(block.sourceText, block.index).onScreen;
-    const bullets = (onScreen.bullets ?? []).filter(Boolean).slice(0, 5);
+    let failures = 0;
+    for (const block of blocks) {
+      await assertLeaseValid(job.id);
+      const onScreen = templateUsesOnScreen(template)
+        ? parseOnScreenJson(block.onScreenJson) ?? buildFallbackMeta(block.sourceText, block.index).onScreen ?? null
+        : null;
+      const bullets = (onScreen?.bullets ?? []).filter(Boolean).slice(0, 5);
     const slideDir = blockSlideDir(
       course.id,
       moduleRecord.id,
@@ -5086,81 +5108,19 @@ async function renderSlidesForTemplate(options: {
       }
     }
 
-    try {
-      if (template.kind === "image") {
-        const imageDataUrl = imagePath ? await loadImageDataUrl(imagePath) : null;
-        let imageUrl = imageDataUrl;
-        if (!imageUrl && imagePath) {
-          imageUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-          imageSource = "api_raw";
-        } else if (imageUrl) {
-          imageSource = "asset_data_url";
-        }
-        if (!imageUrl && imagePath) {
-          imageUrl = pathToFileURL(imagePath).toString();
-          imageSource = "asset_file_url";
-        }
-        imageLoaded = await renderImageSlidePng(
-          { title: onScreen.title, bullets, imageUrl },
+      try {
+        ({ imageLoaded, imageSource } = await renderSlideTemplatePng({
+          template,
+          blockId: block.id,
+          imagePath,
+          imageSource,
+          onScreen,
+          bullets,
           outputPath
-        );
-        if (!imageLoaded && imagePath) {
-          const fileRetryUrl = pathToFileURL(imagePath).toString();
-          imageLoaded = await renderImageSlidePng(
-            { title: onScreen.title, bullets, imageUrl: fileRetryUrl },
-            outputPath
-          );
-          if (imageLoaded) {
-            imageSource = "asset_file_url_retry";
-          }
-        }
-        if (!imageLoaded && imagePath) {
-          const retryUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-          imageLoaded = await renderImageSlidePng(
-            { title: onScreen.title, bullets, imageUrl: retryUrl },
-            outputPath
-          );
-          if (imageLoaded) {
-            imageSource = "api_raw_retry";
-          }
-        }
-      } else if (template.kind === "text") {
-        const imageDataUrl = imagePath ? await loadImageDataUrl(imagePath) : null;
-        let imageUrl = imageDataUrl;
-        if (!imageUrl && imagePath) {
-          imageUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-          imageSource = "api_raw";
-        } else if (imageUrl) {
-          imageSource = "asset_data_url";
-        }
-        if (!imageUrl && imagePath) {
-          imageUrl = pathToFileURL(imagePath).toString();
-          imageSource = "asset_file_url";
-        }
-        imageLoaded = await renderTextSlidePng({ title: onScreen.title, bullets, imageUrl }, outputPath);
-        if (!imageLoaded && imagePath) {
-          const fileRetryUrl = pathToFileURL(imagePath).toString();
-          imageLoaded = await renderTextSlidePng(
-            { title: onScreen.title, bullets, imageUrl: fileRetryUrl },
-            outputPath
-          );
-          if (imageLoaded) {
-            imageSource = "asset_file_url_retry";
-          }
-        }
-        if (!imageLoaded && imagePath) {
-          const retryUrl = `http://127.0.0.1:${config.apiPort}/blocks/${block.id}/image/raw?v=${Date.now()}`;
-          imageLoaded = await renderTextSlidePng({ title: onScreen.title, bullets, imageUrl: retryUrl }, outputPath);
-          if (imageLoaded) {
-            imageSource = "api_raw_retry";
-          }
-        }
-      } else {
-        throw new Error(`Unsupported template kind: ${template.kind}`);
-      }
+        }));
 
-      await prisma.asset.deleteMany({
-        where: { blockId: block.id, kind: "slide_png", templateId: template.id }
+        await prisma.asset.deleteMany({
+          where: { blockId: block.id, kind: "slide_png", templateId: template.id }
       });
       await prisma.asset.create({
         data: {
@@ -6344,6 +6304,7 @@ async function generateBlockMeta(options: {
   model: string;
   keepAlive?: string | number;
   releaseAfter?: boolean;
+  includeOnScreen?: boolean;
 }): Promise<{ meta: BlockMeta; ms: number; provider: string; model: string; fallbackUsed: boolean }> {
   const { job, block, index, total, prevText, nextText } = options;
   const attempts = resolveLlmStageAttempts("segment_block");
@@ -6352,7 +6313,8 @@ async function generateBlockMeta(options: {
     total,
     sourceText: block.sourceText,
     prevText,
-    nextText
+    nextText,
+    includeOnScreen: options.includeOnScreen
   });
   const startedAt = Date.now();
   logJobEvent("segment_block_meta_started", job, {
@@ -6422,7 +6384,9 @@ async function generateBlockMeta(options: {
           promptChars: prompt.length,
           responseChars: llmResult.content.length
         });
-        const meta = normalizeBlockMetaResponse(content, block.sourceText, block.index);
+        const meta = normalizeBlockMetaResponse(content, block.sourceText, block.index, {
+          includeOnScreen: options.includeOnScreen
+        });
         successfulAttempt = attempt;
         logJobEvent("segment_block_meta_completed", job, {
           block_index: block.index,
@@ -6502,7 +6466,9 @@ async function generateBlockMeta(options: {
       error: serializeError(err),
       failures
     });
-    const fallback = buildFallbackMeta(block.sourceText, block.index);
+    const fallback = buildFallbackMeta(block.sourceText, block.index, {
+      includeOnScreen: options.includeOnScreen
+    });
     logJobEvent("segment_block_meta_fallback_used", job, {
       block_index: block.index,
       reason: failures
@@ -6550,7 +6516,7 @@ async function generateBlocksForVersion(options: {
   const { job, versionId, scriptText, speechRateWps, model } = options;
   const versionScope = await prisma.lessonVersion.findUnique({
     where: { id: versionId },
-    select: { workspaceId: true }
+    select: { workspaceId: true, preferredTemplateId: true }
   });
   if (!versionScope) {
     throw new Error("lesson version not found");
@@ -6562,6 +6528,10 @@ async function generateBlocksForVersion(options: {
     scriptText,
     speechRateWps,
     model
+  });
+  const includeOnScreen = await resolveLessonVersionOnScreenRequirement({
+    preferredTemplateId: versionScope.preferredTemplateId,
+    fallbackTextLayerMode: segmentation.context.textLayerMode
   });
   const drafts = segmentation.drafts;
   await prisma.job.deleteMany({ where: { block: { lessonVersionId: versionId } } });
@@ -6624,7 +6594,8 @@ async function generateBlocksForVersion(options: {
           prevText,
           nextText,
           model,
-          keepAlive
+          keepAlive,
+          includeOnScreen
         });
         recordLlmResult(result, draft.index);
         const created = await prisma.block.findFirst({
@@ -6636,7 +6607,7 @@ async function generateBlocksForVersion(options: {
           ttsText: sanitizeNarratedScriptText(draft.sourceText),
           wordCount: draft.wordCount,
           durationEstimateS: draft.durationEstimateS,
-          onScreenJson: JSON.stringify(result.meta.onScreen),
+          onScreenJson: result.meta.onScreen ? JSON.stringify(result.meta.onScreen) : null,
           imagePromptJson: JSON.stringify(result.meta.imagePrompt),
           animationPromptJson: JSON.stringify(result.meta.animationPrompt),
           directionNotesJson: JSON.stringify(result.meta.directionNotes),
@@ -6735,13 +6706,14 @@ async function generateBlocksForVersion(options: {
             prevText,
             nextText,
             model,
-            keepAlive
+            keepAlive,
+            includeOnScreen
           });
           recordLlmResult(result, draft.index);
           await prisma.block.updateMany({
             where: { lessonVersionId: versionId, index: draft.index },
             data: {
-              onScreenJson: JSON.stringify(result.meta.onScreen),
+              onScreenJson: result.meta.onScreen ? JSON.stringify(result.meta.onScreen) : null,
               imagePromptJson: JSON.stringify(result.meta.imagePrompt),
               animationPromptJson: JSON.stringify(result.meta.animationPrompt),
               directionNotesJson: JSON.stringify(result.meta.directionNotes),
@@ -7526,6 +7498,10 @@ async function runJob(job: JobRecord): Promise<void> {
       if (block.lessonVersionId !== job.lessonVersionId) {
         throw new Error("block does not belong to job lesson version");
       }
+      const versionScope = await prisma.lessonVersion.findUnique({
+        where: { id: block.lessonVersionId },
+        select: { preferredTemplateId: true }
+      });
       const siblingBlocks = await prisma.block.findMany({
         where: { lessonVersionId: block.lessonVersionId },
         orderBy: { index: "asc" },
@@ -7557,12 +7533,15 @@ async function runJob(job: JobRecord): Promise<void> {
         prevText,
         nextText,
         model: resolveLlmStageAttempts("segment_block")[0]?.model ?? resolveDefaultLlmModel("ollama", config.ollamaModel),
-        releaseAfter: false
+        releaseAfter: false,
+        includeOnScreen: await resolveLessonVersionOnScreenRequirement({
+          preferredTemplateId: versionScope?.preferredTemplateId ?? null
+        })
       });
       await prisma.block.update({
         where: { id: block.id },
         data: {
-          onScreenJson: JSON.stringify(result.meta.onScreen),
+          onScreenJson: result.meta.onScreen ? JSON.stringify(result.meta.onScreen) : null,
           imagePromptJson: JSON.stringify(result.meta.imagePrompt),
           animationPromptJson: JSON.stringify(result.meta.animationPrompt),
           directionNotesJson: JSON.stringify(result.meta.directionNotes),

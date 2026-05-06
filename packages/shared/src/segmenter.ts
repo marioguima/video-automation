@@ -76,7 +76,7 @@ export type BlockDraft = {
 };
 
 export type BlockMeta = {
-  onScreen: OnScreen;
+  onScreen?: OnScreen;
   imagePrompt: ImagePrompt;
   animationPrompt: AnimationPrompt;
   directionNotes: DirectionNotes;
@@ -377,11 +377,13 @@ function fallbackAnimationPrompt(sourceText: string, index: number): AnimationPr
   };
 }
 
-function fallbackDirectionNotes(sourceText: string): DirectionNotes {
+function fallbackDirectionNotes(sourceText: string, includeOnScreen = true): DirectionNotes {
   const trimmed = normalizeWhitespace(sourceText);
   return {
     notes: trimmed
-      ? `Use this scene to support the narrated idea without adding visible text unless it is present in on_screen. Keep the visual focused on: ${trimmed.slice(0, 180)}`
+      ? includeOnScreen
+        ? `Use this scene to support the narrated idea without adding visible text unless it is present in on_screen. Keep the visual focused on: ${trimmed.slice(0, 180)}`
+        : `Use this scene to support the narrated idea without adding visible text. Keep the visual focused on: ${trimmed.slice(0, 180)}`
       : "Use this scene to support the narration with clear visual continuity."
   };
 }
@@ -468,8 +470,9 @@ export function buildBlockMetaPrompt(options: {
   sourceText: string;
   prevText?: string;
   nextText?: string;
+  includeOnScreen?: boolean;
 }): string {
-  const { index, total, sourceText, prevText, nextText } = options;
+  const { index, total, sourceText, prevText, nextText, includeOnScreen = true } = options;
   const contextParts = [];
   if (prevText) {
     contextParts.push(`Previous context (do not quote verbatim):\n${prevText}`);
@@ -487,25 +490,25 @@ CRITICAL OUTPUT CONTRACT:
 - Do not use Markdown, bullets outside JSON, code fences, comments, explanations, or copied instructions.
 - If uncertain, still return the JSON object using the provided block text.
 
-Task: generate on_screen, image_prompt and animation_prompt for block ${index} of ${total}.
+Task: generate ${includeOnScreen ? "on_screen, " : ""}image_prompt and animation_prompt for block ${index} of ${total}.
 Use ONLY the block text as source. Do not invent facts.
 
 Rules:
 1) Do not rewrite the block text.
-2) on_screen must be in PT-BR only.
-3) on_screen: title max 8 words; bullets 2–5 items, max 10 words each.
-4) image_prompt must be in English only. Use "block_prompt" as the main description and optionally "avoid" and "seed_hint".
-5) image_prompt must describe a concrete visual scene derived from the block text, not a summary or slogan.
-6) image_prompt must avoid any visible text, typography, logos, watermarks, UI, posters, banners, signs, labels, captions, or subtitles.
-7) image_prompt should be 2–4 sentences and include: subject, environment, action, camera/framing, and lighting.
-8) image_prompt.seed must be an integer number (for KSampler).
-9) animation_prompt must be in English only and describe how the generated image should move.
-10) animation_prompt should include "prompt", "motion", "camera" and "duration_hint".
-11) Return ONLY valid JSON in the format below.
+2) ${includeOnScreen ? "on_screen must be in PT-BR only." : "Do not generate on_screen, captions, bullets, highlights, or any visible text layer."}
+3) ${includeOnScreen ? "on_screen: title max 8 words; bullets 2–5 items, max 10 words each." : "image_prompt must be in English only. Use \"block_prompt\" as the main description and optionally \"avoid\" and \"seed_hint\"."}
+4) ${includeOnScreen ? "image_prompt must be in English only. Use \"block_prompt\" as the main description and optionally \"avoid\" and \"seed_hint\"." : "image_prompt must describe a concrete visual scene derived from the block text, not a summary or slogan."}
+5) ${includeOnScreen ? "image_prompt must describe a concrete visual scene derived from the block text, not a summary or slogan." : "image_prompt must avoid any visible text, typography, logos, watermarks, UI, posters, banners, signs, labels, captions, or subtitles."}
+6) ${includeOnScreen ? "image_prompt must avoid any visible text, typography, logos, watermarks, UI, posters, banners, signs, labels, captions, or subtitles." : "image_prompt should be 2–4 sentences and include: subject, environment, action, camera/framing, and lighting."}
+7) ${includeOnScreen ? "image_prompt should be 2–4 sentences and include: subject, environment, action, camera/framing, and lighting." : "image_prompt.seed must be an integer number (for KSampler)."}
+8) ${includeOnScreen ? "image_prompt.seed must be an integer number (for KSampler)." : "animation_prompt must be in English only and describe how the generated image should move."}
+9) ${includeOnScreen ? "animation_prompt must be in English only and describe how the generated image should move." : "animation_prompt should include \"prompt\", \"motion\", \"camera\" and \"duration_hint\"."}
+10) ${includeOnScreen ? "animation_prompt should include \"prompt\", \"motion\", \"camera\" and \"duration_hint\"." : "Return ONLY valid JSON in the format below."}
+11) ${includeOnScreen ? "Return ONLY valid JSON in the format below." : "Do not include fields that are not in the required format."}
 
 Format:
 {
-  "on_screen": {"title":"string","bullets":["string"]},
+  ${includeOnScreen ? `"on_screen": {"title":"string","bullets":["string"]},` : ""}
   "image_prompt": {"block_prompt":"string","avoid":"string","seed_hint":"string","seed":123456},
   "animation_prompt": {"prompt":"string","motion":"string","camera":"string","duration_hint":"string"}
 }
@@ -517,8 +520,10 @@ ${sourceText}${context}`;
 export function normalizeBlockMetaResponse(
   content: string,
   sourceText: string,
-  index: number
+  index: number,
+  options?: { includeOnScreen?: boolean }
 ): BlockMeta {
+  const includeOnScreen = options?.includeOnScreen ?? true;
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -533,16 +538,18 @@ export function normalizeBlockMetaResponse(
   }
 
   const candidate = parsed as { on_screen?: unknown; image_prompt?: unknown; animation_prompt?: unknown };
-  if (!isValidOnScreen(candidate.on_screen)) {
-    throw new Error("Invalid on_screen payload");
-  }
-  const onScreenTitle = candidate.on_screen.title;
-  if (looksLikeEnglish(onScreenTitle) && !looksLikePortuguese(onScreenTitle)) {
-    throw new Error("on_screen must be in PT-BR");
-  }
-  for (const bullet of candidate.on_screen.bullets) {
-    if (looksLikeEnglish(bullet) && !looksLikePortuguese(bullet)) {
-      throw new Error("on_screen bullets must be in PT-BR");
+  if (includeOnScreen) {
+    if (!isValidOnScreen(candidate.on_screen)) {
+      throw new Error("Invalid on_screen payload");
+    }
+    const onScreenTitle = candidate.on_screen.title;
+    if (looksLikeEnglish(onScreenTitle) && !looksLikePortuguese(onScreenTitle)) {
+      throw new Error("on_screen must be in PT-BR");
+    }
+    for (const bullet of candidate.on_screen.bullets) {
+      if (looksLikeEnglish(bullet) && !looksLikePortuguese(bullet)) {
+        throw new Error("on_screen bullets must be in PT-BR");
+      }
     }
   }
   if (!isValidImagePrompt(candidate.image_prompt)) {
@@ -558,6 +565,7 @@ export function normalizeBlockMetaResponse(
     seed_hint: raw.seed_hint,
     seed: raw.seed
   };
+  const onScreen = includeOnScreen ? (candidate.on_screen as OnScreen) : undefined;
   const animationPrompt = isValidAnimationPrompt(candidate.animation_prompt)
     ? {
         prompt: candidate.animation_prompt.prompt,
@@ -567,10 +575,10 @@ export function normalizeBlockMetaResponse(
       }
     : fallbackAnimationPrompt(sourceText, index);
   return {
-    onScreen: candidate.on_screen,
+    ...(onScreen ? { onScreen } : {}),
     imagePrompt,
     animationPrompt,
-    directionNotes: fallbackDirectionNotes(sourceText)
+    directionNotes: fallbackDirectionNotes(sourceText, includeOnScreen)
   };
 }
 
@@ -583,12 +591,17 @@ export function buildDeterministicBlocks(
   return buildFallbackBlocks(scriptText, speechRateWps, maxChars, maxWords);
 }
 
-export function buildFallbackMeta(sourceText: string, index: number): BlockMeta {
+export function buildFallbackMeta(
+  sourceText: string,
+  index: number,
+  options?: { includeOnScreen?: boolean }
+): BlockMeta {
+  const includeOnScreen = options?.includeOnScreen ?? true;
   return {
-    onScreen: fallbackOnScreen(sourceText, index),
+    ...(includeOnScreen ? { onScreen: fallbackOnScreen(sourceText, index) } : {}),
     imagePrompt: fallbackImagePrompt(sourceText, index),
     animationPrompt: fallbackAnimationPrompt(sourceText, index),
-    directionNotes: fallbackDirectionNotes(sourceText)
+    directionNotes: fallbackDirectionNotes(sourceText, includeOnScreen)
   };
 }
 

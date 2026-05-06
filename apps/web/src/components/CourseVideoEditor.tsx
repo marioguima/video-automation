@@ -1212,6 +1212,8 @@ const parseSoundEffectPrompt = (raw: string | null | undefined): { prompt?: stri
 const hasOnScreenText = (block: LessonBlock) => Boolean(block.onScreenText?.title?.trim());
 const hasImagePromptText = (block: LessonBlock) => Boolean(block.imagePrompt?.prompt?.trim());
 const hasAnimationPromptText = (block: LessonBlock) => Boolean(block.animationPrompt?.prompt?.trim());
+const templateUsesOnScreen = (templateId?: string | null, kind?: string | null) =>
+  kind === 'text' || templateId === 'slide-text-v0' || templateId === 'slide-image-v1';
 
 const mapLegacyStatus = (status?: string | null): LessonBlock['status'] => {
   if (!status) return 'Empty';
@@ -1392,10 +1394,6 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
   const finalVideoJobIdRef = useRef<string | null>(null);
   const selectedVersionIdRef = useRef<string | null>(null);
   const hasInitializedTemplateSelectionRef = useRef(false);
-  const autoSlidesForTemplateSwitchRef = useRef<{ key: string | null; armed: boolean }>({
-    key: null,
-    armed: false
-  });
   const audioReviewRef = useRef<HTMLAudioElement | null>(null);
   const audioReviewItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const audioReviewModalRef = useRef<HTMLDivElement | null>(null);
@@ -1788,17 +1786,10 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
   useEffect(() => {
     if (!selectedVersionId || !selectedTemplateId) {
       hasInitializedTemplateSelectionRef.current = false;
-      autoSlidesForTemplateSwitchRef.current = { key: null, armed: false };
       return;
     }
-    const nextKey = `${selectedVersionId}:${selectedTemplateId}`;
     if (!hasInitializedTemplateSelectionRef.current) {
       hasInitializedTemplateSelectionRef.current = true;
-      autoSlidesForTemplateSwitchRef.current = { key: nextKey, armed: false };
-      return;
-    }
-    if (autoSlidesForTemplateSwitchRef.current.key !== nextKey) {
-      autoSlidesForTemplateSwitchRef.current = { key: nextKey, armed: true };
     }
   }, [selectedVersionId, selectedTemplateId]);
 
@@ -2516,6 +2507,14 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
     () => templateOptions.find((t) => t.id === selectedTemplateId) ?? activeTemplate,
     [templateOptions, selectedTemplateId, activeTemplate]
   );
+  const currentSlideTemplate = useMemo(
+    () => slideTemplates.find((template) => template.id === selectedTemplateId) ?? null,
+    [slideTemplates, selectedTemplateId]
+  );
+  const activeTemplateUsesOnScreen = useMemo(
+    () => templateUsesOnScreen(currentSlideTemplate?.id, currentSlideTemplate?.kind ?? null),
+    [currentSlideTemplate]
+  );
 
   const availableVoices = useMemo<Voice[]>(
     () => ttsVoices.map((voice) => ({
@@ -2807,7 +2806,7 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
     if (!lessonId) return;
     if (isGeneratingFinalVideo) return;
     const current = blocks.find((block) => block.id === id);
-    if (current && !hasOnScreenText(current)) {
+    if (activeTemplateUsesOnScreen && current && !hasOnScreenText(current)) {
       setError(`O bloco ${current.number} está sem conteúdo on-screen. Preencha o título para regenerar o áudio.`);
       scrollToBlock(current.id);
       return;
@@ -2843,7 +2842,7 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
       setError((err as Error).message ?? 'Failed to regenerate audio.');
       setGeneratingStates(prev => ({ ...prev, [id]: { ...prev[id], audio: false } }));
     }
-  }, [blocks, ensureTtsReady, getNarratedDraft, invalidateFinalVideoLocal, isGeneratingFinalVideo, lessonId, lessonVoiceId, saveNarratedText]);
+  }, [activeTemplateUsesOnScreen, blocks, ensureTtsReady, getNarratedDraft, invalidateFinalVideoLocal, isGeneratingFinalVideo, lessonId, lessonVoiceId, saveNarratedText]);
 
   const handleGenerateSlides = async () => {
     if (isGeneratingFinalVideo) return;
@@ -2851,7 +2850,9 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
       setError('Select a template before generating slides.');
       return;
     }
-    const missingOnScreen = blocks.find((block) => !hasOnScreenText(block));
+    const missingOnScreen = activeTemplateUsesOnScreen
+      ? blocks.find((block) => !hasOnScreenText(block))
+      : undefined;
     if (missingOnScreen) {
       setError(`O bloco ${missingOnScreen.number} está sem conteúdo on-screen. Preencha o título para gerar slides.`);
       scrollToBlock(missingOnScreen.id);
@@ -2885,39 +2886,6 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
       setSlidesProgress(null);
     }
   };
-
-  useEffect(() => {
-    const autoState = autoSlidesForTemplateSwitchRef.current;
-    if (!autoState.armed || !autoState.key) return;
-    if (slideAvailabilityLoadedKey !== autoState.key) return;
-    if (!selectedVersionId || !selectedTemplateId) return;
-    if (blocks.length === 0) {
-      autoSlidesForTemplateSwitchRef.current.armed = false;
-      return;
-    }
-
-    const hasActiveTextGeneration = isSegmenting || singleTextQueue.active > 0;
-    const hasHardLockGeneration = hasActiveTextGeneration || isGeneratingFinalVideo;
-    const hasActiveImageOrSlideGeneration = isGeneratingAssets || singleImageQueue.active > 0;
-    if (hasHardLockGeneration || hasActiveImageOrSlideGeneration) return;
-
-    const missingForTemplate = blocks.some((block) => !slideAvailability[block.id]);
-    autoSlidesForTemplateSwitchRef.current.armed = false;
-    if (!missingForTemplate) return;
-    void handleGenerateSlides();
-  }, [
-    blocks,
-    handleGenerateSlides,
-    isGeneratingAssets,
-    isGeneratingFinalVideo,
-    isSegmenting,
-    selectedTemplateId,
-    selectedVersionId,
-    singleImageQueue.active,
-    singleTextQueue.active,
-    slideAvailability,
-    slideAvailabilityLoadedKey
-  ]);
 
   const runBatchImageGeneration = async () => {
     if (isGeneratingFinalVideo) return;
@@ -3186,7 +3154,7 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
         setError('No blocks available to generate slides.');
         return;
       }
-      if (missingOnScreenBlocks.length > 0) {
+      if (activeTemplateUsesOnScreen && missingOnScreenBlocks.length > 0) {
         const first = missingOnScreenBlocks[0];
         setError(`O bloco ${first.number} está sem conteúdo on-screen. Preencha para gerar slides.`);
         scrollToBlock(first.id);
@@ -3258,7 +3226,7 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
             return;
           }
         }
-        if (missingOnScreenBlocks.length > 0) {
+        if (activeTemplateUsesOnScreen && missingOnScreenBlocks.length > 0) {
           const first = missingOnScreenBlocks[0];
           setError(`O bloco ${first.number} está sem conteúdo on-screen. Ajuste o texto antes do vídeo final.`);
           scrollToBlock(first.id);
@@ -3637,10 +3605,11 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
     });
     return map;
   }, [blocks]);
-  const selectedSlideTemplateKind =
-    slideTemplates.find((template) => template.id === selectedTemplateId)?.kind ?? null;
+  const selectedSlideTemplateKind = currentSlideTemplate?.kind ?? null;
   const templateRequiresImageAsset = selectedSlideTemplateKind === 'image';
-  const missingOnScreenBlocks = blocks.filter((block) => !hasOnScreenText(block));
+  const missingOnScreenBlocks = activeTemplateUsesOnScreen
+    ? blocks.filter((block) => !hasOnScreenText(block))
+    : [];
   const missingImagePromptBlocks = blocks.filter((block) => !hasImagePromptText(block));
   const missingAnimationPromptBlocks = blocks.filter((block) => !hasAnimationPromptText(block));
   const missingAudioBlocksForFinal = blocks.filter((block) => !audioUrls[block.id]);
@@ -3681,11 +3650,11 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
     (templateRequiresImageAsset && missingImageAssetsForFinal.length > 0);
   const isAudioReviewDisabled = audioReviewPlayableCount === 0 || isAnyGenerationRunning || isGeneratingFinalVideo;
   const contentValidationAlerts = [
-    ...missingOnScreenBlocks.map((block) => ({
+    ...(!activeTemplateUsesOnScreen ? [] : missingOnScreenBlocks.map((block) => ({
       key: `missing-onscreen-${block.id}`,
       blockId: block.id,
       message: `${block.number}: falta conteúdo on-screen (título).`
-    })),
+    }))),
     ...missingImagePromptBlocks.map((block) => ({
       key: `missing-prompt-${block.id}`,
       blockId: block.id,
@@ -5063,7 +5032,7 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
               Audio Review is open. Close the modal to return to the full editor.
             </div>
           ) : blocks.map((block) => {
-              const blockMissingOnScreen = !hasOnScreenText(block);
+              const blockMissingOnScreen = activeTemplateUsesOnScreen && !hasOnScreenText(block);
               const blockMissingPrompt = !hasImagePromptText(block);
               const blockMissingAnimationPrompt = !hasAnimationPromptText(block);
               return (
@@ -5138,7 +5107,7 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
                       isGeneratingText={Boolean(generatingStates[block.id]?.text || isTextGenerationBusy)}
                       isLocked={isGeneratingFinalVideo}
                       ttsReady={ttsHealthy}
-                      missingOnScreen={blockMissingOnScreen}
+                      missingOnScreen={activeTemplateUsesOnScreen && blockMissingOnScreen}
                       onDraft={setNarratedDraft}
                       onSave={saveNarratedText}
                       onRegenerate={handleRegenerateAudio}
@@ -5146,22 +5115,23 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
                   </div>
                 </section>
 
-                {/* 2. On-Screen Content Section */}
-                <section className="space-y-6 text-foreground">
-                  <div className="flex items-center justify-between border-b border-dashed border-[hsl(var(--editor-border))] pb-3">
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                      <Type size={14} className="text-orange-600" />
-                      On-Screen Content
+                {activeTemplateUsesOnScreen && (
+                  <section className="space-y-6 text-foreground">
+                    <div className="flex items-center justify-between border-b border-dashed border-[hsl(var(--editor-border))] pb-3">
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                        <Type size={14} className="text-orange-600" />
+                        On-Screen Content
+                      </div>
                     </div>
-                  </div>
-                  <OnScreenEditor
-                    blockId={block.id}
-                    value={block.onScreenText}
-                    onSave={saveOnScreen}
-                    disabled={Boolean(generatingStates[block.id]?.text || isGeneratingFinalVideo)}
-                    invalid={blockMissingOnScreen}
-                  />
-                </section>
+                    <OnScreenEditor
+                      blockId={block.id}
+                      value={block.onScreenText}
+                      onSave={saveOnScreen}
+                      disabled={Boolean(generatingStates[block.id]?.text || isGeneratingFinalVideo)}
+                      invalid={blockMissingOnScreen}
+                    />
+                  </section>
+                )}
               </div>
 
                 <div className="self-stretch border-l border-dashed border-[hsl(var(--editor-border))]/60"></div>
@@ -5246,20 +5216,22 @@ const CourseVideoEditor: React.FC<CourseVideoEditorProps> = ({
                             </a>
                           </div>
 
-                          <div className={`absolute inset-0 p-6 flex flex-col pointer-events-none ${
-                            currentTemplate.layout === 'centered' ? 'items-center justify-center text-center' :
-                            currentTemplate.layout === 'split' ? 'items-start justify-center bg-gradient-to-r from-black/80 to-transparent pr-24' :
-                            'items-start justify-end bg-gradient-t-from-black/80 via-black/20 to-transparent'
-                          }`}>
-                            <h4 className="text-lg font-bold text-white mb-3 leading-tight drop-shadow-lg">{block.onScreenText.title}</h4>
-                            <ul className="space-y-1.5">
-                              {block.onScreenText.bullets.map((b, i) => (
-                                <li key={`preview-bullet-${block.id}-${i}`} className="flex items-center gap-2 text-[9px] font-medium text-white/80 drop-shadow">
-                                  <div className="w-1 h-1 bg-orange-400 rounded-full" /> {b}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
+                          {activeTemplateUsesOnScreen && (
+                            <div className={`absolute inset-0 p-6 flex flex-col pointer-events-none ${
+                              currentTemplate.layout === 'centered' ? 'items-center justify-center text-center' :
+                              currentTemplate.layout === 'split' ? 'items-start justify-center bg-gradient-to-r from-black/80 to-transparent pr-24' :
+                              'items-start justify-end bg-gradient-t-from-black/80 via-black/20 to-transparent'
+                            }`}>
+                              <h4 className="text-lg font-bold text-white mb-3 leading-tight drop-shadow-lg">{block.onScreenText.title}</h4>
+                              <ul className="space-y-1.5">
+                                {block.onScreenText.bullets.map((b, i) => (
+                                  <li key={`preview-bullet-${block.id}-${i}`} className="flex items-center gap-2 text-[9px] font-medium text-white/80 drop-shadow">
+                                    <div className="w-1 h-1 bg-orange-400 rounded-full" /> {b}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="relative group/asset aspect-video rounded-[6px] overflow-hidden border border-[hsl(var(--editor-border))] bg-[hsl(var(--editor-surface))] shadow-sm">
