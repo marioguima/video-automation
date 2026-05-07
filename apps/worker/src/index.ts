@@ -1,5 +1,5 @@
 import { spawn, execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -673,8 +673,9 @@ function deriveWsUrlFromHttpBase(baseUrl: string): string {
   return parsed.toString();
 }
 
-const agentControlToken =
+let agentControlToken =
   process.env.AGENT_CONTROL_TOKEN?.trim() || internalJobsEventToken;
+const agentControlTokenSecret = process.env.AGENT_CONTROL_TOKEN_SECRET?.trim() ?? "";
 let agentWorkspaceId = process.env.WORKSPACE_ID?.trim() ?? "";
 let agentId = process.env.AGENT_ID?.trim() ?? "";
 const agentLabel = process.env.AGENT_LABEL?.trim() ?? null;
@@ -715,6 +716,107 @@ function hasAgentControlIdentityConfigured(): boolean {
     agentId
   });
   return hasCompleteAgentControlIdentity(presence);
+}
+
+function base64UrlEncode(input: Buffer | string): string {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function signLocalAgentControlToken(claims: {
+  v: 1;
+  agentId: string;
+  workspaceId: string;
+  exp: number;
+}): string | null {
+  if (!agentControlTokenSecret) return null;
+  const payload = base64UrlEncode(JSON.stringify(claims));
+  const signature = createHmac("sha256", agentControlTokenSecret).update(payload).digest();
+  return `v1.${payload}.${base64UrlEncode(signature)}`;
+}
+
+async function repairAgentControlIdentity(): Promise<void> {
+  const workspaces = await prisma.workspace.findMany({
+    select: {
+      id: true,
+      name: true,
+      _count: { select: { memberships: true } }
+    },
+    orderBy: { createdAt: "asc" }
+  });
+  const activeWorkspaces = workspaces.filter((workspace) => workspace._count.memberships > 0);
+  const configuredWorkspace = agentWorkspaceId
+    ? workspaces.find((workspace) => workspace.id === agentWorkspaceId) ?? null
+    : null;
+  const configuredWorkspaceIsUsable = Boolean(configuredWorkspace && configuredWorkspace._count.memberships > 0);
+
+  if (!configuredWorkspaceIsUsable) {
+    if (activeWorkspaces.length !== 1) {
+      logWorkerAction("agent_control_identity_unresolved", {
+        reason: "workspace_not_usable",
+        configured_workspace_id: agentWorkspaceId || null,
+        active_workspace_count: activeWorkspaces.length
+      });
+      return;
+    }
+    agentWorkspaceId = activeWorkspaces[0].id;
+  }
+
+  let agentRecord =
+    agentId && agentWorkspaceId
+      ? await prisma.agent.findUnique({
+          where: { id: agentId },
+          select: { id: true, workspaceId: true }
+        })
+      : null;
+
+  if (!agentRecord || agentRecord.workspaceId !== agentWorkspaceId) {
+    if (agentMachineFingerprint) {
+      agentRecord = await prisma.agent.findFirst({
+        where: { workspaceId: agentWorkspaceId, machineFingerprint: agentMachineFingerprint },
+        select: { id: true, workspaceId: true }
+      });
+    }
+  }
+
+  if (!agentRecord && agentLabel) {
+    agentRecord = await prisma.agent.findFirst({
+      where: { workspaceId: agentWorkspaceId, label: agentLabel },
+      select: { id: true, workspaceId: true }
+    });
+  }
+
+  if (!agentRecord) {
+    agentRecord = await prisma.agent.create({
+      data: {
+        workspaceId: agentWorkspaceId,
+        label: agentLabel,
+        machineFingerprint: agentMachineFingerprint,
+        status: "offline"
+      },
+      select: { id: true, workspaceId: true }
+    });
+  }
+
+  agentId = agentRecord.id;
+  const signed = signLocalAgentControlToken({
+    v: 1,
+    agentId,
+    workspaceId: agentWorkspaceId,
+    exp: Date.now() + 1000 * 60 * 60 * 24 * 30
+  });
+  if (signed) {
+    agentControlToken = signed;
+  }
+
+  logWorkerAction("agent_control_identity_ready", {
+    workspace_id: agentWorkspaceId,
+    agent_id: agentId,
+    source: configuredWorkspaceIsUsable ? "configured" : "auto_repaired"
+  });
 }
 
 function markAgentControlReady(): void {
@@ -8001,6 +8103,7 @@ workerEventLoop().catch(async (err) => {
 
 const healthServer = startHealthServer(config.workerPort);
 void (async () => {
+  await repairAgentControlIdentity();
   const wsBootStarted = await startAgentControlChannel();
   const shouldFailMissingIdentity = shouldFailStartupWithoutIdentity({
     workerRequireWsOnStartup,

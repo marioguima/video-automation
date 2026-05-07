@@ -3148,7 +3148,7 @@ const Editor: React.FC<EditorProps> = ({
 
   const startBatchTtsGeneration = useCallback(async (): Promise<boolean> => {
     if (!selectedVersionId) {
-      setError('Create a lesson version before generating audios.');
+      setError('O conteúdo ainda não está pronto para gerar áudios.');
       return false;
     }
     setError(null);
@@ -3225,7 +3225,7 @@ const Editor: React.FC<EditorProps> = ({
         return;
       }
       if (!selectedVersionId) {
-        setError('Create a lesson version before generating blocks.');
+        setError('O conteúdo ainda não está pronto para gerar blocos.');
         return;
       }
       await startSegmentJob(false);
@@ -3269,7 +3269,7 @@ const Editor: React.FC<EditorProps> = ({
         return;
       }
       if (!selectedVersionId) {
-        setError('Create a lesson version before generating audios.');
+        setError('O conteúdo ainda não está pronto para gerar áudios.');
         return;
       }
       if (!blocks.length) {
@@ -3285,7 +3285,7 @@ const Editor: React.FC<EditorProps> = ({
           return;
         }
         if (!selectedVersionId) {
-          setError('Create a lesson version before generating the final video.');
+          setError('O conteúdo ainda não está pronto para gerar o vídeo final.');
           return;
         }
         if (blocks.length === 0) {
@@ -5097,7 +5097,7 @@ const Editor: React.FC<EditorProps> = ({
 
           {!lessonId && (
             <div className="max-w-[1200px] mx-auto rounded-[5px] border border-border bg-[hsl(var(--editor-surface))] p-8 text-center text-muted-foreground">
-              Select a lesson to start editing.
+              Selecione um conteúdo para abrir o editor.
             </div>
           )}
 
@@ -5109,7 +5109,7 @@ const Editor: React.FC<EditorProps> = ({
 
           {lessonId && selectedVersionId && blocks.length === 0 && !isLoadingBlocks && (
             <div className="max-w-[1200px] mx-auto bg-[hsl(var(--editor-surface))] border border-[hsl(var(--editor-border))] rounded-[5px] p-6 text-sm text-muted-foreground">
-              No blocks generated yet. Use “Generate Blocks” to create them from the current lesson version.
+              Ainda não existem blocos para este conteúdo. Use “Generate Blocks” para iniciar a estruturação do entregável.
             </div>
           )}
 

@@ -8,6 +8,14 @@ const inflight = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { ts: number; data: unknown }>();
 const UNAUTHORIZED_EVENT = 'vizlec:unauthorized';
 
+function formatApiError(error: string | undefined, fallback: string): string {
+  if (!error) return fallback;
+  if (error === 'agent_offline') {
+    return 'A API não encontrou um agente conectado no worker para executar esta ação.';
+  }
+  return error;
+}
+
 function emitUnauthorized(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
@@ -34,7 +42,7 @@ export async function apiGet<T>(
       }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error ?? `GET ${path} failed`);
+        throw new Error(formatApiError((err as { error?: string }).error, `GET ${path} failed`));
       }
       const data = await res.json();
       cache.set(path, { ts: Date.now(), data });
@@ -61,7 +69,7 @@ export async function apiPost<T>(path: string, payload: unknown): Promise<T> {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `POST ${path} failed`);
+    throw new Error(formatApiError(err.error, `POST ${path} failed`));
   }
   return res.json() as Promise<T>;
 }
@@ -78,7 +86,7 @@ export async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `PATCH ${path} failed`);
+    throw new Error(formatApiError(err.error, `PATCH ${path} failed`));
   }
   return res.json() as Promise<T>;
 }
@@ -93,7 +101,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error ?? `DELETE ${path} failed`);
+    throw new Error(formatApiError(err.error, `DELETE ${path} failed`));
   }
   return res.json() as Promise<T>;
 }
