@@ -278,7 +278,7 @@ type OutputComposition = {
 type ContentProjectsProps = {
   initialProjectId?: string | null;
   onInitialProjectConsumed?: () => void;
-  onOpenVideo?: (payload: { lessonId: string; title: string }) => void;
+  onOpenEditor?: (payload: { editorEntityId: string; title: string }) => void;
 };
 
 const STAGES: Array<{ value: ProductionStage; label: string }> = [
@@ -830,7 +830,7 @@ function normalizeOutputStatus(value: string | null | undefined): OutputStatus {
 export default function ContentProjects({
   initialProjectId,
   onInitialProjectConsumed,
-  onOpenVideo
+  onOpenEditor
 }: ContentProjectsProps) {
   const [screen, setScreen] = useState<Screen>('list');
   const [projectViewMode, setProjectViewMode] = useState<ProjectViewMode>('grid');
@@ -875,6 +875,7 @@ export default function ContentProjects({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const detailScrollTopRef = useRef(0);
   const shouldRestoreDetailScrollRef = useRef(false);
+  const editorInitInFlightRef = useRef<Set<string>>(new Set());
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -1389,7 +1390,8 @@ export default function ContentProjects({
     setError(null);
     try {
       const projectIds = Array.from(new Set([...(item.projectIds ?? []), selectedProjectId]));
-      await apiPatch<ContentItem>(`/content-items/${item.id}`, { projectIds });
+      const linkedItem = await apiPatch<ContentItem>(`/content-items/${item.id}`, { projectIds });
+      await ensureEditorForItem(linkedItem, { silent: true });
       await Promise.all([loadItems(selectedProjectId), loadProjects(), loadLibraryItems()]);
       setStatus(`Content linked: ${item.title}.`);
       if (projectIds.length > 0) {
@@ -1465,15 +1467,26 @@ export default function ContentProjects({
   };
 
   const openEditorForItem = (item: ContentItem) => {
-    const lessonId = item.metadata?.backing?.lessonId;
-    if (!lessonId || !onOpenVideo) return;
-    onOpenVideo({ lessonId, title: item.title });
+    const editorEntityId = item.metadata?.backing?.lessonId;
+    if (!editorEntityId || !onOpenEditor) return;
+    onOpenEditor({ editorEntityId, title: item.title });
   };
 
-  const prepareEditorForItem = async (item: ContentItem) => {
-    if (!onOpenVideo) return;
-    setBusy(true);
-    setError(null);
+  const ensureEditorForItem = async (item: ContentItem, options?: { openWhenReady?: boolean; silent?: boolean }) => {
+    const existingEditorEntityId = item.metadata?.backing?.lessonId;
+    if (existingEditorEntityId) {
+      if (options?.openWhenReady && onOpenEditor) {
+        onOpenEditor({ editorEntityId: existingEditorEntityId, title: item.title });
+      }
+      return existingEditorEntityId;
+    }
+    if (editorInitInFlightRef.current.has(item.id)) return null;
+
+    editorInitInFlightRef.current.add(item.id);
+    if (!options?.silent) {
+      setBusy(true);
+      setError(null);
+    }
     try {
       const data = await apiGet<{
         itemId: string;
@@ -1482,9 +1495,9 @@ export default function ContentProjects({
           lessonVersionId?: string;
         } | null;
       }>(`/content-items/${item.id}/blocks`, { cacheMs: 0, dedupe: false });
-      const lessonId = data.backing?.lessonId;
-      if (!lessonId) {
-        throw new Error('Editor backing not available for this content.');
+      const editorEntityId = data.backing?.lessonId;
+      if (!editorEntityId) {
+        throw new Error('Editor session not available for this content.');
       }
       setItems((current) =>
         current.map((currentItem) =>
@@ -1502,11 +1515,20 @@ export default function ContentProjects({
             : currentItem
         )
       );
-      onOpenVideo({ lessonId, title: item.title });
+      if (options?.openWhenReady && onOpenEditor) {
+        onOpenEditor({ editorEntityId, title: item.title });
+      }
+      return editorEntityId;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to prepare editor.');
+      if (!options?.silent) {
+        setError(err instanceof Error ? err.message : 'Failed to initialize editor.');
+      }
+      return null;
     } finally {
-      setBusy(false);
+      editorInitInFlightRef.current.delete(item.id);
+      if (!options?.silent) {
+        setBusy(false);
+      }
     }
   };
 
@@ -1734,7 +1756,7 @@ export default function ContentProjects({
   const renderStudio = () => {
     const selectedTarget = promotionTargets[0] ?? null;
     const selectedBacking = selectedStudioItem?.metadata?.backing ?? null;
-    const selectedItemHasEditor = Boolean(selectedBacking?.lessonId && onOpenVideo);
+    const selectedItemHasEditor = Boolean(selectedBacking?.lessonId && onOpenEditor);
     const visibleOutputColumns = OUTPUT_STATUS_COLUMNS.map((column) => ({
       ...column,
       items: selectedOutputColumns.find((candidate) => candidate.value === column.value)?.items ?? []
@@ -1757,18 +1779,12 @@ export default function ContentProjects({
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {selectedItemHasEditor && selectedStudioItem ? (
-                <Button onClick={() => openEditorForItem(selectedStudioItem)} disabled={busy}>
-                  Open Editor
-                </Button>
-              ) : selectedStudioItem ? (
-                <Button onClick={() => prepareEditorForItem(selectedStudioItem)} disabled={busy}>
-                  Prepare Editor
-                </Button>
-              ) : null}
-              {selectedProjectContentOutput && selectedStudioItem ? (
-                <Button variant="outline" onClick={() => generateNarrative(selectedProjectContentOutput, selectedStudioItem)} disabled={busy}>
-                  Build Narrative
+              {selectedStudioItem ? (
+                <Button
+                  onClick={() => openEditorForItem(selectedStudioItem)}
+                  disabled={busy || !selectedItemHasEditor}
+                >
+                  {selectedItemHasEditor ? 'Open Editor' : 'Editor Initializing'}
                 </Button>
               ) : null}
             </div>

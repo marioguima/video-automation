@@ -1396,8 +1396,8 @@ const App: React.FC = () => {
           <ContentProjects
             initialProjectId={pendingContentProjectId}
             onInitialProjectConsumed={() => setPendingContentProjectId(null)}
-            onOpenVideo={({ lessonId, title }) => {
-              setSelectedLesson(getLessonStub(lessonId, title));
+            onOpenEditor={({ editorEntityId, title }) => {
+              setSelectedLesson(getLessonStub(editorEntityId, title));
               setSelectedModuleIdForLesson(null);
               setPendingLessonAutoQueue(null);
               setCurrentView('editor');
