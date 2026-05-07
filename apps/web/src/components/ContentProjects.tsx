@@ -35,7 +35,7 @@ import CompositionPreview, {
   type StudioCompositionTimeline
 } from './composition/CompositionPreview';
 
-type Screen = 'list' | 'create' | 'detail';
+type Screen = 'list' | 'create' | 'detail' | 'studio';
 type ProjectViewMode = 'grid' | 'list';
 type ProjectStatusFilter = 'all' | 'draft' | 'active' | 'archived';
 type ProjectSortKey = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'content-desc' | 'content-asc';
@@ -872,6 +872,9 @@ export default function ContentProjects({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const projectFilterMenuRef = useRef<HTMLDivElement | null>(null);
   const projectSortMenuRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const detailScrollTopRef = useRef(0);
+  const shouldRestoreDetailScrollRef = useRef(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -1197,6 +1200,17 @@ export default function ContentProjects({
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, [isProjectFilterMenuOpen, isProjectSortMenuOpen]);
 
+  useEffect(() => {
+    if (screen !== 'studio') return;
+    scrollContainerRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [screen, selectedStudioItemId]);
+
+  useEffect(() => {
+    if (screen !== 'detail' || !shouldRestoreDetailScrollRef.current) return;
+    scrollContainerRef.current?.scrollTo({ top: detailScrollTopRef.current, left: 0, behavior: 'auto' });
+    shouldRestoreDetailScrollRef.current = false;
+  }, [screen]);
+
   const openProject = (project: Project) => {
     setStatus('');
     setSelectedProjectId(project.id);
@@ -1428,8 +1442,9 @@ export default function ContentProjects({
   };
 
   const openStudio = async (item: ContentItem) => {
+    detailScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? 0;
     setSelectedStudioItemId(item.id);
-    setScreen('detail');
+    setScreen('studio');
     try {
       const outputs = outputsByItem[item.id] ?? (await loadOutputsForItem(item.id));
       if (outputs[0]?.id) {
@@ -1442,6 +1457,11 @@ export default function ContentProjects({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open studio.');
     }
+  };
+
+  const backToProjectDetail = () => {
+    shouldRestoreDetailScrollRef.current = true;
+    setScreen('detail');
   };
 
   const openEditorForItem = (item: ContentItem) => {
@@ -1719,63 +1739,39 @@ export default function ContentProjects({
       ...column,
       items: selectedOutputColumns.find((candidate) => candidate.value === column.value)?.items ?? []
     }));
-    const studioNextStep = !selectedStudioItem
-      ? 'Selecione um conteúdo.'
-      : !selectedItemHasEditor
-        ? 'Prepare o editor.'
-        : 'Abra o editor ou acompanhe os entregáveis abaixo.';
     return (
       <div className="space-y-6">
-        <section className="rounded-[6px] border border-border bg-background p-4">
+        <section className="space-y-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <h3 className="font-bold">Deliverables Board</h3>
-              <p className="text-sm text-muted-foreground">{studioNextStep}</p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={backToProjectDetail}
+                className="flex items-center gap-2 text-slate-500 hover:text-primary font-bold text-xs uppercase tracking-widest transition-colors"
+              >
+                <ArrowLeft size={16} />
+                {selectedProject ? `Back to ${selectedProject.name}` : 'Back to Project'}
+              </button>
+              <div>
+                <h2 className="text-3xl font-bold leading-tight text-slate-800 dark:text-white">{selectedStudioItem?.title ?? 'Content'}</h2>
+              </div>
             </div>
-            {selectedStudioItem ? (
-              <div className="flex flex-wrap gap-2">
-                {selectedItemHasEditor ? (
-                  <Button onClick={() => openEditorForItem(selectedStudioItem)} disabled={busy}>
-                    Open Editor
-                  </Button>
-                ) : (
-                  <Button onClick={() => prepareEditorForItem(selectedStudioItem)} disabled={busy}>
-                    Prepare Editor
-                  </Button>
-                )}
-                {selectedProjectContentOutput && selectedStudioItem ? (
-                  <Button variant="outline" onClick={() => generateNarrative(selectedProjectContentOutput, selectedStudioItem)} disabled={busy}>
-                    Build Narrative
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="mt-5 flex flex-wrap gap-2">
-            {items.length > 0 ? (
-              items.map((item) => {
-                const active = item.id === selectedStudioItemId;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setSelectedStudioItemId(item.id)}
-                    className={`rounded-[999px] border px-3 py-2 text-left transition-colors ${
-                      active
-                        ? 'border-orange-500/50 bg-orange-500/10'
-                        : 'border-border bg-card hover:border-orange-500/30'
-                    }`}
-                  >
-                    <div className="text-sm font-semibold">{item.title}</div>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="rounded-[5px] border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                Este projeto ainda não tem conteúdo associado. Use o tab <span className="font-semibold text-foreground">Contents</span> para vincular conteúdo primeiro.
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {selectedItemHasEditor && selectedStudioItem ? (
+                <Button onClick={() => openEditorForItem(selectedStudioItem)} disabled={busy}>
+                  Open Editor
+                </Button>
+              ) : selectedStudioItem ? (
+                <Button onClick={() => prepareEditorForItem(selectedStudioItem)} disabled={busy}>
+                  Prepare Editor
+                </Button>
+              ) : null}
+              {selectedProjectContentOutput && selectedStudioItem ? (
+                <Button variant="outline" onClick={() => generateNarrative(selectedProjectContentOutput, selectedStudioItem)} disabled={busy}>
+                  Build Narrative
+                </Button>
+              ) : null}
+            </div>
           </div>
         </section>
 
@@ -1783,10 +1779,6 @@ export default function ContentProjects({
           <>
             <section className="p-1">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div>
-                  <h3 className="font-bold">{selectedStudioItem.title}</h3>
-                  <p className="text-sm text-muted-foreground">Cada card representa um entregável deste conteúdo dentro do projeto.</p>
-                </div>
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant={studioChannelFilter === 'all' ? 'default' : 'outline'}
@@ -1931,13 +1923,13 @@ export default function ContentProjects({
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-background text-foreground">
+    <div ref={scrollContainerRef} className="h-full overflow-y-auto bg-background text-foreground">
       <div
         className={`px-6 py-6 space-y-6 ${
-          screen === 'detail' && selectedStudioItemId ? 'w-full max-w-none' : 'max-w-7xl mx-auto'
+          screen === 'studio' ? 'w-full max-w-none' : 'max-w-7xl mx-auto'
         }`}
       >
-        {screen !== 'detail' && (
+        {screen !== 'detail' && screen !== 'studio' && (
           <header className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -2563,8 +2555,12 @@ export default function ContentProjects({
                   )}
                 </section>
               </div>
-            {selectedStudioItemId && renderStudio()}
           </section>
+          </section>
+        )}
+        {screen === 'studio' && selectedProject && selectedStudioItem && (
+          <section className="space-y-8 pb-16">
+            {renderStudio()}
           </section>
         )}
         <ConfirmDialog
