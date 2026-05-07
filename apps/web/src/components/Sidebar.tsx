@@ -110,7 +110,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
           <LogoIcon className="w-7 h-7" />
         </div>
         <h1 className={`text-xl font-bold tracking-tight text-foreground transition-opacity duration-200 whitespace-nowrap ${isCollapsed ? 'opacity-0 w-0 hidden' : 'hidden lg:block'}`}>
-          VizLec
+          FlowShopy
         </h1>
       </div>
 

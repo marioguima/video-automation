@@ -34,7 +34,7 @@ Motivo:
 Decisao:
 
 - projeto pode organizar curso, canal do YouTube, perfil do Instagram, pagina do Facebook, perfil do TikTok, lancamento, campanha, serie, colecao ou musica sem carregar um campo `kind`;
-- canais/perfis/paginas podem ser contexto operacional do projeto, mas aparecem no contrato como destinations/variantes;
+- canais/perfis/paginas podem ser contexto operacional do projeto, mas aparecem no contrato como destinations/outputs;
 - canais aparecem como destino/entrega quando um projeto publica em varios canais;
 - nao existe mais o conceito de "criar curso" como fluxo separado de produto; cursos devem entrar como projetos;
 - a producao ocorre na visao de projeto;
@@ -50,7 +50,7 @@ Motivo:
 Observacao:
 
 - qualquer implementacao anterior que tratou projeto como tipo/categoria deve ser revisada;
-- canais/perfis/paginas pertencem a destinations/variantes, nao ao tipo de projeto;
+- canais/perfis/paginas pertencem a destinations/outputs, nao ao tipo de projeto;
 - esta decisao substitui a direcao provisoria anterior.
 
 ## 2026-04-30 - Tela Content
@@ -58,10 +58,10 @@ Observacao:
 Decisao:
 
 - a entrada `Content` deve ser voltada para producao do conteudo/roteiro;
-- configuracao de canais de entrega, formatos e aspect ratios pertence ao projeto/variantes;
+- configuracao de canais de entrega, formatos e aspect ratios pertence ao projeto/outputs;
 - a tela de conteudo deve ter area principal de escrita e um bloco de prompt/conversa para solicitacoes a IA;
 - conteudo precisa ser associado a projeto para entrar no fluxo de producao, mas a associacao nao deve dominar a experiencia visual da tela.
-- a tela de conteudo nao deve pedir o tipo de midia antes da escrita; video, imagem, musica, texto e PDF sao entregaveis/variantes, nao o conteudo em si.
+- a tela de conteudo nao deve pedir o tipo de midia antes da escrita; video, imagem, musica, texto e PDF sao entregaveis/outputs, nao o conteudo em si.
 
 Motivo:
 
@@ -99,6 +99,66 @@ Motivo:
 - entregar rapido;
 - reduzir risco;
 - preservar editor/jobs/render existentes.
+
+## 2026-05-05 - Saida definitiva do modelo de curso
+
+Decisao:
+
+- o produto nao deve continuar evoluindo como gerador de aulas;
+- `Course/Module/Lesson` deixa de ser direcao de produto e passa a ser somente legado tecnico temporario;
+- o alvo oficial passa a ser uma fabrica de conteudo promocional orientada por `ContentItem`, `Project`, `ProjectContentOutput`, `NarrativeUnit` e `Composition`;
+- o legado deve ser removido progressivamente quando o fluxo novo cobrir os casos principais, e nao apenas escondido na UI.
+
+Motivo:
+
+- manter dois modelos de produto em paralelo tende a duplicar regras, linguagem e custos de manutencao;
+- curso e apenas um dos contextos possiveis de um projeto;
+- o produto precisa suportar video, imagem, clips, overlays, CTA, promocao e composicao audiovisual mais ampla do que o modelo de aula permite.
+
+## 2026-05-05 - Composicao e preview com Remotion
+
+Decisao:
+
+- `Remotion` passa a ser a direcao principal para composicao, preview e timeline;
+- `ffmpeg` permanece como infraestrutura de midia e export, nao como camada principal de autoria;
+- `slide` deixa de ser unidade central do produto e passa a ser apenas um tipo simples de composicao.
+
+Motivo:
+
+- o produto precisa de visualizador, timeline, efeitos, transicoes, overlays e composicao declarativa;
+- `ffmpeg` e muito forte como executor, mas fraco como camada de autoria/preview;
+- o preview antes do render final reduz custo e aumenta controle editorial.
+
+## 2026-05-05 - Novo significado de template
+
+Decisao:
+
+- `template` nao deve mais significar apenas texto sobre imagem;
+- o conceito correto e um sistema de composicao formado por `StyleDNA`, `Component`, `CompositionPreset` e `VariationRules`;
+- videos devem manter identidade visual sem se tornarem clones.
+
+Motivo:
+
+- o produto precisa reaproveitar componentes testados sem cair em uma fabrica de videos parecidos;
+- uma coisa e manter consistencia de marca; outra e produzir saidas visualmente repetitivas;
+- a combinacao de componentes, presets e regras de variacao cria identidade com originalidade.
+
+## 2026-05-06 - Conteudo nasce fora do projeto
+
+Decisao:
+
+- `Content` continua sendo a area unica de criacao e edicao da materia-prima editorial;
+- `Project` nao deve duplicar essa experiencia com um segundo formulario principal de conteudo;
+- dentro do projeto, a acao correta e localizar e associar conteudos existentes;
+- um mesmo conteudo pode se relacionar com um, varios ou nenhum projeto;
+- `Studio` existe para transformar conteudo associado em output/composicao, nao para competir com a area `Content`.
+
+Motivo:
+
+- conteudo e materia-prima e precisa existir por si;
+- projeto sozinho nao gera valor; ele apenas parametriza a fabrica/core;
+- duplicar a criacao de conteudo em mais de um lugar aumenta ambiguidade e deixa a UI menos clara;
+- a complexidade precisa ficar debaixo do capo, com um fluxo unico e direto para o usuario.
 
 ## Documentacao
 
@@ -154,7 +214,7 @@ Motivo:
 
 ## Assuntos em aberto
 
-- Quando criar tabela `Variant`.
+- Como e quando remover definitivamente a linguagem de `Variant` do dominio restante.
 - Quando criar tabela `ContentSource`.
 - Como modelar thumbnails.
 - Qual provider de animacao imagem-para-video usar.

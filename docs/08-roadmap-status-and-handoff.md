@@ -1,6 +1,6 @@
 # FlowShopy Roadmap, Status and Handoff
 
-Ultima atualizacao: 2026-05-02
+Ultima atualizacao: 2026-05-05
 
 ## Estado real atual
 
@@ -13,8 +13,10 @@ Nota importante de produto:
 - nao existe mais fluxo separado de "criacao de cursos"; curso deve ser tratado como projeto;
 - FlowShopy deve evoluir como maquina de atencao para promocao de produtos/ofertas/eventos, usando short links redirecionaveis.
 - a tela `Content` deve ser voltada para producao do conteudo/roteiro com apoio de IA; canais e formatos pertencem ao projeto.
-- a tela `Content` nao deve pedir tipo de midia na criacao; o conteudo e generico e entregaveis sao definidos no projeto/variant.
-- a tela `Content` nao deve gerar cenas, abrir editor de video ou iniciar render; segmentacao/render pertencem ao projeto/variant.
+- a tela `Content` nao deve pedir tipo de midia na criacao; o conteudo e generico e entregaveis sao definidos no projeto e materializados como outputs.
+- a tela `Content` nao deve gerar cenas, abrir editor de video ou iniciar render; segmentacao/render pertencem ao projeto/output.
+- a tela `Project` nao deve virar um segundo lugar para criar conteudo; ela deve localizar, associar e orquestrar conteudos existentes.
+- um mesmo conteudo pode estar associado a um ou muitos projetos; o vinculo precisa ser reutilizavel e visivel.
 - CTAs e linguagem de interacao devem poder variar por canal; blocos comuns devem ser reaproveitados quando possivel.
 
 Implementado:
@@ -24,7 +26,7 @@ Implementado:
 - endpoints basicos de conteudo;
 - tela `Projects`;
 - backing tecnico invisivel usando Course/Module/Lesson;
-- gerar blocos a partir de ContentItem ainda existe tecnicamente no backend, mas a UI de Content nao deve expor isso fora do contexto de projeto/variant;
+- gerar blocos a partir de ContentItem ainda existe tecnicamente no backend, mas a UI de Content nao deve expor isso fora do contexto de projeto/output;
 - abrir editor a partir de ContentItem ainda existe tecnicamente no backend/projeto, mas nao deve ser acao da listagem/cadastro de Content;
 - Gemini nas settings;
 - worker usando Gemini quando selecionado;
@@ -33,7 +35,7 @@ Implementado:
 - projeto nao possui `kind`; canal, perfil, curso, musica e campanha foram removidos do contrato de projeto e ficam como contexto, destinations ou entregaveis;
 - area `Content` criada na sidebar com listagem de conteudos e tela separada de cadastro; cadastro prioriza producao de conteudo/roteiro com prompt IA opcional, permite associar apenas a projeto existente e nao exibe tipo de midia antes do conteudo;
 - area `Content` nao deve exibir `Generate Scenes`, `Open Editor` ou qualquer acao de renderizacao;
-- detalhe de `Projects` nao cria conteudo; ele lista conteudos associados e permite seguir com geracao de entregavel;
+- detalhe de `Projects` nao deve criar conteudo; ele lista conteudos associados, permite vincular conteudos existentes e acompanhar os outputs gerados para cada combinacao projeto + conteudo;
 - area `Content` deve listar todos os conteudos ja criados, com filtros por nome/data/projeto/destination, modos grade/lista e acesso ao formulario de edicao;
 - area `Content` deve ter foco visual no conteudo; projeto aparece apenas como uso/associacao secundaria;
 - V1 bloqueia edicao de conteudo apenas quando algum projeto ja iniciou criacao/geracao de entregavel com base nele; simples associacao a projeto nao bloqueia edicao; versionamento de conteudo usado fica para fase futura;
@@ -68,6 +70,10 @@ Implementado:
 - decisao: `textLayer` nao e tipo de roteiro; captions, highlights, slide points, logo, overlays e estilos pertencem ao template/render do video final.
 - decisao: `music_storyboard` deve gerar visual beats, nao blocos de fala; sincronizacao fina com musica fica para etapa posterior com BPM/waveform/transientes ou marcadores manuais.
 - decisao: sound effects e background music sao camadas opcionais de mix/render do projeto, nao requisitos da segmentacao estrutural.
+- decisao aceita em 2026-05-05: o produto nao deve continuar evoluindo como gerador de aulas; a arquitetura-alvo passa a ser conteudo -> estrutura semantica -> output -> composicao -> preview -> render -> promocao.
+- decisao aceita em 2026-05-05: o legado `Course/Module/Lesson` deve ser removido progressivamente quando o dominio novo cobrir os fluxos principais; nao devemos manter dois modelos de produto em paralelo por conveniencia.
+- decisao aceita em 2026-05-05: `template` deixa de significar slide com ou sem texto e passa a significar sistema de composicao baseado em `Component`, `CompositionPreset`, `StyleDNA` e `VariationRules`.
+- decisao aceita em 2026-05-05: `Remotion` entra como direcao principal para composicao, preview e timeline; `ffmpeg` permanece como infraestrutura de midia e export.
 - segmentacao estrutural por LLM conectada ao worker usando `buildSegmentationPrompt`, com fallback para segundo modelo Gemini quando disponivel e fallback final por heuristica deterministica; aguardando validacao manual.
 - `buildSegmentationPrompt` nao pede mais `on_screen`; `on_screen` permanece temporariamente na etapa de metadados por bloco para compatibilidade com editor/render atual; aguardando validacao manual.
 - regeneracao manual de bloco (`segment_block`) usa o `sourceText` ja salvo no bloco, evitando voltar para os cortes heuristicos antigos; aguardando validacao manual.
@@ -79,24 +85,39 @@ Nao implementado ainda:
 - templates de render com politicas manual/aleatoria/sequencial;
 - biblioteca global de musicas de fundo e selecao por projeto;
 - geracao/mixagem efetiva de sound effects;
-- validacao de projeto/variant com TTS exigido e lingua sem rota TTS configurada;
+- validacao de projeto/output com TTS exigido e lingua sem rota TTS configurada;
 - worker ainda nao consome a escolha visual do projeto em `metadata.pipeline.image`/`metadata.pipeline.video`;
 - adaptador da extensao Veo para pedir imagem/video, acompanhar status e importar resultado;
 - render de cena animada usando provider configurado;
 - troca de voz por amostra (`voice_replacement`);
 - separacao/alinhamento de audio para substituir voz preservando fundo;
-- Variant como entidade dedicada;
-- Variant render plan, CTA por canal e render por blocos/cache;
+- ProjectOutputDefinition como contrato de saídas do projeto;
+- ProjectContentOutput como instância técnica do entregável para a combinação projeto + conteúdo;
+- NarrativeUnit como entidade dedicada;
+- Composition como entidade dedicada;
+- Component Library / CompositionPreset;
+- viewer/timeline em Remotion;
+- plano de render por output, CTA por canal e render por blocos/cache;
 - versionamento de ContentItem usado em entregaveis;
 - ContentSource;
 - biblioteca de conteudos reutilizaveis independente de projeto;
 - associacao muitos-para-muitos entre conteudo e projetos;
+- simplificar a tela de projeto para manter uma unica acao principal de associacao, sem duplicar o fluxo de criacao da area `Content`;
 - DeliveryChannel/formatos permitidos por canal;
 - PromotionTarget;
 - ShortLink redirecionavel;
 - publicacao social;
 - Stripe;
 - animacao de imagem.
+
+Prioridade de arquitetura a partir desta decisao:
+
+1. parar de adicionar novas capacidades ao dominio herdado de curso;
+2. consolidar `ContentItem`, `Project`, `PromotionTarget`, `ProjectOutputDefinition`, `ProjectContentOutput` e `ProjectContent`;
+3. introduzir `NarrativeUnit` e `Composition` como fonte de verdade para composicao;
+4. usar `Remotion` para preview/timeline;
+5. migrar renderer final para `Composition` quando o preview estiver estavel;
+6. remover o equivalente herdado conforme cada fase estabilizar.
 
 ## Credencial local de dev
 
@@ -198,7 +219,7 @@ Itens:
 - [ ] segmentacao deterministica usando `maxChars` configurado ou estimado pelo limite de fala; implementado, aguardando validacao manual;
 - [ ] segmentacao LLM usando `buildSegmentationPrompt` com `SpeechBudget`; implementado, aguardando validacao manual;
 - [ ] validacao deterministica bloqueando blocos acima do limite de fala antes de persistir; implementado, aguardando validacao manual;
-- [ ] aviso/bloqueio quando a lingua do projeto/variant nao tiver rota TTS e o modo exigir TTS.
+- [ ] aviso/bloqueio quando a lingua do projeto/output nao tiver rota TTS e o modo exigir TTS.
 
 Aceite parcial concluido:
 
@@ -214,17 +235,17 @@ Aceite parcial concluido:
 - [x] mudancas de bloco invalidam assets derivados existentes;
 - [x] teste COPE cobre persistencia de notas e sound effect.
 
-### Fase 3 - Variantes
+### Fase 3 - Outputs
 
 Objetivo: mesmo conteudo gerar multiplas saidas.
 
 Itens:
 
-- entidade/contrato Variant;
+- entidades `ProjectOutputDefinition` e `ProjectContentOutput`;
 - destinos por ContentItem;
-- aspect ratios por Variant;
-- assets por Variant;
-- variante curta por LLM.
+- aspect ratios por output;
+- assets por output;
+- output curto derivado por LLM.
 
 ### Fase 4 - Fontes
 
@@ -281,7 +302,7 @@ Antes de continuar implementacao pesada de render/publicacao, fechar o contrato 
 Prioridade:
 
 1. validar manualmente Projects -> conteudo associado -> Generate Scenes -> editor e confirmar log `segment_structure_llm_completed`;
-2. bloquear/avisar quando projeto/variant exige TTS e a lingua nao possui rota TTS configurada;
+2. bloquear/avisar quando projeto/output exige TTS e a lingua nao possui rota TTS configurada;
 3. fazer worker consumir `metadata.pipeline.image.model` na geracao de imagem;
 4. tratar limite separado para fala nativa de provider de video, como duracoes aceitas pelo modelo;
 5. adicionar `render.textLayer`/templates ao projeto e separar `on_screen` da etapa de metadados atual;
@@ -293,7 +314,7 @@ Prioridade:
 11. testar Projects -> abrir projeto com conteudo associado -> gerar cenas -> editor;
 12. conectar bloco de prompt IA ao provider LLM selecionado;
 13. modelar biblioteca de conteudos reutilizaveis e associacao muitos-para-muitos conteudo-projeto;
-14. modelar canais de entrega e formatos permitidos como contrato dedicado no projeto/variant;
+14. modelar canais de entrega e formatos permitidos como contrato dedicado no projeto/output;
 15. modelar PromotionTarget e ShortLink como entidades futuras;
 16. manter fluxo/telas de cursos intactos ate decisao explicita de migracao.
 

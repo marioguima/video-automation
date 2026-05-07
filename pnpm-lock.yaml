@@ -71,6 +71,12 @@ importers:
       '@radix-ui/react-slot':
         specifier: 1.0.2
         version: 1.0.2(@types/react@18.3.27)(react@18.3.1)
+      '@remotion/player':
+        specifier: ^4.0.457
+        version: 4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@remotion/transitions':
+        specifier: ^4.0.457
+        version: 4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       class-variance-authority:
         specifier: 0.7.0
         version: 0.7.0
@@ -89,6 +95,9 @@ importers:
       recharts:
         specifier: 2.12.7
         version: 2.12.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      remotion:
+        specifier: ^4.0.457
+        version: 4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       tailwind-merge:
         specifier: 2.3.0
         version: 2.3.0
@@ -1218,6 +1227,27 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@remotion/paths@4.0.457':
+    resolution: {integrity: sha512-brv/0ze8tuvKQC6el/3fUvEi3V7lQ67r+q0tZZPdoyJeZ0bL++BrNrMEPuJS99JUqBm1TZBTeVdOBOYudMl6cw==}
+
+  '@remotion/player@4.0.457':
+    resolution: {integrity: sha512-BXcpCcP7CaTdO7fIpmN7lCk+tr88zMITGJNAoTfH3Nb2CwtoY9BU1mNzTiRppgw8+TNCqWxdXN2PlXxInJDWYg==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
+  '@remotion/shapes@4.0.457':
+    resolution: {integrity: sha512-9oBAuxeoU8BYQh/x6GBZMI6mvDJQkUsFhBdERvFUUcuroZ5jxEwU50IqLNTA38SNrnchz5xhXYzaKCDA+N8Abg==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
+  '@remotion/transitions@4.0.457':
+    resolution: {integrity: sha512-sK7/k/oslZiYxShpAKEx/rayCFYAcVv3j7W2GUVE5ULZhdYp5d+6CHTXkz9UQyed0QCJ6ngZWmdevJGXAlcttA==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -3089,6 +3119,12 @@ packages:
   remeda@2.33.4:
     resolution: {integrity: sha512-ygHswjlc/opg2VrtiYvUOPLjxjtdKvjGz1/plDhkG66hjNjFr1xmfrs2ClNFo/E6TyUFiwYNh53bKV26oBoMGQ==}
 
+  remotion@4.0.457:
+    resolution: {integrity: sha512-Qi0s/Rcn4nLgeZnMi96UAiswj59P/2mWBbGV/7CLK7yPkunGyqgqE3rN77B1Rc/CEMR1aN50zDeX9VA2TSLNng==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
     engines: {node: '>=0.10.0'}
@@ -4534,6 +4570,28 @@ snapshots:
       react: 18.3.1
     optionalDependencies:
       '@types/react': 18.3.27
+
+  '@remotion/paths@4.0.457': {}
+
+  '@remotion/player@4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+      remotion: 4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+
+  '@remotion/shapes@4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      '@remotion/paths': 4.0.457
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+
+  '@remotion/transitions@4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      '@remotion/paths': 4.0.457
+      '@remotion/shapes': 4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+      remotion: 4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
@@ -6417,6 +6475,11 @@ snapshots:
   regexp-to-ast@0.5.0: {}
 
   remeda@2.33.4: {}
+
+  remotion@4.0.457(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+    dependencies:
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
 
   require-directory@2.1.1: {}
 

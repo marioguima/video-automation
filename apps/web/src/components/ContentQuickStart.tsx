@@ -384,7 +384,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
   };
 
   const renderList = () => (
-    <div className="h-full overflow-y-auto custom-scrollbar">
+    <div className="h-full overflow-y-auto custom-scrollbar bg-background text-foreground">
       <div className="p-8 max-w-7xl mx-auto pb-24">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
           <div>
@@ -517,7 +517,7 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
   if (screen === 'list') return renderList();
 
   return (
-    <div className="h-full overflow-y-auto custom-scrollbar">
+    <div className="h-full overflow-y-auto custom-scrollbar bg-background text-foreground">
       <div className="p-8 max-w-4xl mx-auto pb-24">
         <div className="flex items-center justify-between mb-8">
           <button

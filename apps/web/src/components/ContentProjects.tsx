@@ -2,16 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowUpDown,
-  CalendarDays,
-  CheckCircle2,
-  Clapperboard,
-  Clock,
-  Columns3,
   Eye,
   Filter,
   Film,
   FolderKanban,
-  Grid3X3,
   Image,
   LayoutGrid,
   List,
@@ -35,16 +29,29 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
 import ConfirmDialog from './ui/confirm-dialog';
+import CompositionPreview, {
+  type CompositionAspectRatio,
+  type NarrativeRole,
+  type StudioCompositionTimeline
+} from './composition/CompositionPreview';
 
 type Screen = 'list' | 'create' | 'detail';
-type DetailView = 'contents' | 'feed' | 'kanban' | 'agenda';
 type ProjectViewMode = 'grid' | 'list';
 type ProjectStatusFilter = 'all' | 'draft' | 'active' | 'archived';
 type ProjectSortKey = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'content-desc' | 'content-asc';
-type AspectRatio = '16:9' | '9:16' | '1:1' | '4:5' | '4:3' | '3:4';
+type AspectRatio = CompositionAspectRatio;
 type MediaType = 'image' | 'video';
+type StudioChannelFilter = 'all' | string;
 type ProductionStage = 'idea' | 'script' | 'scenes' | 'assets' | 'editing' | 'ready' | 'scheduled' | 'published';
-type ProjectStageCount = { value: ProductionStage; label: string; count: number };
+type OutputStatus =
+  | 'not_started'
+  | 'queued'
+  | 'in_progress'
+  | 'ready_for_review'
+  | 'approved'
+  | 'rendered'
+  | 'published'
+  | 'failed';
 
 type ProjectOutput = {
   id: string;
@@ -110,6 +117,7 @@ type Project = {
     defaultAspectRatios?: AspectRatio[];
     defaultOutputs?: ProjectOutput[];
     pipeline?: ProjectPipelineConfig;
+    coverImageUrl?: string;
   } | null;
 };
 
@@ -185,6 +193,8 @@ type ContentItem = {
   sourceText?: string | null;
   orientation?: string | null;
   status: string;
+  projectIds?: string[];
+  projectNames?: string[];
   metadata?: {
     backing?: {
       lessonId?: string;
@@ -199,12 +209,70 @@ type ContentItem = {
   } | null;
 };
 
-type ContentBlocksResponse = {
-  backing: {
-    lessonId: string;
-    lessonVersionId: string;
-  };
-  blocks: Array<{ id: string; index: number; sourceText: string; status?: string | null }>;
+type ShortLink = {
+  id: string;
+  code: string;
+  url: string;
+  status: string;
+};
+
+type PromotionTarget = {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  destinationUrl: string;
+  ctaLabel?: string | null;
+  status: string;
+  shortLinks: ShortLink[];
+};
+
+type ProjectContentOutput = {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  projectItemId: string;
+  itemId: string;
+  outputDefinitionId: string;
+  title: string;
+  mediaType: string;
+  channel: string;
+  destination: string;
+  aspectRatio: AspectRatio;
+  presetId: string;
+  currentStage?: string | null;
+  targetDurationS?: number | null;
+  status: string;
+  narrativeUnitsCount: number;
+  composition?: OutputComposition | null;
+};
+
+type NarrativeUnit = {
+  id: string;
+  projectContentOutputId: string;
+  order: number;
+  role: NarrativeRole;
+  sourceText: string;
+  narrationText?: string | null;
+  title?: string | null;
+  durationEstimateS?: number | null;
+  visualIntent?: {
+    visualStyle?: string;
+    assetPreference?: string;
+    emphasis?: string;
+    motionHint?: string;
+  } | null;
+}
+
+type OutputComposition = {
+  id: string;
+  projectContentOutputId: string;
+  fps: number;
+  width: number;
+  height: number;
+  durationFrames: number;
+  status: string;
+  timeline: StudioCompositionTimeline | null;
 };
 
 type ContentProjectsProps = {
@@ -294,6 +362,17 @@ const STAGE_TONE_CLASSES: Record<ProductionStage, string> = {
   scheduled: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-300',
   published: 'border-green-500/25 bg-green-500/10 text-green-300'
 };
+
+const OUTPUT_STATUS_COLUMNS: Array<{ value: OutputStatus; label: string }> = [
+  { value: 'not_started', label: 'Not started' },
+  { value: 'queued', label: 'Queued' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'ready_for_review', label: 'Ready for review' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rendered', label: 'Rendered' },
+  { value: 'published', label: 'Published' },
+  { value: 'failed', label: 'Failed' }
+];
 
 type OutputFormat = ProjectOutput & {
   mediaType: MediaType;
@@ -682,6 +761,10 @@ function formatProjectOutput(output: ProjectOutput): string {
   return `${output.channel}: ${mediaLabel} ${output.aspectRatio}`;
 }
 
+function getProjectChannelLabels(project: Project): string[] {
+  return uniqueValues(getProjectOutputs(project).map((output) => output.channel));
+}
+
 function getProjectOutputIds(project: Project): string[] {
   const formatIds = new Set(OUTPUT_FORMATS.map((format) => format.id));
   const savedIds = getProjectOutputs(project)
@@ -694,29 +777,6 @@ function getProjectTimestamp(project: Project): number {
   const raw = project.updatedAt ?? project.createdAt;
   const value = raw ? new Date(raw).getTime() : 0;
   return Number.isFinite(value) ? value : 0;
-}
-
-function formatProjectDate(value?: string): string {
-  if (!value) return 'Updated -';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Updated -';
-  return `Updated ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-}
-
-function getProjectProgress(project: Project): number {
-  const outputs = getProjectOutputs(project).length;
-  if (outputs === 0) return 0;
-  return Math.min(100, Math.round((outputs / OUTPUT_FORMATS.length) * 100));
-}
-
-function getContentProgress(items: ContentItem[]): number {
-  if (items.length === 0) return 0;
-  const maxStageIndex = STAGES.length - 1;
-  const total = items.reduce((sum, item) => {
-    const index = STAGES.findIndex((stage) => stage.value === getItemStage(item));
-    return sum + Math.max(0, index);
-  }, 0);
-  return Math.round((total / (items.length * maxStageIndex)) * 100);
 }
 
 function formatProjectStatusLabel(status?: string | null): string {
@@ -742,11 +802,7 @@ function getItemStage(item: ContentItem): ProductionStage {
   const stage = item.metadata?.productionStage;
   if (stage && STAGES.some((itemStage) => itemStage.value === stage)) return stage;
   if (STAGES.some((itemStage) => itemStage.value === item.status)) return item.status as ProductionStage;
-  return item.metadata?.backing?.lessonVersionId ? 'scenes' : 'idea';
-}
-
-function getItemDestinations(item: ContentItem): Destination[] {
-  return asArray<Destination>(item.metadata?.destinations);
+  return item.sourceText?.trim() ? 'script' : 'idea';
 }
 
 function getItemAspectRatios(item: ContentItem): AspectRatio[] {
@@ -767,13 +823,8 @@ function getProjectAspectRatios(project: Project): AspectRatio[] {
   return saved.length > 0 ? saved : DEFAULT_PROJECT_ASPECT_RATIOS;
 }
 
-function previewAspectClass(aspectRatio: AspectRatio): string {
-  if (aspectRatio === '9:16') return 'aspect-[9/16] max-h-[280px]';
-  if (aspectRatio === '1:1') return 'aspect-square';
-  if (aspectRatio === '4:5') return 'aspect-[4/5] max-h-[280px]';
-  if (aspectRatio === '4:3') return 'aspect-[4/3]';
-  if (aspectRatio === '3:4') return 'aspect-[3/4] max-h-[280px]';
-  return 'aspect-video';
+function normalizeOutputStatus(value: string | null | undefined): OutputStatus {
+  return OUTPUT_STATUS_COLUMNS.some((column) => column.value === value) ? (value as OutputStatus) : 'not_started';
 }
 
 export default function ContentProjects({
@@ -782,7 +833,6 @@ export default function ContentProjects({
   onOpenVideo
 }: ContentProjectsProps) {
   const [screen, setScreen] = useState<Screen>('list');
-  const [detailView, setDetailView] = useState<DetailView>('contents');
   const [projectViewMode, setProjectViewMode] = useState<ProjectViewMode>('grid');
   const [projectStatusFilter, setProjectStatusFilter] = useState<ProjectStatusFilter>('all');
   const [projectSort, setProjectSort] = useState<ProjectSortKey>('newest');
@@ -790,10 +840,20 @@ export default function ContentProjects({
   const [isProjectSortMenuOpen, setIsProjectSortMenuOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [items, setItems] = useState<ContentItem[]>([]);
+  const [libraryItems, setLibraryItems] = useState<ContentItem[]>([]);
+  const [promotionTargets, setPromotionTargets] = useState<PromotionTarget[]>([]);
+  const [outputsByItem, setOutputsByItem] = useState<Record<string, ProjectContentOutput[]>>({});
+  const [selectedStudioItemId, setSelectedStudioItemId] = useState<string | null>(null);
+  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null);
+  const [studioChannelFilter, setStudioChannelFilter] = useState<StudioChannelFilter>('all');
+  const [narrativeUnits, setNarrativeUnits] = useState<NarrativeUnit[]>([]);
+  const [activeComposition, setActiveComposition] = useState<OutputComposition | null>(null);
+  const [isLinkExistingOpen, setIsLinkExistingOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('Novo projeto');
   const [projectDescription, setProjectDescription] = useState('');
+  const [projectCoverImageUrl, setProjectCoverImageUrl] = useState('');
   const [selectedOutputIds, setSelectedOutputIds] = useState<string[]>(DEFAULT_PROJECT_OUTPUT_IDS);
   const [ttsRouteOptions, setTtsRouteOptions] = useState<TtsRouteOption[]>([]);
   const [imageModelOptions, setImageModelOptions] = useState<VisualModelOption[]>([]);
@@ -817,6 +877,27 @@ export default function ContentProjects({
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId]
   );
+
+  const selectedStudioItem = useMemo(
+    () => items.find((item) => item.id === selectedStudioItemId) ?? null,
+    [items, selectedStudioItemId]
+  );
+
+  const selectedProjectContentOutputs = useMemo(
+    () => (selectedStudioItemId ? outputsByItem[selectedStudioItemId] ?? [] : []),
+    [selectedStudioItemId, outputsByItem]
+  );
+
+  const selectedProjectContentOutput = useMemo(
+    () => selectedProjectContentOutputs.find((output) => output.id === selectedOutputId) ?? null,
+    [selectedOutputId, selectedProjectContentOutputs]
+  );
+
+  const linkableLibraryItems = useMemo(() => {
+    if (!selectedProjectId) return [];
+    const associatedIds = new Set(items.map((item) => item.id));
+    return libraryItems.filter((item) => !associatedIds.has(item.id));
+  }, [items, libraryItems, selectedProjectId]);
 
   const editingProject = useMemo(
     () => projects.find((project) => project.id === editingProjectId) ?? null,
@@ -857,60 +938,32 @@ export default function ContentProjects({
     [selectedOutputFormats]
   );
 
-  const itemsByStage = useMemo(() => {
-    const grouped = new Map<ProductionStage, ContentItem[]>();
-    for (const stage of STAGES) grouped.set(stage.value, []);
-    for (const item of items) grouped.get(getItemStage(item))?.push(item);
-    return grouped;
-  }, [items]);
-
-  const plannedItems = useMemo(
-    () =>
-      [...items].sort((a, b) => {
-        const aDate = a.metadata?.plannedPublishAt ?? '9999-12-31';
-        const bDate = b.metadata?.plannedPublishAt ?? '9999-12-31';
-        return aDate.localeCompare(bDate);
-      }),
-    [items]
-  );
-
   const selectedProjectOutputs = useMemo(
     () => (selectedProject ? getProjectOutputs(selectedProject) : []),
     [selectedProject]
   );
 
-  const selectedProjectPipeline = useMemo(
-    () => (selectedProject ? getProjectPipelineConfig(selectedProject) : null),
-    [selectedProject]
+  const studioFilteredOutputs = useMemo(
+    () =>
+      studioChannelFilter === 'all'
+        ? selectedProjectContentOutputs
+        : selectedProjectContentOutputs.filter((output) => output.channel === studioChannelFilter),
+    [selectedProjectContentOutputs, studioChannelFilter]
+  );
+
+  const selectedOutputColumns = useMemo(
+    () =>
+      OUTPUT_STATUS_COLUMNS.map((column) => ({
+        ...column,
+        items: studioFilteredOutputs.filter((output) => normalizeOutputStatus(output.status) === column.value)
+      })),
+    [studioFilteredOutputs]
   );
 
   const selectedProjectChannels = useMemo(
     () => uniqueValues(selectedProjectOutputs.map((output) => output.channel)),
     [selectedProjectOutputs]
   );
-
-  const selectedProjectProgress = useMemo(() => getContentProgress(items), [items]);
-
-  const selectedProjectStageCounts = useMemo<ProjectStageCount[]>(
-    () =>
-      STAGES.map((stage) => ({
-        ...stage,
-        count: itemsByStage.get(stage.value)?.length ?? 0
-      })).filter((stage) => stage.count > 0),
-    [itemsByStage]
-  );
-
-  const selectedProjectPrimaryStage = useMemo<ProjectStageCount | null>(
-    () =>
-      selectedProjectStageCounts.reduce<ProjectStageCount | null>(
-        (bestStage, stage) => (!bestStage || stage.count > bestStage.count ? stage : bestStage),
-        null
-      ),
-    [selectedProjectStageCounts]
-  );
-
-  const selectedProjectVideoFormats = selectedProjectOutputs.filter((output) => output.mediaType === 'video').length;
-  const selectedProjectImageFormats = selectedProjectOutputs.filter((output) => output.mediaType === 'image').length;
 
   const projectRecencyTag = useMemo(() => {
     const now = Date.now();
@@ -947,6 +1000,12 @@ export default function ContentProjects({
   const loadProjects = async () => {
     const data = await apiGet<Project[]>('/content-projects', { cacheMs: 0, dedupe: false });
     setProjects(data);
+  };
+
+  const loadLibraryItems = async () => {
+    const data = await apiGet<ContentItem[]>('/content-items', { cacheMs: 0, dedupe: false });
+    setLibraryItems(data);
+    return data;
   };
 
   const loadGenerationSettings = async () => {
@@ -1019,9 +1078,40 @@ export default function ContentProjects({
     setItems(data);
   };
 
+  const loadPromotionTargets = async (projectId: string) => {
+    const data = await apiGet<PromotionTarget[]>(`/content-projects/${projectId}/promotion-targets`, {
+      cacheMs: 0,
+      dedupe: false
+    });
+    setPromotionTargets(data);
+  };
+
+  const loadOutputsForItem = async (itemId: string) => {
+    if (!selectedProjectId) return [];
+    const data = await apiGet<ProjectContentOutput[]>(`/content-projects/${selectedProjectId}/items/${itemId}/outputs`, {
+      cacheMs: 0,
+      dedupe: false
+    });
+    setOutputsByItem((current) => ({ ...current, [itemId]: data }));
+    if (!selectedOutputId && data[0]?.id) {
+      setSelectedOutputId(data[0].id);
+    }
+    return data;
+  };
+
+  const loadNarrativeForOutput = async (outputId: string) => {
+    const [units, composition] = await Promise.all([
+      apiGet<NarrativeUnit[]>(`/project-content-outputs/${outputId}/narrative-units`, { cacheMs: 0, dedupe: false }),
+      apiGet<OutputComposition>(`/project-content-outputs/${outputId}/composition`, { cacheMs: 0, dedupe: false }).catch(() => null)
+    ]);
+    setNarrativeUnits(units);
+    setActiveComposition(composition);
+  };
+
   useEffect(() => {
     loadProjects().catch((err) => setError(err instanceof Error ? err.message : String(err)));
     loadGenerationSettings().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    loadLibraryItems().catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
   useEffect(() => {
@@ -1029,18 +1119,67 @@ export default function ContentProjects({
     const projectExists = projects.some((project) => project.id === initialProjectId);
     if (!projectExists) return;
     setSelectedProjectId(initialProjectId);
-    setDetailView('contents');
-    setScreen('detail');
+      setScreen('detail');
     onInitialProjectConsumed?.();
   }, [initialProjectId, projects, onInitialProjectConsumed]);
 
   useEffect(() => {
     if (!selectedProjectId) {
       setItems([]);
+      setPromotionTargets([]);
+      setOutputsByItem({});
+      setSelectedStudioItemId(null);
+      setSelectedOutputId(null);
+      setNarrativeUnits([]);
+      setActiveComposition(null);
       return;
     }
     loadItems(selectedProjectId).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    loadPromotionTargets(selectedProjectId).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    loadLibraryItems().catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (!items.length) {
+      setSelectedStudioItemId(null);
+      return;
+    }
+    if (!selectedStudioItemId || !items.some((item) => item.id === selectedStudioItemId)) {
+      setSelectedStudioItemId(items[0]?.id ?? null);
+    }
+  }, [items, selectedStudioItemId]);
+
+  useEffect(() => {
+    if (!selectedStudioItemId) {
+      setSelectedOutputId(null);
+      setStudioChannelFilter('all');
+      setNarrativeUnits([]);
+      setActiveComposition(null);
+      return;
+    }
+    loadOutputsForItem(selectedStudioItemId).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, [selectedProjectId, selectedStudioItemId]);
+
+  useEffect(() => {
+    if (!selectedProjectContentOutputs.length) {
+      setSelectedOutputId(null);
+      setNarrativeUnits([]);
+      setActiveComposition(null);
+      return;
+    }
+    if (!selectedOutputId || !selectedProjectContentOutputs.some((output) => output.id === selectedOutputId)) {
+      setSelectedOutputId(selectedProjectContentOutputs[0]?.id ?? null);
+    }
+  }, [selectedOutputId, selectedProjectContentOutputs]);
+
+  useEffect(() => {
+    if (!selectedOutputId) {
+      setNarrativeUnits([]);
+      setActiveComposition(null);
+      return;
+    }
+    loadNarrativeForOutput(selectedOutputId).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, [selectedOutputId]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -1061,7 +1200,6 @@ export default function ContentProjects({
   const openProject = (project: Project) => {
     setStatus('');
     setSelectedProjectId(project.id);
-    setDetailView('contents');
     setScreen('detail');
   };
 
@@ -1070,6 +1208,7 @@ export default function ContentProjects({
     setEditingProjectId(null);
     setProjectName('Novo projeto');
     setProjectDescription('');
+    setProjectCoverImageUrl('');
     setSelectedOutputIds(DEFAULT_PROJECT_OUTPUT_IDS);
     setPipelineScriptMode('scene_blocks');
     setPipelineAudioMode('tts');
@@ -1087,6 +1226,7 @@ export default function ContentProjects({
     setEditingProjectId(project.id);
     setProjectName(project.name);
     setProjectDescription(project.description ?? '');
+    setProjectCoverImageUrl(typeof project.metadata?.coverImageUrl === 'string' ? project.metadata.coverImageUrl : '');
     setSelectedOutputIds(getProjectOutputIds(project));
     const pipeline = getProjectPipelineConfig(project);
     setPipelineScriptMode(pipeline.script.mode ?? 'scene_blocks');
@@ -1157,6 +1297,7 @@ export default function ContentProjects({
           defaultAspectRatios: uniqueValues(outputFormats.map((format) => format.aspectRatio)),
           defaultOutputs: outputFormats.map(toProjectOutput),
           pipeline,
+          coverImageUrl: projectCoverImageUrl.trim() || undefined,
           product: 'flowshopy'
         }
       };
@@ -1172,8 +1313,7 @@ export default function ContentProjects({
       setEditingProjectId(null);
       setStatus(editingProjectId ? 'Project updated.' : 'Project created.');
       setScreen('detail');
-      setDetailView('contents');
-    } catch (err) {
+      } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save project.');
     } finally {
       setBusy(false);
@@ -1193,8 +1333,7 @@ export default function ContentProjects({
       setProjects((current) => current.filter((project) => project.id !== projectToDelete.id));
       setItems([]);
       setSelectedProjectId(null);
-      setDetailView('contents');
-      setScreen('list');
+        setScreen('list');
       setStatus(`Project deleted: ${projectToDelete.name}. Content remains in the library.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete project.');
@@ -1230,91 +1369,139 @@ export default function ContentProjects({
     });
   };
 
-  const segmentItem = async (item: ContentItem) => {
+  const linkExistingContentToProject = async (item: ContentItem) => {
+    if (!selectedProjectId) return;
     setBusy(true);
     setError(null);
     try {
-      const response = await apiPost<{ blocksCount: number; job: { id: string; status: string } }>(
-        `/content-items/${item.id}/segment`,
-        {
-          purge: true,
-          autoQueue: { audio: false, image: false }
-        }
-      );
-      const data = await apiGet<ContentBlocksResponse>(`/content-items/${item.id}/blocks`, { cacheMs: 0, dedupe: false });
-      setItems((current) =>
-        current.map((currentItem) =>
-          currentItem.id === item.id
-            ? {
-                ...currentItem,
-                status: 'scenes',
-                metadata: {
-                  ...(currentItem.metadata ?? {}),
-                  productionStage: 'scenes',
-                  backing: data.backing
-                }
-              }
-            : currentItem
-        )
-      );
-      await updateItem(item, { status: 'scenes', metadata: { productionStage: 'scenes', backing: data.backing } });
-      setStatus(`Scenes queued. Estimated scenes: ${response.blocksCount}.`);
+      const projectIds = Array.from(new Set([...(item.projectIds ?? []), selectedProjectId]));
+      await apiPatch<ContentItem>(`/content-items/${item.id}`, { projectIds });
+      await Promise.all([loadItems(selectedProjectId), loadProjects(), loadLibraryItems()]);
+      setStatus(`Content linked: ${item.title}.`);
+      if (projectIds.length > 0) {
+        setIsLinkExistingOpen(false);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate scenes.');
+      setError(err instanceof Error ? err.message : 'Failed to link content.');
     } finally {
       setBusy(false);
     }
   };
 
-  const openItem = async (item: ContentItem) => {
-    const lessonId = item.metadata?.backing?.lessonId;
-    if (lessonId) {
-      onOpenVideo?.({ lessonId, title: item.title });
-      return;
-    }
+  const generateNarrative = async (output: ProjectContentOutput, item: ContentItem) => {
+    setBusy(true);
+    setError(null);
     try {
-      const data = await apiGet<ContentBlocksResponse>(`/content-items/${item.id}/blocks`, { cacheMs: 0, dedupe: false });
-      onOpenVideo?.({ lessonId: data.backing.lessonId, title: item.title });
+      const response = await apiPost<{
+        output: ProjectContentOutput;
+        narrativeUnits: NarrativeUnit[];
+        composition: OutputComposition | null;
+      }>(`/project-content-outputs/${output.id}/narrative/generate`, {});
+      setOutputsByItem((current) => ({
+        ...current,
+        [item.id]: (current[item.id] ?? []).map((currentOutput) =>
+          currentOutput.id === output.id ? response.output : currentOutput
+        )
+      }));
+      setNarrativeUnits(response.narrativeUnits);
+      setActiveComposition(response.composition);
+      setItems((current) =>
+        current.map((currentItem) =>
+          currentItem.id === item.id
+            ? {
+                ...currentItem,
+                status: 'editing',
+                metadata: {
+                  ...(currentItem.metadata ?? {}),
+                  productionStage: 'editing'
+                }
+              }
+            : currentItem
+        )
+      );
+      setStatus(`Narrative generated for ${output.channel} ${output.aspectRatio}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open editor.');
+      setError(err instanceof Error ? err.message : 'Failed to generate narrative.');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const renderDestinationBadges = (item: ContentItem) => {
-    const destinations = getItemDestinations(item);
-    if (destinations.length === 0) return <Badge variant="outline">No destination</Badge>;
-    return destinations.slice(0, 3).map((destination) => (
-      <Badge key={destination} variant="secondary" className="capitalize">
-        {formatDestination(destination)}
-      </Badge>
-    ));
+  const openStudio = async (item: ContentItem) => {
+    setSelectedStudioItemId(item.id);
+    setScreen('detail');
+    try {
+      const outputs = outputsByItem[item.id] ?? (await loadOutputsForItem(item.id));
+      if (outputs[0]?.id) {
+        setSelectedOutputId(outputs[0].id);
+      } else {
+        setSelectedOutputId(null);
+        setNarrativeUnits([]);
+        setActiveComposition(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open studio.');
+    }
   };
 
-  const renderItemActions = (item: ContentItem) => {
-    const canUseVideoPipeline = item.kind === 'content' || item.kind === 'video' || item.kind === 'music_video';
-    if (!canUseVideoPipeline) return null;
-    return (
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={() => segmentItem(item)} disabled={busy}>
-          Generate Scenes
-        </Button>
-        <Button size="sm" onClick={() => openItem(item)} disabled={busy}>
-          Open Editor
-        </Button>
-      </div>
-    );
+  const openEditorForItem = (item: ContentItem) => {
+    const lessonId = item.metadata?.backing?.lessonId;
+    if (!lessonId || !onOpenVideo) return;
+    onOpenVideo({ lessonId, title: item.title });
+  };
+
+  const prepareEditorForItem = async (item: ContentItem) => {
+    if (!onOpenVideo) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await apiGet<{
+        itemId: string;
+        backing?: {
+          lessonId?: string;
+          lessonVersionId?: string;
+        } | null;
+      }>(`/content-items/${item.id}/blocks`, { cacheMs: 0, dedupe: false });
+      const lessonId = data.backing?.lessonId;
+      if (!lessonId) {
+        throw new Error('Editor backing not available for this content.');
+      }
+      setItems((current) =>
+        current.map((currentItem) =>
+          currentItem.id === item.id
+            ? {
+                ...currentItem,
+                metadata: {
+                  ...(currentItem.metadata ?? {}),
+                  backing: {
+                    lessonId: data.backing?.lessonId,
+                    lessonVersionId: data.backing?.lessonVersionId
+                  }
+                }
+              }
+            : currentItem
+        )
+      );
+      onOpenVideo({ lessonId, title: item.title });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to prepare editor.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const renderProjectCover = (project: Project, mode: 'grid' | 'list') => {
-    const projectOutputs = getProjectOutputs(project);
     const recency = projectRecencyTag[project.id];
-    const progress = getProjectProgress(project);
+    const coverImageUrl = typeof project.metadata?.coverImageUrl === 'string' ? project.metadata.coverImageUrl : '';
     return (
       <div
         className={`relative overflow-hidden bg-slate-100 dark:bg-slate-800 ${
           mode === 'grid' ? 'aspect-video' : 'h-full min-h-[170px]'
         }`}
       >
+        {coverImageUrl ? (
+          <img src={coverImageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        ) : null}
         <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.08),rgba(249,115,22,0.14))] dark:bg-[linear-gradient(135deg,rgba(148,163,184,0.12),rgba(249,115,22,0.13))]" />
         <div className="absolute left-8 top-8 h-2 w-32 rounded-full bg-slate-400/55 dark:bg-slate-300/50" />
         <div className="absolute left-8 top-14 h-1.5 w-44 rounded-full bg-slate-400/40 dark:bg-slate-300/35" />
@@ -1334,38 +1521,22 @@ export default function ContentProjects({
             {recency === 'new' ? 'NEW' : 'UPDATED'}
           </div>
         ) : null}
-
-        <div className="absolute inset-x-3 bottom-3 z-20 flex items-center justify-between gap-3">
-          <span className="inline-flex items-center justify-center rounded-[5px] bg-black/80 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
-            {project.status || 'draft'}
-          </span>
-          <span className="inline-flex items-center justify-center rounded-[5px] bg-black/80 px-2 py-0.5 text-xs font-bold text-white">
-            {projectOutputs.length} formats
-          </span>
-        </div>
-
-        <div className="absolute inset-x-3 bottom-8 z-20 h-1.5 rounded-full bg-black/45">
-          <div
-            className="h-full rounded-full bg-orange-600 transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
       </div>
     );
   };
 
   const renderProjectBadges = (project: Project) => {
-    const projectOutputs = getProjectOutputs(project);
+    const channels = getProjectChannelLabels(project);
     return (
       <div className="flex flex-wrap gap-1">
-        {projectOutputs.slice(0, 3).map((output) => (
-          <Badge key={output.id} variant="secondary" className="text-[10px]">
-            {formatProjectOutput(output)}
+        {channels.slice(0, 5).map((channel) => (
+          <Badge key={channel} variant="secondary" className="text-[10px]">
+            {channel}
           </Badge>
         ))}
-        {projectOutputs.length > 3 && (
+        {channels.length > 5 && (
           <Badge variant="outline" className="text-[10px]">
-            +{projectOutputs.length - 3}
+            +{channels.length - 5}
           </Badge>
         )}
       </div>
@@ -1416,14 +1587,9 @@ export default function ContentProjects({
             {project.name}
           </h3>
 
-          <p className="mt-2 text-xs text-muted-foreground font-medium line-clamp-2">
-            {project.description || 'No description yet.'}
-          </p>
-
           <div className="mt-3">{renderProjectBadges(project)}</div>
 
-          <div className="mt-3 flex items-center justify-between pt-3 text-[10px] font-bold uppercase tracking-tight text-muted-foreground">
-            <span>{formatProjectDate(project.updatedAt ?? project.createdAt)}</span>
+          <div className="mt-3 flex items-center justify-end pt-3 text-[10px] font-bold uppercase tracking-tight text-muted-foreground">
             <span>{project.itemsCount} items</span>
           </div>
         </div>
@@ -1475,10 +1641,6 @@ export default function ContentProjects({
 
             <h3 className="text-lg font-bold leading-tight mb-2">{project.name}</h3>
 
-            <p className="text-xs text-muted-foreground font-medium line-clamp-2">
-              {project.description || 'No description yet.'}
-            </p>
-
             <div className="mt-3">{renderProjectBadges(project)}</div>
           </div>
 
@@ -1488,9 +1650,7 @@ export default function ContentProjects({
                 <p className={`text-[10px] font-black uppercase tracking-[0.16em] ${recency === 'new' ? 'text-orange-600' : 'text-muted-foreground'}`}>
                   {recency === 'new' ? 'NEW' : 'UPDATED'}
                 </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">{formatProjectDate(project.updatedAt ?? project.createdAt)}</p>
-              )}
+              ) : null}
               <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-foreground">
                 {(project.status || 'draft').toUpperCase()}
               </p>
@@ -1529,7 +1689,11 @@ export default function ContentProjects({
   };
 
   const renderContentItem = (item: ContentItem) => (
-    <article key={item.id} className="border border-border rounded-md bg-background p-4 space-y-4">
+    <article
+      key={item.id}
+      className="border border-border rounded-md bg-background p-4 space-y-4 cursor-pointer transition-colors hover:border-orange-500/30"
+      onClick={() => openStudio(item)}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1543,20 +1707,240 @@ export default function ContentProjects({
           </div>
           <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{item.sourceText}</p>
         </div>
-        <div className="flex flex-wrap gap-1 justify-end">{renderDestinationBadges(item)}</div>
       </div>
-      {renderItemActions(item)}
-    </article>
-  );
+      </article>
+    );
+
+  const renderStudio = () => {
+    const selectedTarget = promotionTargets[0] ?? null;
+    const selectedBacking = selectedStudioItem?.metadata?.backing ?? null;
+    const selectedItemHasEditor = Boolean(selectedBacking?.lessonId && onOpenVideo);
+    const visibleOutputColumns = OUTPUT_STATUS_COLUMNS.map((column) => ({
+      ...column,
+      items: selectedOutputColumns.find((candidate) => candidate.value === column.value)?.items ?? []
+    }));
+    const studioNextStep = !selectedStudioItem
+      ? 'Selecione um conteúdo.'
+      : !selectedItemHasEditor
+        ? 'Prepare o editor.'
+        : 'Abra o editor ou acompanhe os entregáveis abaixo.';
+    return (
+      <div className="space-y-6">
+        <section className="rounded-[6px] border border-border bg-background p-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <h3 className="font-bold">Deliverables Board</h3>
+              <p className="text-sm text-muted-foreground">{studioNextStep}</p>
+            </div>
+            {selectedStudioItem ? (
+              <div className="flex flex-wrap gap-2">
+                {selectedItemHasEditor ? (
+                  <Button onClick={() => openEditorForItem(selectedStudioItem)} disabled={busy}>
+                    Open Editor
+                  </Button>
+                ) : (
+                  <Button onClick={() => prepareEditorForItem(selectedStudioItem)} disabled={busy}>
+                    Prepare Editor
+                  </Button>
+                )}
+                {selectedProjectContentOutput && selectedStudioItem ? (
+                  <Button variant="outline" onClick={() => generateNarrative(selectedProjectContentOutput, selectedStudioItem)} disabled={busy}>
+                    Build Narrative
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {items.length > 0 ? (
+              items.map((item) => {
+                const active = item.id === selectedStudioItemId;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedStudioItemId(item.id)}
+                    className={`rounded-[999px] border px-3 py-2 text-left transition-colors ${
+                      active
+                        ? 'border-orange-500/50 bg-orange-500/10'
+                        : 'border-border bg-card hover:border-orange-500/30'
+                    }`}
+                  >
+                    <div className="text-sm font-semibold">{item.title}</div>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="rounded-[5px] border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                Este projeto ainda não tem conteúdo associado. Use o tab <span className="font-semibold text-foreground">Contents</span> para vincular conteúdo primeiro.
+              </div>
+            )}
+          </div>
+        </section>
+
+        {selectedStudioItem ? (
+          <>
+            <section className="p-1">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <h3 className="font-bold">{selectedStudioItem.title}</h3>
+                  <p className="text-sm text-muted-foreground">Cada card representa um entregável deste conteúdo dentro do projeto.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant={studioChannelFilter === 'all' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setStudioChannelFilter('all')}
+                  >
+                    All channels
+                  </Button>
+                  {selectedProjectChannels.map((channel) => (
+                    <Button
+                      key={channel}
+                      variant={studioChannelFilter === channel ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setStudioChannelFilter(channel)}
+                    >
+                      {channel}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+                <div className="mt-5 overflow-x-auto pb-2">
+                  <div className="flex min-w-max items-stretch gap-4">
+                    {visibleOutputColumns.map((column) => (
+                      <section
+                        key={column.value}
+                        className="min-h-[520px] w-[160px] flex-none rounded-[6px] bg-transparent"
+                      >
+                        <div className="border-b border-border/60 px-2 py-3">
+                          <div className="text-sm font-semibold text-muted-foreground">
+                            {column.label} ({column.items.length})
+                          </div>
+                        </div>
+                      <div className="space-y-2.5 px-1 py-3">
+                        {column.items.length > 0 ? (
+                          column.items.map((output) => {
+                            const active = output.id === selectedOutputId;
+                            return (
+                              <button
+                                key={output.id}
+                                type="button"
+                                onClick={() => setSelectedOutputId(output.id)}
+                                className={`w-full rounded-[6px] px-3 py-3 text-left transition-colors ${
+                                  active
+                                    ? 'bg-orange-500/10 ring-1 ring-orange-500/40'
+                                    : 'bg-card/40 hover:bg-card/70'
+                                }`}
+                              >
+                                <div>
+                                  <div>
+                                    <div className="font-semibold">{output.channel}</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">{output.aspectRatio}</div>
+                                  </div>
+                                </div>
+                                <div className="mt-3 text-xs text-muted-foreground">
+                                  {output.currentStage ? `Stage: ${output.currentStage}` : 'No current stage'}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {output.narrativeUnitsCount} units
+                                </div>
+                              </button>
+                            );
+                          })
+                          ) : null}
+                        </div>
+                      </section>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr),360px]">
+              <section className="rounded-[6px] border border-border bg-background p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold">Selected Output</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {!selectedItemHasEditor
+                        ? 'Prepare o editor para iniciar o fluxo deste conteúdo.'
+                        : selectedProjectContentOutput
+                          ? `${selectedProjectContentOutput.channel} • ${selectedProjectContentOutput.aspectRatio} • ${selectedProjectContentOutput.presetId}`
+                          : 'Selecione um card do kanban para ver detalhes.'}
+                    </p>
+                  </div>
+                  {selectedProjectContentOutput && selectedStudioItem ? (
+                    <Button variant="outline" onClick={() => generateNarrative(selectedProjectContentOutput, selectedStudioItem)} disabled={busy}>
+                      Build Narrative
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="mt-4">
+                  <CompositionPreview timeline={activeComposition?.timeline ?? null} />
+                </div>
+              </section>
+
+              <section className="rounded-[6px] border border-border bg-background p-4">
+                <div>
+                  <h3 className="font-bold">Narrative</h3>
+                  <p className="text-sm text-muted-foreground">Resumo do que já existe para o entregável selecionado.</p>
+                </div>
+                {narrativeUnits.length > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    {narrativeUnits.slice(0, 5).map((unit) => (
+                      <article key={unit.id} className="rounded-[5px] border border-border bg-card px-3 py-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <Badge variant="secondary">{unit.role}</Badge>
+                          <div className="text-xs text-muted-foreground">
+                            {unit.durationEstimateS ? `${unit.durationEstimateS.toFixed(1)}s` : 'No duration'}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-sm font-medium">{unit.title || `Unit ${unit.order + 1}`}</div>
+                        <p className="mt-1 text-xs text-muted-foreground line-clamp-3">{unit.narrationText || unit.sourceText}</p>
+                      </article>
+                    ))}
+                    {narrativeUnits.length > 5 ? (
+                      <div className="text-xs text-muted-foreground">+{narrativeUnits.length - 5} units no editor</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-[5px] border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                    {selectedStudioItem && selectedProjectContentOutput
+                      ? 'Ainda nao existe narrativa para este entregável.'
+                      : selectedStudioItem && selectedItemHasEditor
+                        ? 'Abra o editor para iniciar o fluxo deste conteúdo.'
+                        : 'Prepare o editor para começar o fluxo deste conteúdo.'}
+                  </div>
+                )}
+
+                {selectedTarget ? (
+                  <div className="mt-6 rounded-[6px] border border-border bg-card p-3">
+                    <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">Promotion</div>
+                    <div className="mt-2 text-sm font-semibold">{selectedTarget.name}</div>
+                    <div className="mt-1 text-xs text-muted-foreground break-all">{selectedTarget.destinationUrl}</div>
+                  </div>
+                ) : null}
+              </section>
+            </section>
+          </>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="h-full overflow-y-auto bg-background text-foreground">
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div
+        className={`px-6 py-6 space-y-6 ${
+          screen === 'detail' && selectedStudioItemId ? 'w-full max-w-none' : 'max-w-7xl mx-auto'
+        }`}
+      >
         {screen !== 'detail' && (
           <header className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">FlowShopy</p>
                 <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
               </div>
               {screen === 'list' ? (
@@ -1565,9 +1949,6 @@ export default function ContentProjects({
                 </Button>
               ) : null}
             </div>
-            <p className="text-sm text-muted-foreground max-w-4xl">
-              Projects group related content and define the default destinations and formats used to produce deliverables.
-            </p>
           </header>
         )}
 
@@ -1756,6 +2137,13 @@ export default function ContentProjects({
               onChange={(event) => setProjectDescription(event.target.value)}
               className="min-h-[120px] w-full rounded-md border border-border bg-background p-3 text-sm"
               placeholder="What content belongs in this project?"
+            />
+
+            <input
+              value={projectCoverImageUrl}
+              onChange={(event) => setProjectCoverImageUrl(event.target.value)}
+              className="h-11 rounded-md border border-border bg-background px-3 text-sm"
+              placeholder="Project image URL (optional)"
             />
 
             <div className="border border-border rounded-md bg-background p-4 space-y-4">
@@ -2084,16 +2472,13 @@ export default function ContentProjects({
             </div>
 
             <section className="space-y-10">
-              <div className="flex flex-col gap-6 md:flex-row">
-                <div className="h-44 w-full flex-shrink-0 overflow-hidden rounded-[5px] border border-border bg-card shadow-sm md:w-60">
+              <div className="flex flex-col gap-6 md:flex-row md:items-start">
+                <div className="h-44 w-full flex-shrink-0 overflow-hidden rounded-[5px] border border-border bg-card shadow-sm md:w-64">
                   {renderProjectCover(selectedProject, 'list')}
                 </div>
 
                 <div className="min-w-0 flex-1 pt-1">
                   <h2 className="text-3xl font-bold leading-tight text-slate-800 dark:text-white">{selectedProject.name}</h2>
-                  <p className="mt-2 max-w-4xl text-sm text-muted-foreground">
-                    {selectedProject.description || 'No description yet.'}
-                  </p>
 
                   <div className="mt-4 flex flex-wrap items-center gap-3">
                     <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-primary">
@@ -2108,88 +2493,11 @@ export default function ContentProjects({
                     <span className="rounded-full border border-slate-400/20 bg-slate-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-300">
                       {items.length} content items
                     </span>
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                      <Clock size={14} />
-                      {formatProjectDate(selectedProject.updatedAt ?? selectedProject.createdAt)}
-                    </span>
                   </div>
-
-                  <div className="mt-4 h-[7px] w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-                    <div
-                      className="h-full bg-green-500 transition-all duration-500"
-                      style={{ width: `${selectedProjectProgress}%` }}
-                    />
-                  </div>
-                  <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                    {selectedProjectProgress}% project progress
-                    {selectedProjectPrimaryStage ? (
-                      <span className="ml-2 text-orange-400">
-                        Current stage: {selectedProjectPrimaryStage.label}
-                      </span>
-                    ) : null}
-                  </p>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {selectedProjectStageCounts.length > 0 ? (
-                      selectedProjectStageCounts.map((stage) => (
-                        <span
-                          key={stage.value}
-                          className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${STAGE_TONE_CLASSES[stage.value]}`}
-                        >
-                          {stage.count} {stage.label}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="rounded-full border border-dashed border-border px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                        No content staged yet
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {selectedProjectPipeline && (
-                      <>
-                        <Badge variant="outline" className="border-slate-400/30 bg-slate-500/10 text-slate-200">
-                          Audio {PIPELINE_AUDIO_LABELS[selectedProjectPipeline.audio.mode ?? 'none']}
-                        </Badge>
-                        <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
-                          Video {PIPELINE_VIDEO_LABELS[selectedProjectPipeline.video.mode ?? 'none']}
-                        </Badge>
-                        {selectedProjectPipeline.image.mode === 'generate' && (
-                          <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
-                            Image pipeline
-                          </Badge>
-                        )}
-                        {selectedProjectPipeline.audio.tts?.providerId && selectedProjectPipeline.audio.tts?.language && (
-                          <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
-                            TTS {selectedProjectPipeline.audio.tts.providerId} / {selectedProjectPipeline.audio.tts.language}
-                          </Badge>
-                        )}
-                        {selectedProjectPipeline.image.model?.providerId && selectedProjectPipeline.image.model?.modelId && (
-                          <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
-                            Image {selectedProjectPipeline.image.model.providerId} / {selectedProjectPipeline.image.model.modelId}
-                          </Badge>
-                        )}
-                        {selectedProjectPipeline.video.model?.providerId && selectedProjectPipeline.video.model?.modelId && (
-                          <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
-                            Video {selectedProjectPipeline.video.model.providerId} / {selectedProjectPipeline.video.model.modelId}
-                          </Badge>
-                        )}
-                      </>
-                    )}
-                    {selectedProjectVideoFormats > 0 && (
-                      <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-300">
-                        Video formats {selectedProjectVideoFormats}
-                      </Badge>
-                    )}
-                    {selectedProjectImageFormats > 0 && (
-                      <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
-                        Image formats {selectedProjectImageFormats}
-                      </Badge>
-                    )}
-                    {selectedProjectOutputs.map((output) => (
-                      <Badge key={output.id} variant="secondary" className="bg-slate-800/80 text-slate-100">
-                        {formatProjectOutput(output)}
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {getProjectChannelLabels(selectedProject).map((channel) => (
+                      <Badge key={channel} variant="secondary" className="bg-slate-800/80 text-slate-100">
+                        {channel}
                       </Badge>
                     ))}
                   </div>
@@ -2197,172 +2505,72 @@ export default function ContentProjects({
                   {status && <p className="mt-3 text-xs text-muted-foreground">{status}</p>}
                 </div>
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'contents', label: 'Contents', Icon: ListChecks },
-                    { value: 'feed', label: 'Feed', Icon: Grid3X3 },
-                    { value: 'kanban', label: 'Kanban', Icon: Columns3 },
-                    { value: 'agenda', label: 'Agenda', Icon: CalendarDays }
-                  ].map(({ value, label, Icon }) => (
-                    <Button
-                      key={value}
-                      variant={detailView === value ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setDetailView(value as DetailView)}
-                      className="gap-2"
-                    >
-                      <Icon size={15} /> {label}
-                    </Button>
-                  ))}
-              </div>
-
-            {detailView === 'contents' && (
               <div className="space-y-5">
                 <section className="grid gap-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="font-bold">Deliverables</h3>
+                      <h3 className="font-bold">Associated Content</h3>
                       <p className="text-sm text-muted-foreground">{items.length} associated content item{items.length === 1 ? '' : 's'}</p>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => selectedProjectId && loadItems(selectedProjectId)} title="Refresh content">
-                      <RefreshCw size={16} />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setIsLinkExistingOpen((current) => !current)}>
+                        <Plus size={14} /> Link existing
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => selectedProjectId && loadItems(selectedProjectId)} title="Refresh content">
+                        <RefreshCw size={16} />
+                      </Button>
+                    </div>
                   </div>
+
+                  {isLinkExistingOpen && (
+                    <div className="rounded-[6px] border border-border bg-card p-4 space-y-4">
+                      <div>
+                        <h4 className="font-semibold">Link existing content</h4>
+                        <p className="text-sm text-muted-foreground">Associe conteúdo já existente da biblioteca a este projeto. A criação do conteúdo continua sendo feita no menu Content.</p>
+                      </div>
+                      {linkableLibraryItems.length > 0 ? (
+                        <div className="space-y-2">
+                          {linkableLibraryItems.map((item) => (
+                            <div key={item.id} className="flex items-start justify-between gap-3 rounded-[5px] border border-border bg-background px-3 py-3">
+                              <div className="min-w-0">
+                                <div className="font-semibold">{item.title}</div>
+                                <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{item.sourceText}</div>
+                                {(item.projectNames ?? []).length > 0 ? (
+                                  <div className="mt-2 text-[11px] text-muted-foreground">
+                                    In: {(item.projectNames ?? []).join(', ')}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <Button size="sm" variant="outline" onClick={() => linkExistingContentToProject(item)} disabled={busy}>
+                                Link
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-[5px] border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                          Nenhum conteúdo disponível para vincular.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {items.map(renderContentItem)}
                   {items.length === 0 && (
                     <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6">
-                      No associated content.
+                      No associated content. Create content in the Content menu and link it here to this project.
                     </div>
                   )}
                 </section>
               </div>
-            )}
-
-            {detailView === 'feed' && (
-              <div>
-                <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
-                  {items.map((item) => {
-                    const aspectRatio = getItemAspectRatios(item)[0] ?? '16:9';
-                    const Icon = item.kind === 'image' ? Image : item.kind === 'music_video' ? Clapperboard : Film;
-                    return (
-                      <article key={item.id} className="border border-border rounded-md bg-background overflow-hidden">
-                        <div className={`relative bg-muted flex items-center justify-center ${previewAspectClass(aspectRatio)}`}>
-                          {item.metadata?.thumbnailUrl ? (
-                            <img src={item.metadata.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <div className="flex flex-col items-center gap-3 text-muted-foreground px-6 text-center">
-                              <Icon size={36} />
-                              <div className="text-sm font-semibold text-foreground">{item.title}</div>
-                              <div className="text-xs">Preview will use thumbnail, first frame, main image or this placeholder.</div>
-                            </div>
-                          )}
-                          <Badge className="absolute left-3 top-3" variant="secondary">
-                            {aspectRatio}
-                          </Badge>
-                        </div>
-                        <div className="p-4 space-y-3">
-                          <div>
-                            <h3 className="font-semibold">{item.title}</h3>
-                            <p className="text-xs text-muted-foreground">Content</p>
-                          </div>
-                          <div className="flex flex-wrap gap-1">{renderDestinationBadges(item)}</div>
-                          <div className="flex flex-wrap gap-1">
-                            {getItemAspectRatios(item).map((ratio) => (
-                              <Badge key={ratio} variant="outline">
-                                {ratio}
-                              </Badge>
-                            ))}
-                          </div>
-                          {renderItemActions(item)}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-                {items.length === 0 && (
-                  <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6">
-                    The feed is empty. Add content to this project first.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {detailView === 'kanban' && (
-              <div className="overflow-x-auto">
-                <div className="grid grid-cols-[repeat(8,minmax(220px,1fr))] gap-3 min-w-[1760px]">
-                  {STAGES.map((stage) => (
-                    <section key={stage.value} className="border border-border rounded-md bg-background min-h-[420px]">
-                      <div className="p-3 border-b border-border flex items-center justify-between">
-                        <h3 className="font-semibold text-sm">{stage.label}</h3>
-                        <Badge variant="secondary">{itemsByStage.get(stage.value)?.length ?? 0}</Badge>
-                      </div>
-                      <div className="p-3 space-y-3">
-                        {(itemsByStage.get(stage.value) ?? []).map((item) => (
-                          <article key={item.id} className="border border-border rounded-md bg-card p-3 space-y-3">
-                            <div>
-                              <h4 className="text-sm font-semibold">{item.title}</h4>
-                              <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{item.sourceText}</p>
-                            </div>
-                            <div className="flex flex-wrap gap-1">{renderDestinationBadges(item)}</div>
-                            <select
-                              value={getItemStage(item)}
-                              onChange={(event) => moveItemToStage(item, event.target.value as ProductionStage)}
-                              className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
-                              disabled={busy}
-                            >
-                              {STAGES.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  Move to {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </article>
-                        ))}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {detailView === 'agenda' && (
-              <div className="space-y-4">
-                <div className="border border-border rounded-md bg-background">
-                  {plannedItems.map((item) => (
-                    <div key={item.id} className="p-4 border-b border-border last:border-b-0 flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold">{item.title}</h3>
-                          <Badge variant="secondary">{getItemStage(item)}</Badge>
-                        </div>
-                        <div className="text-sm text-muted-foreground mt-1">
-                          {item.metadata?.plannedPublishAt ? `Planned for ${item.metadata.plannedPublishAt}` : 'No planned publish date'}
-                          {item.metadata?.ownerName ? ` - Owner: ${item.metadata.ownerName}` : ''}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1 md:justify-end">{renderDestinationBadges(item)}</div>
-                    </div>
-                  ))}
-                  {plannedItems.length === 0 && (
-                    <div className="text-sm text-muted-foreground p-6">
-                      No scheduled work yet. Add a date when creating content.
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 size={16} className="mt-0.5 text-primary" />
-                  Agenda is project-scoped. Platform scheduling remains a future integration.
-                </div>
-              </div>
-            )}
+            {selectedStudioItemId && renderStudio()}
           </section>
           </section>
         )}
         <ConfirmDialog
           open={isDeleteDialogOpen && Boolean(selectedProject)}
           title="Delete project?"
-          description={`This will delete "${selectedProject?.name ?? 'this project'}" and detach its content items. The content and generated backing data will remain available.`}
+          description={`This will delete "${selectedProject?.name ?? 'this project'}" and detach its content items. The content remains available in the library.`}
           confirmLabel="Delete project"
           onCancel={() => setIsDeleteDialogOpen(false)}
           onConfirm={deleteProject}

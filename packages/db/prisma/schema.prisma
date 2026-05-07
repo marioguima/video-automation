@@ -32,6 +32,12 @@ model Workspace {
   contentProjects ContentProject[]
   contentItems ContentItem[]
   contentProjectItems ContentProjectItem[]
+  promotionTargets PromotionTarget[]
+  shortLinks ShortLink[]
+  projectOutputDefinitions ProjectOutputDefinition[]
+  projectContentOutputs ProjectContentOutput[]
+  narrativeUnits NarrativeUnit[]
+  compositions Composition[]
   modules     Module[]
   lessons     Lesson[]
   lessonVersions LessonVersion[]
@@ -104,6 +110,9 @@ model ContentProject {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   projectItems ContentProjectItem[]
+  promotionTargets PromotionTarget[]
+  outputDefinitions ProjectOutputDefinition[]
+  projectContentOutputs ProjectContentOutput[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -124,6 +133,7 @@ model ContentItem {
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   projectItems ContentProjectItem[]
+  projectContentOutputs ProjectContentOutput[]
 
   @@index([workspaceId, kind, status])
 }
@@ -138,10 +148,152 @@ model ContentProjectItem {
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
   item      ContentItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  outputs   ProjectContentOutput[]
 
   @@unique([workspaceId, projectId, itemId])
   @@index([workspaceId, projectId, createdAt])
   @@index([workspaceId, itemId, createdAt])
+}
+
+model PromotionTarget {
+  id             String   @id @default(cuid())
+  workspaceId     String
+  projectId       String
+  name            String
+  description     String?
+  destinationUrl  String
+  ctaLabel        String?
+  status          String   @default("draft")
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shortLinks ShortLink[]
+
+  @@index([workspaceId, projectId, createdAt])
+  @@index([workspaceId, status])
+}
+
+model ShortLink {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  promotionTargetId String
+  code              String   @unique
+  url               String
+  status            String   @default("active")
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  promotionTarget PromotionTarget @relation(fields: [promotionTargetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, promotionTargetId, createdAt])
+  @@index([workspaceId, status])
+}
+
+model ProjectOutputDefinition {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  projectId       String
+  key             String
+  channel         String
+  label           String
+  mediaType       String   @default("video")
+  destination     String
+  aspectRatio     String   @default("16:9")
+  presetId        String   @default("clean-authority")
+  language        String?
+  isActive        Boolean  @default(true)
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  outputs   ProjectContentOutput[]
+
+  @@unique([projectId, key])
+  @@index([workspaceId, projectId, createdAt])
+  @@index([workspaceId, isActive])
+}
+
+model ProjectContentOutput {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  projectId         String
+  projectItemId     String
+  itemId            String
+  outputDefinitionId String
+  title             String
+  mediaType         String   @default("video")
+  channel           String
+  destination       String
+  aspectRatio       String   @default("16:9")
+  presetId          String   @default("clean-authority")
+  status            String   @default("not_started")
+  currentStage      String?
+  targetDurationS   Float?
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectItem ContentProjectItem @relation(fields: [projectItemId], references: [id], onDelete: Cascade)
+  item      ContentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  outputDefinition ProjectOutputDefinition @relation(fields: [outputDefinitionId], references: [id], onDelete: Cascade)
+  narrativeUnits NarrativeUnit[]
+  composition Composition?
+
+  @@unique([projectId, itemId, outputDefinitionId])
+  @@index([workspaceId, projectId, itemId, createdAt])
+  @@index([workspaceId, status, currentStage])
+}
+
+model NarrativeUnit {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  projectContentOutputId String
+  order             Int
+  role              String
+  sourceText        String
+  narrationText     String?
+  title             String?
+  durationEstimateS Float?
+  visualIntentJson  String?
+  ctaIntentJson     String?
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projectContentOutput ProjectContentOutput @relation(fields: [projectContentOutputId], references: [id], onDelete: Cascade)
+
+  @@unique([projectContentOutputId, order])
+  @@index([workspaceId, projectContentOutputId, order])
+}
+
+model Composition {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  projectContentOutputId String   @unique
+  fps            Int      @default(30)
+  width          Int      @default(1920)
+  height         Int      @default(1080)
+  durationFrames Int      @default(0)
+  status         String   @default("draft")
+  timelineJson   String
+  metadataJson   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projectContentOutput ProjectContentOutput @relation(fields: [projectContentOutputId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
 }
 
 model Course {

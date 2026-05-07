@@ -4,7 +4,7 @@
 
 FlowShopy e uma plataforma de criacao e automacao de conteudo com foco em video, pensada como uma maquina de atencao para promocao de produtos.
 
-O produto segue o principio COPE: Create Once, Publish Everywhere. O usuario cria um conteudo central e gera variantes publicaveis para diferentes destinos, formatos e aspect ratios.
+O produto segue o principio COPE: Create Once, Publish Everywhere. O usuario cria um conteudo central e gera outputs publicaveis para diferentes destinos, formatos e aspect ratios.
 
 Na V1, o produto entrega videos. No futuro, o mesmo dominio deve aceitar imagens, carrosseis, e-books/PDFs e outros formatos, mas isso nao deve bloquear a primeira versao.
 
@@ -61,11 +61,19 @@ conteudo -> projeto -> entregaveis -> publicacao/promocao
 Existem dois elementos principais:
 
 - `Content`: a base reutilizavel. Pode nascer de ideia, roteiro, pesquisa, transcricao ou outro insumo.
-- `Project`: o agrupador editorial/comercial que da utilidade e fluxo ao conteudo. Um conteudo sozinho pode existir como rascunho ou biblioteca, mas passa a ter impacto real quando associado a um projeto.
+- `Project`: o conjunto de parametros que orquestra a transformacao do conteudo em entregaveis. Um conteudo sozinho pode existir como rascunho ou biblioteca, mas passa a ter impacto real quando associado a um projeto.
 
 Um projeto nao deve comecar por uma classificacao como canal, perfil, campanha ou musica. Ele e um workspace de producao com nome, descricao, destinos padrao e formatos. O assunto, objetivo comercial ou contexto editorial entram na descricao e nos conteudos associados.
 
 Um mesmo conteudo pode ser usado em mais de um projeto. O produto deve permitir enxergar facilmente onde cada conteudo esta sendo utilizado.
+
+Regras de produto:
+
+- conteudo e materia-prima e existe por si so;
+- projeto nao cria valor sozinho; ele precisa de conteudo associado;
+- projeto nao e o entregavel final; ele define parametros para o core/fabrica gerar o entregavel;
+- a criacao de conteudo pertence a area `Content`;
+- a area de `Project` deve localizar, associar e orquestrar conteudos existentes, nao duplicar a experiencia de escrita.
 
 ## Escopo da V1
 
@@ -74,16 +82,13 @@ V1 deve entregar o fluxo principal de video:
 1. criar ou iniciar um conteudo;
 2. produzir/refinar o conteudo com escrita manual e/ou apoio de IA;
 3. associar o conteudo a um projeto;
-4. usar configuracoes do projeto para canais de entrega e formatos;
-5. gerar/editar cenas;
-6. gerar texto narrado;
-7. gerar prompts de imagem;
-8. reservar/editar prompts de animacao;
-9. gerar audio TTS;
-10. gerar imagens;
-11. renderizar cenas/slides/clipes;
-12. concatenar video final;
-13. baixar MP4 final.
+4. usar configuracoes do projeto para parametrizar a fabrica de entregaveis;
+5. materializar outputs de video 16:9 e 9:16 a partir da combinacao projeto + conteudo;
+6. gerar estrutura semantica e composicao do output selecionado;
+7. gerar/editar audio, imagem, clips, motion e CTA conforme o output;
+8. visualizar timeline/preview;
+9. renderizar video final;
+10. baixar MP4 final.
 
 ## Visoes de produto obrigatorias
 
@@ -102,6 +107,12 @@ Deve guiar:
 - geracao de cenas.
 
 Tambem deve existir um acesso rapido para iniciar pela criacao de conteudo. Essa tela deve ser voltada para producao do conteudo/roteiro, com area de escrita e um bloco de prompt/conversa para pedir ajuda da IA. Ela nao deve ser a tela principal de configuracao de canais e formatos; isso pertence ao projeto.
+
+Regra de UX:
+
+- `Content` cria e edita conteudo;
+- `Project` associa conteudo existente e o transforma em entregavel;
+- nao deve haver duas telas principais diferentes para criar o mesmo conteudo.
 
 ### Feed
 

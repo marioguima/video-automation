@@ -17,11 +17,13 @@ import type { WebSocket } from "ws";
 
 import {
   buildDeterministicBlocks,
+  COMPOSITION_ASPECT_RATIOS,
   ensureAppSettingsFile,
   ensureDataDir,
   getConfig,
   getMissingAppSettingsSecrets,
   loadRootEnv,
+  NARRATIVE_ROLES,
   normalizeLlmStages,
   resolveDefaultLlmModel,
   normalizeLlmProvider,
@@ -35,10 +37,19 @@ import {
   findVoiceById,
   blockSlideDir,
   type AppSettings,
+  type CompositionAspectRatio,
+  type CompositionTimeline,
+  type NarrativeRole,
   type VisualGenerationCapability
 } from "@vizlec/shared";
 import { createPrismaClient } from "@vizlec/db";
 import { buildEndpointPurposeExplanation } from "./openapi-endpoint-explanations.js";
+import {
+  buildInitialCompositionTimeline,
+  generateNarrativeUnits,
+  getTimelineDimensions,
+  normalizePresetId
+} from "./content-composition.js";
 
 loadRootEnv();
 
@@ -5602,6 +5613,28 @@ function parseJsonRecord(value: string | null | undefined): Record<string, unkno
   }
 }
 
+function parseJsonValue<T>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function isPrismaMissingTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  return candidate.code === "P2021" || (typeof candidate.message === "string" && candidate.message.includes("does not exist in the current database"));
+}
+
+function sendCompositionMigrationRequired(reply: FastifyReply) {
+  return reply.code(409).send({
+    error: "content composition migration required",
+    message: "Run the database migration for the content composition domain before using this endpoint."
+  });
+}
+
 type ProjectPipelineScriptMode = "none" | "scene_blocks" | "music_storyboard";
 type ProjectPipelineAudioMode = "none" | "tts" | "music" | "video_native_audio";
 type ProjectPipelineImageMode = "none" | "generate";
@@ -6037,6 +6070,253 @@ function serializeContentItem(item: {
   };
 }
 
+function normalizeCompositionAspectRatio(value: unknown): CompositionAspectRatio | null {
+  return typeof value === "string" && COMPOSITION_ASPECT_RATIOS.includes(value as CompositionAspectRatio)
+    ? (value as CompositionAspectRatio)
+    : null;
+}
+
+function normalizeNarrativeRole(value: unknown): NarrativeRole | null {
+  return typeof value === "string" && NARRATIVE_ROLES.includes(value as NarrativeRole)
+    ? (value as NarrativeRole)
+    : null;
+}
+
+function buildShortLinkCode(seed: string): string {
+  const normalized = seed
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 20);
+  const suffix = randomBytes(3).toString("hex");
+  return `${normalized || "promo"}-${suffix}`;
+}
+
+function serializePromotionTarget(target: {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  destinationUrl: string;
+  ctaLabel: string | null;
+  status: string;
+  metadataJson: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  shortLinks?: Array<{
+    id: string;
+    code: string;
+    url: string;
+    status: string;
+    metadataJson: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+}) {
+  return {
+    id: target.id,
+    workspaceId: target.workspaceId,
+    projectId: target.projectId,
+    name: target.name,
+    description: target.description,
+    destinationUrl: target.destinationUrl,
+    ctaLabel: target.ctaLabel,
+    status: target.status,
+    metadata: parseJsonRecord(target.metadataJson),
+    createdAt: target.createdAt,
+    updatedAt: target.updatedAt,
+    shortLinks: (target.shortLinks ?? []).map((link) => ({
+      id: link.id,
+      code: link.code,
+      url: link.url,
+      status: link.status,
+      metadata: parseJsonRecord(link.metadataJson),
+      createdAt: link.createdAt,
+      updatedAt: link.updatedAt
+    }))
+  };
+}
+
+function serializeNarrativeUnit(unit: {
+  id: string;
+  workspaceId: string;
+  projectContentOutputId: string;
+  order: number;
+  role: string;
+  sourceText: string;
+  narrationText: string | null;
+  title: string | null;
+  durationEstimateS: number | null;
+  visualIntentJson: string | null;
+  ctaIntentJson: string | null;
+  metadataJson: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: unit.id,
+    workspaceId: unit.workspaceId,
+    projectContentOutputId: unit.projectContentOutputId,
+    order: unit.order,
+    role: normalizeNarrativeRole(unit.role) ?? "core_point",
+    sourceText: unit.sourceText,
+    narrationText: unit.narrationText,
+    title: unit.title,
+    durationEstimateS: unit.durationEstimateS,
+    visualIntent: parseJsonRecord(unit.visualIntentJson),
+    ctaIntent: parseJsonRecord(unit.ctaIntentJson),
+    metadata: parseJsonRecord(unit.metadataJson),
+    createdAt: unit.createdAt,
+    updatedAt: unit.updatedAt
+  };
+}
+
+function serializeComposition(composition: {
+  id: string;
+  workspaceId: string;
+  projectContentOutputId: string;
+  fps: number;
+  width: number;
+  height: number;
+  durationFrames: number;
+  status: string;
+  timelineJson: string;
+  metadataJson: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: composition.id,
+    workspaceId: composition.workspaceId,
+    projectContentOutputId: composition.projectContentOutputId,
+    fps: composition.fps,
+    width: composition.width,
+    height: composition.height,
+    durationFrames: composition.durationFrames,
+    status: composition.status,
+    timeline: parseJsonValue<CompositionTimeline>(composition.timelineJson),
+    metadata: parseJsonRecord(composition.metadataJson),
+    createdAt: composition.createdAt,
+    updatedAt: composition.updatedAt
+  };
+}
+
+function serializeProjectOutputDefinition(definition: {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  key: string;
+  channel: string;
+  label: string;
+  mediaType: string;
+  destination: string;
+  aspectRatio: string;
+  presetId: string;
+  language: string | null;
+  isActive: boolean;
+  metadataJson: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: definition.id,
+    workspaceId: definition.workspaceId,
+    projectId: definition.projectId,
+    key: definition.key,
+    channel: definition.channel,
+    label: definition.label,
+    mediaType: definition.mediaType,
+    destination: definition.destination,
+    aspectRatio: normalizeCompositionAspectRatio(definition.aspectRatio) ?? "16:9",
+    presetId: normalizePresetId(definition.presetId),
+    language: definition.language,
+    isActive: definition.isActive,
+    metadata: parseJsonRecord(definition.metadataJson),
+    createdAt: definition.createdAt,
+    updatedAt: definition.updatedAt
+  };
+}
+
+function serializeProjectContentOutput(output: {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  projectItemId: string;
+  itemId: string;
+  outputDefinitionId: string;
+  title: string;
+  mediaType: string;
+  channel: string;
+  destination: string;
+  aspectRatio: string;
+  presetId: string;
+  status: string;
+  currentStage: string | null;
+  targetDurationS: number | null;
+  metadataJson: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  _count?: { narrativeUnits?: number };
+  outputDefinition?: {
+    id: string;
+    workspaceId: string;
+    projectId: string;
+    key: string;
+    channel: string;
+    label: string;
+    mediaType: string;
+    destination: string;
+    aspectRatio: string;
+    presetId: string;
+    language: string | null;
+    isActive: boolean;
+    metadataJson: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null;
+  composition?: {
+    id: string;
+    workspaceId: string;
+    projectContentOutputId: string;
+    fps: number;
+    width: number;
+    height: number;
+    durationFrames: number;
+    status: string;
+    timelineJson: string;
+    metadataJson: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null;
+}) {
+  return {
+    id: output.id,
+    workspaceId: output.workspaceId,
+    projectId: output.projectId,
+    projectItemId: output.projectItemId,
+    itemId: output.itemId,
+    outputDefinitionId: output.outputDefinitionId,
+    title: output.title,
+    mediaType: output.mediaType,
+    channel: output.channel,
+    destination: output.destination,
+    aspectRatio: normalizeCompositionAspectRatio(output.aspectRatio) ?? "16:9",
+    presetId: normalizePresetId(output.presetId),
+    status: output.status,
+    currentStage: output.currentStage,
+    targetDurationS: output.targetDurationS,
+    metadata: parseJsonRecord(output.metadataJson),
+    createdAt: output.createdAt,
+    updatedAt: output.updatedAt,
+    narrativeUnitsCount: output._count?.narrativeUnits ?? 0,
+    outputDefinition: output.outputDefinition ? serializeProjectOutputDefinition(output.outputDefinition) : null,
+    composition: output.composition ? serializeComposition(output.composition) : null
+  };
+}
+
 type ContentItemBacking = {
   courseId: string;
   moduleId: string;
@@ -6192,7 +6472,229 @@ async function estimateBlocksForLessonVersion(versionId: string, workspaceId: st
   return drafts.length;
 }
 
-fastify.get(
+type NormalizedProjectOutputDefinition = {
+  key: string;
+  channel: string;
+  label: string;
+  mediaType: string;
+  destination: string;
+  aspectRatio: CompositionAspectRatio;
+  presetId: string;
+  language: string | null;
+  metadataJson: string | null;
+};
+
+function slugifyOutputPart(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "output";
+}
+
+function readProjectOutputDefinitions(project: { language: string | null; metadataJson: string | null }): NormalizedProjectOutputDefinition[] {
+  const metadata = parseJsonRecord(project.metadataJson);
+  const rawOutputs = Array.isArray(metadata?.defaultOutputs) ? metadata.defaultOutputs : [];
+  const definitions: NormalizedProjectOutputDefinition[] = [];
+  for (const raw of rawOutputs) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    const channel = normalizeOptionalText(entry.channel) ?? "output";
+    const label = normalizeOptionalText(entry.label) ?? channel;
+    const mediaType = normalizeOptionalText(entry.mediaType) ?? "video";
+    const destination = normalizeOptionalText(entry.destination) ?? channel;
+    const aspectRatio = normalizeCompositionAspectRatio(entry.aspectRatio) ?? "16:9";
+    const presetId = normalizePresetId(normalizeOptionalText(entry.presetId));
+    const key = `${slugifyOutputPart(channel)}-${slugifyOutputPart(mediaType)}-${slugifyOutputPart(aspectRatio)}`;
+    definitions.push({
+      key,
+      channel,
+      label,
+      mediaType,
+      destination,
+      aspectRatio,
+      presetId,
+      language: project.language,
+      metadataJson:
+        entry && typeof entry === "object" && !Array.isArray(entry) ? JSON.stringify(entry) : null
+    });
+  }
+  return definitions;
+}
+
+async function syncProjectOutputDefinitions(projectId: string, workspaceId: string): Promise<void> {
+  const project = await prisma.contentProject.findFirst({
+    where: { id: projectId, workspaceId },
+    select: { id: true, language: true, metadataJson: true }
+  });
+  if (!project) throw new Error("content project not found");
+  const definitions = readProjectOutputDefinitions(project);
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.projectOutputDefinition.findMany({
+      where: { projectId, workspaceId },
+      select: { id: true, key: true }
+    });
+    const nextKeys = new Set(definitions.map((definition) => definition.key));
+
+    for (const definition of definitions) {
+      await tx.projectOutputDefinition.upsert({
+        where: {
+          projectId_key: {
+            projectId,
+            key: definition.key
+          }
+        },
+        update: {
+          channel: definition.channel,
+          label: definition.label,
+          mediaType: definition.mediaType,
+          destination: definition.destination,
+          aspectRatio: definition.aspectRatio,
+          presetId: definition.presetId,
+          language: definition.language,
+          isActive: true,
+          metadataJson: definition.metadataJson
+        },
+        create: {
+          workspaceId,
+          projectId,
+          key: definition.key,
+          channel: definition.channel,
+          label: definition.label,
+          mediaType: definition.mediaType,
+          destination: definition.destination,
+          aspectRatio: definition.aspectRatio,
+          presetId: definition.presetId,
+          language: definition.language,
+          isActive: true,
+          metadataJson: definition.metadataJson
+        }
+      });
+    }
+
+    const keysToDelete = existing
+      .filter((definition) => !nextKeys.has(definition.key))
+      .map((definition) => definition.id);
+
+    if (keysToDelete.length > 0) {
+      await tx.projectOutputDefinition.deleteMany({
+        where: {
+          workspaceId,
+          projectId,
+          id: { in: keysToDelete }
+        }
+      });
+    }
+
+  });
+}
+
+async function syncOutputsForProjectItems(projectId: string, workspaceId: string): Promise<void> {
+  const links = await prisma.contentProjectItem.findMany({
+    where: { projectId, workspaceId },
+    select: { itemId: true }
+  });
+  for (const link of links) {
+    await ensureProjectContentOutputs({
+      workspaceId,
+      projectId,
+      itemId: link.itemId
+    });
+  }
+}
+
+async function ensureProjectContentOutputs(params: {
+  workspaceId: string;
+  projectId: string;
+  itemId: string;
+}): Promise<void> {
+  const projectItem = await prisma.contentProjectItem.findFirst({
+    where: {
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      itemId: params.itemId
+    },
+    include: {
+      item: true
+    }
+  });
+  if (!projectItem) throw new Error("project content link not found");
+  const definitions = await prisma.projectOutputDefinition.findMany({
+    where: {
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      isActive: true
+    },
+    orderBy: { createdAt: "asc" }
+  });
+  await prisma.$transaction(async (tx) => {
+      for (const definition of definitions) {
+        const existing = await tx.projectContentOutput.findFirst({
+          where: {
+            workspaceId: params.workspaceId,
+            projectId: params.projectId,
+          itemId: params.itemId,
+          outputDefinitionId: definition.id
+          },
+          select: { id: true }
+        });
+        const nextTitle = `${projectItem.item.title} - ${definition.channel} ${definition.aspectRatio}`;
+        if (existing) {
+          await tx.projectContentOutput.update({
+            where: { id: existing.id },
+            data: {
+              projectItemId: projectItem.id,
+              title: nextTitle,
+              mediaType: definition.mediaType,
+              channel: definition.channel,
+              destination: definition.destination,
+              aspectRatio: definition.aspectRatio,
+              presetId: definition.presetId
+            }
+          });
+          continue;
+        }
+        await tx.projectContentOutput.create({
+          data: {
+            workspaceId: params.workspaceId,
+            projectId: params.projectId,
+            projectItemId: projectItem.id,
+            itemId: params.itemId,
+            outputDefinitionId: definition.id,
+            title: nextTitle,
+            mediaType: definition.mediaType,
+            channel: definition.channel,
+            destination: definition.destination,
+            aspectRatio: definition.aspectRatio,
+            presetId: definition.presetId,
+            status: "not_started",
+            currentStage: "queued",
+            metadataJson: JSON.stringify({
+              derivedFromProjectOutput: true
+            })
+          }
+        });
+      }
+      });
+    }
+
+async function ensureProjectContentOutputsIfAvailable(params: {
+  workspaceId: string;
+  projectId: string;
+  itemId: string;
+}): Promise<void> {
+  try {
+    await ensureProjectContentOutputs(params);
+  } catch (error) {
+    if (isPrismaMissingTableError(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+  fastify.get(
   "/content-projects",
   {
       schema: {
@@ -6242,6 +6744,8 @@ fastify.post(
       },
       include: { _count: { select: { projectItems: true } } }
     });
+    await syncProjectOutputDefinitions(project.id, auth.scope.workspaceId);
+    await syncOutputsForProjectItems(project.id, auth.scope.workspaceId);
     return reply.code(201).send(serializeContentProject(project));
   }
 );
@@ -6309,6 +6813,8 @@ fastify.patch(
       data,
       include: { _count: { select: { projectItems: true } } }
     });
+    await syncProjectOutputDefinitions(project.id, auth.scope.workspaceId);
+    await syncOutputsForProjectItems(project.id, auth.scope.workspaceId);
     return reply.code(200).send(serializeContentProject(project));
   }
 );
@@ -6414,9 +6920,11 @@ fastify.get(
       });
       return created;
     });
-    const backing = normalized.kind === "content" || normalized.kind === "video" || normalized.kind === "music_video"
-      ? await ensureContentItemBacking(item.id, auth.scope.workspaceId)
-      : null;
+    await ensureProjectContentOutputs({
+      workspaceId: auth.scope.workspaceId,
+      projectId,
+      itemId: item.id
+    });
     const refreshed = await prisma.contentItem.findUnique({
       where: { id: item.id },
       include: {
@@ -6427,8 +6935,7 @@ fastify.get(
       }
     });
     return reply.code(201).send({
-      ...serializeContentItem(refreshed ?? item),
-      backing
+      ...serializeContentItem(refreshed ?? item)
     });
     }
   );
@@ -6477,9 +6984,13 @@ fastify.get(
         }
         return created;
       });
-      const backing = normalized.kind === "content" || normalized.kind === "video" || normalized.kind === "music_video"
-        ? await ensureContentItemBacking(item.id, auth.scope.workspaceId)
-        : null;
+      for (const projectId of association.projectIds) {
+        await ensureProjectContentOutputs({
+          workspaceId: auth.scope.workspaceId,
+          projectId,
+          itemId: item.id
+        });
+      }
       const refreshed = await prisma.contentItem.findUnique({
         where: { id: item.id },
         include: {
@@ -6490,8 +7001,7 @@ fastify.get(
         }
       });
       return reply.code(201).send({
-        ...serializeContentItem(refreshed ?? item),
-        backing
+        ...serializeContentItem(refreshed ?? item)
       });
     }
   );
@@ -6622,18 +7132,648 @@ fastify.get(
           }
         });
       });
-      if (!updated) return reply.code(404).send({ error: "content item not found" });
-      if (data.sourceText !== undefined) {
-        const backing = readContentItemBacking(updated);
-        if (backing) {
-          await prisma.lessonVersion.updateMany({
-            where: { id: backing.lessonVersionId, workspaceId: auth.scope.workspaceId },
-            data: { scriptText: updated.sourceText ?? "" }
+      if (association.provided) {
+        for (const projectId of association.projectIds) {
+          await ensureProjectContentOutputs({
+            workspaceId: auth.scope.workspaceId,
+            projectId,
+            itemId: item.id
           });
         }
       }
-
+      if (!updated) return reply.code(404).send({ error: "content item not found" });
       return reply.code(200).send(serializeContentItem(updated));
+    }
+  );
+
+  fastify.get(
+    "/content-projects/:projectId/promotion-targets",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Lista alvos promocionais do projeto",
+        description: "Retorna os destinos comerciais e short links associados ao projeto."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { projectId } = request.params as { projectId: string };
+      const project = await prisma.contentProject.findFirst({
+        where: { id: projectId, workspaceId: auth.scope.workspaceId },
+        select: { id: true }
+      });
+      if (!project) return reply.code(404).send({ error: "content project not found" });
+      try {
+        const targets = await prisma.promotionTarget.findMany({
+          where: { projectId, workspaceId: auth.scope.workspaceId },
+          orderBy: { createdAt: "asc" },
+          include: {
+            shortLinks: {
+              orderBy: { createdAt: "asc" }
+            }
+          }
+        });
+        return reply.code(200).send(targets.map(serializePromotionTarget));
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) {
+          return reply.code(200).send([]);
+        }
+        throw error;
+      }
+    }
+  );
+
+  fastify.post(
+    "/content-projects/:projectId/promotion-targets",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Cria alvo promocional do projeto",
+        description: "Cria o destino comercial principal do projeto e um short link inicial."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { projectId } = request.params as { projectId: string };
+      const project = await prisma.contentProject.findFirst({
+        where: { id: projectId, workspaceId: auth.scope.workspaceId },
+        select: { id: true }
+      });
+      if (!project) return reply.code(404).send({ error: "content project not found" });
+      const payload = (request.body ?? {}) as Record<string, unknown>;
+      const name = normalizeOptionalText(payload.name);
+      const destinationUrl = normalizeOptionalText(payload.destinationUrl);
+      if (!name) return reply.code(400).send({ error: "name is required" });
+      if (!destinationUrl) return reply.code(400).send({ error: "destinationUrl is required" });
+      const metadata =
+        payload.metadata && typeof payload.metadata === "object" && !Array.isArray(payload.metadata)
+          ? JSON.stringify(payload.metadata)
+          : null;
+      let created;
+      try {
+        created = await prisma.$transaction(async (tx) => {
+          const target = await tx.promotionTarget.create({
+            data: {
+              workspaceId: auth.scope.workspaceId,
+              projectId,
+              name,
+              description: normalizeOptionalText(payload.description) ?? null,
+              destinationUrl,
+              ctaLabel: normalizeOptionalText(payload.ctaLabel) ?? null,
+              status: normalizeOptionalText(payload.status) ?? "draft",
+              metadataJson: metadata
+            }
+          });
+          await tx.shortLink.create({
+            data: {
+              workspaceId: auth.scope.workspaceId,
+              promotionTargetId: target.id,
+              code: buildShortLinkCode(name),
+              url: destinationUrl,
+              status: "active"
+            }
+          });
+          return tx.promotionTarget.findUnique({
+            where: { id: target.id },
+            include: {
+              shortLinks: {
+                orderBy: { createdAt: "asc" }
+              }
+            }
+          });
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) {
+          return sendCompositionMigrationRequired(reply);
+        }
+        throw error;
+      }
+      if (!created) return reply.code(500).send({ error: "failed to create promotion target" });
+      return reply.code(201).send(serializePromotionTarget(created));
+    }
+  );
+
+  fastify.patch(
+    "/promotion-targets/:targetId",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Atualiza alvo promocional",
+        description: "Atualiza nome, CTA, URL e status do alvo promocional."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { targetId } = request.params as { targetId: string };
+      let existing;
+      try {
+        existing = await prisma.promotionTarget.findFirst({
+          where: { id: targetId, workspaceId: auth.scope.workspaceId }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) {
+          return sendCompositionMigrationRequired(reply);
+        }
+        throw error;
+      }
+      if (!existing) return reply.code(404).send({ error: "promotion target not found" });
+      const payload = (request.body ?? {}) as Record<string, unknown>;
+      const data: {
+        name?: string;
+        description?: string | null;
+        destinationUrl?: string;
+        ctaLabel?: string | null;
+        status?: string;
+        metadataJson?: string | null;
+      } = {};
+      if (payload.name !== undefined) {
+        const value = normalizeOptionalText(payload.name);
+        if (!value) return reply.code(400).send({ error: "name must be a non-empty string" });
+        data.name = value;
+      }
+      if (payload.description !== undefined) data.description = normalizeOptionalText(payload.description) ?? null;
+      if (payload.destinationUrl !== undefined) {
+        const value = normalizeOptionalText(payload.destinationUrl);
+        if (!value) return reply.code(400).send({ error: "destinationUrl must be a non-empty string" });
+        data.destinationUrl = value;
+      }
+      if (payload.ctaLabel !== undefined) data.ctaLabel = normalizeOptionalText(payload.ctaLabel) ?? null;
+      if (payload.status !== undefined) {
+        const value = normalizeOptionalText(payload.status);
+        if (!value) return reply.code(400).send({ error: "status must be a non-empty string" });
+        data.status = value;
+      }
+      if (payload.metadata !== undefined) {
+        if (payload.metadata === null) {
+          data.metadataJson = null;
+        } else if (typeof payload.metadata === "object" && !Array.isArray(payload.metadata)) {
+          data.metadataJson = JSON.stringify(payload.metadata);
+        } else {
+          return reply.code(400).send({ error: "metadata must be an object or null" });
+        }
+      }
+      let updated;
+      try {
+        updated = await prisma.promotionTarget.update({
+          where: { id: targetId },
+          data,
+          include: { shortLinks: { orderBy: { createdAt: "asc" } } }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) {
+          return sendCompositionMigrationRequired(reply);
+        }
+        throw error;
+      }
+      return reply.code(200).send(serializePromotionTarget(updated));
+    }
+  );
+
+  fastify.post(
+    "/promotion-targets/:targetId/short-links",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Cria short link de um alvo promocional",
+        description: "Adiciona um short link reutilizável para o mesmo destino promocional."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { targetId } = request.params as { targetId: string };
+      let target;
+      try {
+        target = await prisma.promotionTarget.findFirst({
+          where: { id: targetId, workspaceId: auth.scope.workspaceId }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) {
+          return sendCompositionMigrationRequired(reply);
+        }
+        throw error;
+      }
+      if (!target) return reply.code(404).send({ error: "promotion target not found" });
+      const payload = (request.body ?? {}) as Record<string, unknown>;
+      const url = normalizeOptionalText(payload.url) ?? target.destinationUrl;
+      const code = normalizeOptionalText(payload.code) ?? buildShortLinkCode(target.name);
+      let created;
+      try {
+        created = await prisma.shortLink.create({
+          data: {
+            workspaceId: auth.scope.workspaceId,
+            promotionTargetId: target.id,
+            code,
+            url,
+            status: normalizeOptionalText(payload.status) ?? "active",
+            metadataJson:
+              payload.metadata && typeof payload.metadata === "object" && !Array.isArray(payload.metadata)
+                ? JSON.stringify(payload.metadata)
+                : null
+          }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) {
+          return sendCompositionMigrationRequired(reply);
+        }
+        throw error;
+      }
+      return reply.code(201).send({
+        id: created.id,
+        code: created.code,
+        url: created.url,
+        status: created.status,
+        metadata: parseJsonRecord(created.metadataJson),
+        createdAt: created.createdAt,
+        updatedAt: created.updatedAt
+      });
+    }
+  );
+
+  fastify.get(
+    "/content-projects/:projectId/output-definitions",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Lista outputs configurados do projeto",
+        description: "Retorna as saidas configuradas no projeto como definicoes reutilizaveis."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { projectId } = request.params as { projectId: string };
+      const project = await prisma.contentProject.findFirst({
+        where: { id: projectId, workspaceId: auth.scope.workspaceId },
+        select: { id: true }
+      });
+      if (!project) return reply.code(404).send({ error: "content project not found" });
+      try {
+        await syncProjectOutputDefinitions(projectId, auth.scope.workspaceId);
+        const definitions = await prisma.projectOutputDefinition.findMany({
+          where: { projectId, workspaceId: auth.scope.workspaceId, isActive: true },
+          orderBy: { createdAt: "asc" }
+        });
+        return reply.code(200).send(definitions.map(serializeProjectOutputDefinition));
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return reply.code(200).send([]);
+        throw error;
+      }
+    }
+  );
+
+  fastify.get(
+    "/content-projects/:projectId/items/:itemId/outputs",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Lista outputs do conteudo no projeto",
+        description: "Materializa e retorna os entregaveis esperados para a combinacao projeto-conteudo."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { projectId, itemId } = request.params as { projectId: string; itemId: string };
+      const link = await prisma.contentProjectItem.findFirst({
+        where: { workspaceId: auth.scope.workspaceId, projectId, itemId },
+        select: { id: true }
+      });
+      if (!link) return reply.code(404).send({ error: "project content link not found" });
+      try {
+        await syncProjectOutputDefinitions(projectId, auth.scope.workspaceId);
+        await ensureProjectContentOutputs({ workspaceId: auth.scope.workspaceId, projectId, itemId });
+        const outputs = await prisma.projectContentOutput.findMany({
+          where: { workspaceId: auth.scope.workspaceId, projectId, itemId },
+          orderBy: { createdAt: "asc" },
+          include: {
+            _count: { select: { narrativeUnits: true } },
+            outputDefinition: true,
+            composition: true
+          }
+        });
+        return reply.code(200).send(outputs.map(serializeProjectContentOutput));
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return reply.code(200).send([]);
+        throw error;
+      }
+    }
+  );
+
+  fastify.post(
+    "/project-content-outputs/:outputId/narrative/generate",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Gera estrutura narrativa do output",
+        description: "Gera unidades narrativas e composicao inicial para um output especifico."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { outputId } = request.params as { outputId: string };
+      let output;
+      try {
+        output = await prisma.projectContentOutput.findFirst({
+          where: { id: outputId, workspaceId: auth.scope.workspaceId },
+          include: { item: true }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return sendCompositionMigrationRequired(reply);
+        throw error;
+      }
+      if (!output) return reply.code(404).send({ error: "project content output not found" });
+      if (!output.item.sourceText?.trim()) {
+        return reply.code(400).send({ error: "content item sourceText is required" });
+      }
+      const generated = generateNarrativeUnits(output.item.sourceText, output.targetDurationS);
+      const timeline = buildInitialCompositionTimeline({
+        aspectRatio: normalizeCompositionAspectRatio(output.aspectRatio) ?? "16:9",
+        presetId: normalizePresetId(output.presetId),
+        units: generated
+      });
+      const dimensions = getTimelineDimensions(normalizeCompositionAspectRatio(output.aspectRatio) ?? "16:9");
+      let result;
+      try {
+        result = await prisma.$transaction(async (tx) => {
+          await tx.narrativeUnit.deleteMany({
+            where: { projectContentOutputId: output.id, workspaceId: auth.scope.workspaceId }
+          });
+          for (const unit of generated) {
+            await tx.narrativeUnit.create({
+              data: {
+                workspaceId: auth.scope.workspaceId,
+                projectContentOutputId: output.id,
+                order: unit.order,
+                role: unit.role,
+                sourceText: unit.sourceText,
+                narrationText: unit.narrationText,
+                title: unit.title,
+                durationEstimateS: unit.durationEstimateS,
+                visualIntentJson: JSON.stringify(unit.visualIntent),
+                ctaIntentJson: unit.ctaIntent ? JSON.stringify(unit.ctaIntent) : null,
+                metadataJson: JSON.stringify(unit.metadata)
+              }
+            });
+          }
+          await tx.composition.upsert({
+            where: { projectContentOutputId: output.id },
+            update: {
+              fps: timeline.fps,
+              width: dimensions.width,
+              height: dimensions.height,
+              durationFrames: timeline.durationFrames,
+              status: "ready",
+              timelineJson: JSON.stringify(timeline)
+            },
+            create: {
+              workspaceId: auth.scope.workspaceId,
+              projectContentOutputId: output.id,
+              fps: timeline.fps,
+              width: dimensions.width,
+              height: dimensions.height,
+              durationFrames: timeline.durationFrames,
+              status: "ready",
+              timelineJson: JSON.stringify(timeline)
+            }
+          });
+          await tx.projectContentOutput.update({
+            where: { id: output.id },
+            data: { status: "ready_for_review", currentStage: "composition" }
+          });
+          const refreshedOutput = await tx.projectContentOutput.findUnique({
+            where: { id: output.id },
+            include: {
+              _count: { select: { narrativeUnits: true } },
+              outputDefinition: true,
+              composition: true
+            }
+          });
+          const units = await tx.narrativeUnit.findMany({
+            where: { projectContentOutputId: output.id, workspaceId: auth.scope.workspaceId },
+            orderBy: { order: "asc" }
+          });
+          return { output: refreshedOutput, units };
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return sendCompositionMigrationRequired(reply);
+        throw error;
+      }
+      if (!result.output) return reply.code(500).send({ error: "failed to refresh output" });
+      return reply.code(200).send({
+        output: serializeProjectContentOutput(result.output),
+        narrativeUnits: result.units.map(serializeNarrativeUnit),
+        composition: result.output.composition ? serializeComposition(result.output.composition) : null
+      });
+    }
+  );
+
+  fastify.get(
+    "/project-content-outputs/:outputId/narrative-units",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Lista unidades narrativas do output",
+        description: "Retorna a estrutura semantica do output selecionado."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { outputId } = request.params as { outputId: string };
+      try {
+        const units = await prisma.narrativeUnit.findMany({
+          where: { projectContentOutputId: outputId, workspaceId: auth.scope.workspaceId },
+          orderBy: { order: "asc" }
+        });
+        return reply.code(200).send(units.map(serializeNarrativeUnit));
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return reply.code(200).send([]);
+        throw error;
+      }
+    }
+  );
+
+  fastify.patch(
+    "/narrative-units/:unitId",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Atualiza unidade narrativa",
+        description: "Permite ajustar manualmente texto, role e intencoes antes do render final."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { unitId } = request.params as { unitId: string };
+      let existing;
+      try {
+        existing = await prisma.narrativeUnit.findFirst({
+          where: { id: unitId, workspaceId: auth.scope.workspaceId }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return sendCompositionMigrationRequired(reply);
+        throw error;
+      }
+      if (!existing) return reply.code(404).send({ error: "narrative unit not found" });
+      const payload = (request.body ?? {}) as Record<string, unknown>;
+      const data: {
+        role?: string;
+        sourceText?: string;
+        narrationText?: string | null;
+        title?: string | null;
+        durationEstimateS?: number | null;
+        visualIntentJson?: string | null;
+        ctaIntentJson?: string | null;
+        metadataJson?: string | null;
+      } = {};
+      if (payload.role !== undefined) {
+        const role = normalizeNarrativeRole(payload.role);
+        if (!role) return reply.code(400).send({ error: `role must be one of: ${NARRATIVE_ROLES.join(", ")}` });
+        data.role = role;
+      }
+      if (payload.sourceText !== undefined) {
+        const value = normalizeOptionalText(payload.sourceText);
+        if (!value) return reply.code(400).send({ error: "sourceText must be a non-empty string" });
+        data.sourceText = value;
+      }
+      if (payload.narrationText !== undefined) data.narrationText = normalizeOptionalText(payload.narrationText) ?? null;
+      if (payload.title !== undefined) data.title = normalizeOptionalText(payload.title) ?? null;
+      if (payload.durationEstimateS !== undefined) {
+        if (payload.durationEstimateS === null) data.durationEstimateS = null;
+        else if (typeof payload.durationEstimateS === "number" && Number.isFinite(payload.durationEstimateS)) data.durationEstimateS = payload.durationEstimateS;
+        else return reply.code(400).send({ error: "durationEstimateS must be a number or null" });
+      }
+      if (payload.visualIntent !== undefined) {
+        if (payload.visualIntent === null) data.visualIntentJson = null;
+        else if (typeof payload.visualIntent === "object" && !Array.isArray(payload.visualIntent)) data.visualIntentJson = JSON.stringify(payload.visualIntent);
+        else return reply.code(400).send({ error: "visualIntent must be an object or null" });
+      }
+      if (payload.ctaIntent !== undefined) {
+        if (payload.ctaIntent === null) data.ctaIntentJson = null;
+        else if (typeof payload.ctaIntent === "object" && !Array.isArray(payload.ctaIntent)) data.ctaIntentJson = JSON.stringify(payload.ctaIntent);
+        else return reply.code(400).send({ error: "ctaIntent must be an object or null" });
+      }
+      if (payload.metadata !== undefined) {
+        if (payload.metadata === null) data.metadataJson = null;
+        else if (typeof payload.metadata === "object" && !Array.isArray(payload.metadata)) data.metadataJson = JSON.stringify(payload.metadata);
+        else return reply.code(400).send({ error: "metadata must be an object or null" });
+      }
+      const updated = await prisma.narrativeUnit.update({
+        where: { id: unitId },
+        data
+      });
+      return reply.code(200).send(serializeNarrativeUnit(updated));
+    }
+  );
+
+  fastify.get(
+    "/project-content-outputs/:outputId/composition",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Retorna composição do output",
+        description: "Entrega a timeline declarativa usada pelo preview e pelo render final."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { outputId } = request.params as { outputId: string };
+      try {
+        const composition = await prisma.composition.findFirst({
+          where: { projectContentOutputId: outputId, workspaceId: auth.scope.workspaceId }
+        });
+        if (!composition) return reply.code(404).send({ error: "composition not found" });
+        return reply.code(200).send(serializeComposition(composition));
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return reply.code(404).send({ error: "composition not found" });
+        throw error;
+      }
+    }
+  );
+
+  fastify.put(
+    "/project-content-outputs/:outputId/composition",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Substitui composição do output",
+        description: "Atualiza a timeline declarativa usada pelo preview."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { outputId } = request.params as { outputId: string };
+      let output;
+      try {
+        output = await prisma.projectContentOutput.findFirst({
+          where: { id: outputId, workspaceId: auth.scope.workspaceId }
+        });
+      } catch (error) {
+        if (isPrismaMissingTableError(error)) return sendCompositionMigrationRequired(reply);
+        throw error;
+      }
+      if (!output) return reply.code(404).send({ error: "project content output not found" });
+      const payload = (request.body ?? {}) as Record<string, unknown>;
+      const timeline = payload.timeline;
+      if (!timeline || typeof timeline !== "object" || Array.isArray(timeline)) {
+        return reply.code(400).send({ error: "timeline must be an object" });
+      }
+      const aspectRatio = normalizeCompositionAspectRatio((timeline as Record<string, unknown>).aspectRatio) ??
+        normalizeCompositionAspectRatio(output.aspectRatio) ??
+        "16:9";
+      const fps =
+        typeof (timeline as Record<string, unknown>).fps === "number" &&
+        Number.isFinite((timeline as Record<string, unknown>).fps)
+          ? Math.max(1, Math.round((timeline as Record<string, unknown>).fps as number))
+          : 30;
+      const durationFrames =
+        typeof (timeline as Record<string, unknown>).durationFrames === "number" &&
+        Number.isFinite((timeline as Record<string, unknown>).durationFrames)
+          ? Math.max(0, Math.round((timeline as Record<string, unknown>).durationFrames as number))
+          : 0;
+      const dimensions = getTimelineDimensions(aspectRatio);
+      const composition = await prisma.composition.upsert({
+        where: { projectContentOutputId: output.id },
+        update: {
+          fps,
+          width: dimensions.width,
+          height: dimensions.height,
+          durationFrames,
+          status: "ready",
+          timelineJson: JSON.stringify(timeline),
+          metadataJson:
+            payload.metadata && typeof payload.metadata === "object" && !Array.isArray(payload.metadata)
+              ? JSON.stringify(payload.metadata)
+              : null
+        },
+        create: {
+          workspaceId: auth.scope.workspaceId,
+          projectContentOutputId: output.id,
+          fps,
+          width: dimensions.width,
+          height: dimensions.height,
+          durationFrames,
+          status: "ready",
+          timelineJson: JSON.stringify(timeline),
+          metadataJson:
+            payload.metadata && typeof payload.metadata === "object" && !Array.isArray(payload.metadata)
+              ? JSON.stringify(payload.metadata)
+              : null
+        }
+      });
+      await prisma.projectContentOutput.update({
+        where: { id: output.id },
+        data: { status: "ready_for_review", currentStage: "composition" }
+      });
+      return reply.code(200).send(serializeComposition(composition));
     }
   );
 

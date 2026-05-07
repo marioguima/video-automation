@@ -57,26 +57,200 @@ Dominio alvo:
 ```text
 Workspace -> ContentItem
 Workspace -> Project
+Project -> PromotionTarget -> ShortLink
 ContentItem <-> Project via ProjectContent
-ProjectContent -> Variant -> Scene/Block -> Asset/Job
+ProjectContent -> ProjectContentOutput -> NarrativeUnit -> Composition -> Asset/Job
+Composition -> Component / CompositionPreset
 ```
+
+Leitura correta do dominio:
+
+- `ContentItem` e a materia-prima editorial;
+- `Project` e o conjunto de parametros que orienta o core/fabrica;
+- `ProjectContentOutput` e o entregavel audiovisual concreto da combinacao projeto + conteudo + output configurado;
+- `Composition` e a forma declarativa de montagem desse entregavel.
 
 Estrategia atual:
 
-- manter `Course/Module/Lesson` como backing tecnico;
+- manter `Course/Module/Lesson` apenas como ponte temporaria;
 - expor `Project/ContentItem` para a UI;
 - salvar ponte em `ContentItem.metadataJson.backing`;
 - usar `ProjectContent`/`ContentProjectItem` para associar conteudo a zero, um ou muitos projetos;
-- migrar gradualmente para Variant/Scene sem quebrar o pipeline.
+- migrar gradualmente para `ProjectContentOutput`, `NarrativeUnit` e `Composition` sem quebrar o pipeline atual;
+- remover o legado de curso quando o dominio novo estiver cobrindo o fluxo principal, em vez de carregar dois modelos de produto por tempo indefinido;
 - nao iniciar segmentacao/render a partir de `ContentItem` isolado na UI;
-- iniciar segmentacao/render somente no contexto de `Project` e, idealmente, `Variant`.
+- iniciar segmentacao/render somente no contexto de `Project` e, idealmente, `ProjectContentOutput`.
+- nao criar `ContentItem` a partir do detalhe do projeto na UX principal; a criacao pertence a area `Content`;
+- permitir no detalhe do projeto apenas encontrar, vincular e orquestrar conteudos existentes.
 
 Nota de produto:
 
 - `Project` e agrupador editorial/comercial, nao destino de publicacao;
 - `Project` nao possui campo `kind`;
 - qualquer tentativa de enviar `kind` para projeto deve ser recusada;
-- canais/perfis/paginas aparecem principalmente como destinations/variantes quando um projeto publica em varios canais.
+- canais/perfis/paginas aparecem principalmente como destinations/outputs quando um projeto publica em varios canais.
+
+Principio de migracao:
+
+- o dominio de curso nao deve continuar recebendo novas capacidades de produto;
+- novas capacidades devem nascer em torno de `ContentItem`, `Project`, `ProjectContentOutput`, `Composition` e promocao;
+- o backing herdado so deve sobreviver enquanto for necessario para manter entrega e reduzir risco de transicao;
+- quando um fluxo novo estabilizar, o equivalente herdado deve ser removido.
+
+## Arquitetura alvo de produto
+
+O FlowShopy nao deve ser tratado como um gerador de aulas. Ele deve ser tratado como uma fabrica de conteudo promocional orientada por conteudo, projeto, output e composicao.
+
+Fluxo alvo:
+
+```text
+ContentItem
+  -> Project association
+  -> Project context
+  -> ProjectContentOutput
+  -> NarrativeStructure
+  -> Composition
+  -> Preview
+  -> Final render
+  -> Publication / Promotion
+```
+
+Leitura correta de cada etapa:
+
+- `ContentItem`: materia-prima editorial; pode nascer de ideia, prompt, briefing, roteiro final, transcricao ou arquivo;
+- `Project association`: um mesmo conteudo pode servir a um, varios ou nenhum projeto;
+- `Project context`: marca, produto promovido, CTA, destinos, formatos e estilo;
+- `ProjectContentOutput`: entregavel concreto por canal, formato e objetivo;
+- `NarrativeStructure`: estrutura semantica do conteudo para aquele output;
+- `Composition`: timeline audiovisual declarativa;
+- `Preview`: visualizacao antes do render final;
+- `Final render`: exportacao definitiva do entregavel.
+
+Regra de UX derivada:
+
+- a tela `Content` e o lugar de criar e editar materia-prima;
+- a tela `Project` e o lugar de associar conteudo, escolher output e orquestrar a fabrica;
+- `Studio` existe dentro do projeto para operar sobre conteudo associado, nao para substituir a area de escrita de conteudo.
+
+### Estrutura semantica
+
+`ContentItem` nao deve gerar "slides" diretamente. Primeiro ele deve gerar uma estrutura semantica reutilizavel.
+
+Exemplos de papeis semanticos:
+
+- `hook`
+- `setup`
+- `core_point`
+- `proof`
+- `objection`
+- `turn`
+- `cta`
+- `outro`
+- `visual_beat`
+- `platform_specific`
+
+Esses papeis descrevem funcao editorial e narrativa. A composicao visual vem depois.
+
+### Entidades alvo
+
+Entidades principais do dominio novo:
+
+- `ContentItem`: conteudo-base;
+- `ContentSource`: origem do conteudo;
+- `Project`: contexto estrategico/comercial;
+- `ProjectContent`: vinculo reutilizavel entre conteudo e projeto;
+- `PromotionTarget`: produto, oferta, evento ou destino promovido;
+- `ShortLink`: link curto redirecionavel usado em CTAs e distribuicao;
+- `ProjectContentOutput`: entregavel concreto por canal/formato;
+- `NarrativeUnit`: unidade semantica derivada do conteudo;
+- `Composition`: timeline declarativa de um output;
+- `CompositionTrack`: trilha de video, imagem, audio, texto, overlay ou efeito;
+- `CompositionClip`: item concreto posicionado na timeline;
+- `Component`: primitive reutilizavel de composicao;
+- `CompositionPreset`: receita visual/motion que combina componentes;
+- `Asset`: entrada, intermediario ou saida de render.
+
+### Composicao em vez de slide
+
+`slide` deve deixar de ser o centro do produto. Ele pode continuar existindo como um tipo de composicao simples, mas o modelo principal precisa aceitar:
+
+- video puro;
+- imagem pura;
+- imagem com motion;
+- video com overlay;
+- video com burn effects;
+- mescla de clips e imagens;
+- CTA visual;
+- transicoes;
+- blocos comuns e blocos especificos por output.
+
+### Componentes e presets
+
+O conceito atual de template deve evoluir para um sistema combinavel:
+
+- `StyleDNA`: identidade da marca;
+- `Component Library`: pecas reutilizaveis;
+- `CompositionPreset`: regras de combinacao;
+- `VariationRules`: variacao controlada para evitar videos parecidos.
+
+Exemplos de `Component`:
+
+- intro;
+- CTA card;
+- transition;
+- lower third;
+- overlay;
+- frame treatment;
+- caption style;
+- zoom behavior;
+- burn/glitch effect.
+
+Exemplos de `CompositionPreset`:
+
+- `direct_response_bold`
+- `clean_authority`
+- `faceless_dark_promo`
+- `ugc_hybrid`
+- `kinetic_cta`
+
+Regras de variacao esperadas:
+
+- limitar repeticao de uma mesma transicao;
+- alternar familias de motion;
+- variar crop/zoom dentro de faixas permitidas;
+- escolher overlays por contexto semantico;
+- permitir multiplos layouts de CTA final;
+- preservar identidade visual sem gerar clones.
+
+## Motor de composicao e render
+
+Direcao aceita:
+
+- `Remotion` deve ser a camada principal de composicao e preview;
+- `ffmpeg` deve permanecer como infraestrutura de midia, nao como modelo mental principal do produto.
+
+Papeis do Remotion:
+
+- visualizador;
+- timeline;
+- preview antes do render final;
+- composicao declarativa;
+- biblioteca de componentes;
+- efeitos, transicoes e motion;
+- parametrizacao por dados de dominio.
+
+Papeis do ffmpeg:
+
+- transcode;
+- normalizacao de audio/video;
+- proxies;
+- operacoes auxiliares de export;
+- otimizações de pipeline.
+
+Implicacao:
+
+- `render_slide`, `render_clip` e `concat_video` sao etapas de execucao herdadas;
+- o alvo e um renderer orientado a `Composition`, onde slide passa a ser apenas um caso simples.
 
 ## Banco de dados
 
@@ -400,7 +574,7 @@ Responsabilidades do template:
 - overlay: asset de video com alpha, opacidade e velocidade;
 - transicoes, enquadramento, safe areas e identidade visual.
 
-Politicas por projeto/variant:
+Politicas por projeto/output:
 
 - `manual`: usuario aprova o template antes de renderizar;
 - `random`: escolhe um template permitido aleatoriamente;
@@ -451,9 +625,9 @@ Fluxo esperado:
 
 1. `ContentItem.sourceText/scriptText` pode existir sem projeto e pode ser associado a um ou mais projetos.
 2. Projeto define canais, formatos e pipeline de producao.
-3. Uma `Variant` de video escolhe modo de fala: sem fala, TTS externo ou audio nativo do motor de video.
+3. Um `ProjectContentOutput` de video escolhe modo de fala: sem fala, TTS externo ou audio nativo do motor de video.
 4. O sistema resolve `SpeechBudget` a partir da rota TTS por lingua ou do provider/modelo de video.
-5. Uma `Variant` de video inicia a segmentacao com limites de fala/duracao ja resolvidos.
+5. Um `ProjectContentOutput` de video inicia a segmentacao com limites de fala/duracao ja resolvidos.
 6. Segmentacao estrutural por LLM cria `Block[]`/visual beats, sem exigir `onScreenJson`.
 7. fallback secundario usa segundo modelo Gemini quando disponivel.
 8. fallback final usa heuristica deterministica com o mesmo orcamento conhecido.
@@ -467,7 +641,7 @@ Fluxo esperado:
 16. provider visual gera imagem ou video de cena conforme capacidade escolhida
 17. Playwright renderiza slide PNG quando o fluxo for slide/imagem estatica
 18. ffmpeg renderiza clip MP4 quando necessario
-19. ffmpeg concatena/compoe video final da Variant
+19. ffmpeg concatena/compoe video final do output
 
 ## Orcamento de fala e segmentacao
 
@@ -495,7 +669,7 @@ Resolucao:
 
 - `external_tts`: usar a rota TTS escolhida pelo projeto e seus limites de provider/voz;
 - nao existe TTS global ativo para producao;
-- `video_native_audio`: usar settings do provider/modelo de video escolhido para a Variant;
+- `video_native_audio`: usar settings do provider/modelo de video escolhido para o output;
 - `none`: segmentacao pode priorizar ritmo visual, sem limite de fala;
 - se `mode` exigir fala e nao houver configuracao, bloquear antes de gerar blocos.
 
@@ -519,7 +693,7 @@ Direcao alvo:
 
 - settings deve ter uma camada `visualGeneration` com providers e modelos;
 - cada provider declara capacidades: `text_to_image`, `image_to_image`, `text_to_video`, `image_to_video`, `native_audio`;
-- projeto/variant escolhe provider/modelo de imagem e provider/modelo de video conforme formato, qualidade e custo;
+- projeto/output escolhe provider/modelo de imagem e provider/modelo de video conforme formato, qualidade e custo;
 - video e opcional por projeto: um projeto pode usar apenas ComfyUI para imagem, outro pode usar Veo Extension para imagem e video;
 - o worker deve tratar cada provider por adaptador, como hoje faz com ComfyUI.
 
@@ -570,7 +744,7 @@ Dependencias futuras:
 - politica de direitos/consentimento para amostras de voz;
 - invalidacao de assets quando a amostra, voz alvo, roteiro ou video fonte mudar.
 
-## Variants, CTA e render por blocos
+## Outputs, CTA e render por blocos
 
 Objetivo:
 
@@ -580,19 +754,19 @@ Objetivo:
 
 Modelo:
 
-- `Variant`: entregavel especifico de um conteudo dentro de um projeto, como YouTube `16:9`, Shorts `9:16`, TikTok `9:16` ou Facebook video;
+- `ProjectContentOutput`: entregavel especifico de um conteudo dentro de um projeto, como YouTube `16:9`, Shorts `9:16`, TikTok `9:16` ou Facebook video;
 - `Block.role`: `core`, `intro`, `cta`, `outro`, `platform_specific`;
-- `Block.variantScope`: `shared` para blocos comuns ou identificador da variante/canal para blocos especificos;
-- `renderPlanJson`: ordem dos blocos que compoem cada variante;
+- `Block.outputScope`: `shared` para blocos comuns ou identificador do output/canal para blocos especificos;
+- `renderPlanJson`: ordem dos blocos que compoem cada output;
 - `ctaStrategyJson`: texto, tom, acao e restricoes do CTA por canal.
 
 Estrategia de render:
 
 - renderizar blocos `core` e cachear seus assets;
-- renderizar blocos especificos por variante quando necessario;
-- montar o video final por variante usando os blocos comuns e especificos;
+- renderizar blocos especificos por output quando necessario;
+- montar o video final por output usando os blocos comuns e especificos;
 - se a transicao entre blocos for simples, concatenar clips prontos;
-- se a transicao depender de continuidade visual entre duas cenas, re-renderizar a borda afetada ou a sequencia final da variante;
+- se a transicao depender de continuidade visual entre duas cenas, re-renderizar a borda afetada ou a sequencia final do output;
 - V1 deve preferir transicoes simples entre blocos variaveis para preservar velocidade, cache e previsibilidade.
 
 Exemplos:
