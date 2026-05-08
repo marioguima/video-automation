@@ -25,10 +25,12 @@ Leia nessa ordem:
 7. [Sales and Distribution Plan](docs/07-sales-and-distribution-plan.md)
 8. [Roadmap, Status and Handoff](docs/08-roadmap-status-and-handoff.md)
 9. [Decision Log](docs/09-decision-log.md)
+10. [Desktop Local Runtime](docs/12-desktop-local-runtime.md)
 
 ## Monorepo
 
 ```text
+apps/desktop  Electron shell, bootstrap local e runtime instalado
 apps/api      Fastify API
 apps/web      React/Vite frontend
 apps/worker   local job worker
@@ -86,9 +88,41 @@ Use o mesmo host no navegador e no `VITE_API_BASE`. Por exemplo, se
 Misturar `localhost` na web com `127.0.0.1` na API pode impedir o cookie de
 sessao de ser enviado em algumas chamadas.
 
+## Runtime alvo
+
+O runtime principal agora e `desktop local-first`.
+
+Modelo:
+
+```text
+Electron shell
+  -> UI local
+  -> API local
+  -> worker local
+  -> SQLite/assets/providers locais
+  -> cloud opcional para licenca, sync e updates
+```
+
 ## Rodar localmente
 
 Suba os processos em terminais separados.
+
+### Modo desktop recomendado
+
+```powershell
+pnpm dev:desktop
+```
+
+Esse comando sobe:
+
+- Vite para `apps/web`
+- Electron em `apps/desktop`
+- API local
+- worker local
+
+### Modo backend/web separado
+
+Se precisar depurar os processos individualmente:
 
 API:
 
@@ -114,6 +148,20 @@ URLs usadas no desenvolvimento atual:
 web:    http://127.0.0.1:4273/
 api:    http://127.0.0.1:4110
 worker: http://127.0.0.1:4111
+```
+
+## Build desktop
+
+Build da interface usada pelo shell:
+
+```powershell
+pnpm build:desktop
+```
+
+Empacotamento instalavel:
+
+```powershell
+pnpm dist:desktop
 ```
 
 ## App settings
@@ -175,6 +223,11 @@ O `apps/worker` e o processo local que executa as tarefas pesadas e/ou
 dependentes da maquina: geracao de blocos, audio/TTS, imagens, slides, video
 final, leitura de arquivos gerados e chamadas a providers locais como Ollama,
 ComfyUI e XTTS.
+
+No desenho novo, isso nao e mais a narrativa principal do produto. O fluxo
+padrao deve ser `desktop -> API local -> worker local`. O pareamento remoto
+permanece como infraestrutura herdada/futura para cenarios distribuidos, nao
+como prerequisito do modo instalado local-first.
 
 Para a API conseguir enviar comandos para esse processo, o worker precisa estar
 pareado com um workspace. Esse worker pareado e chamado de `agent`.

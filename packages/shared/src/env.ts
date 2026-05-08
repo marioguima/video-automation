@@ -49,6 +49,13 @@ function findRepoRoot(startDir: string): string {
 }
 
 export function loadRootEnv(): void {
+  const explicitEnvPath = process.env.VIZLEC_ENV_FILE?.trim();
+  if (explicitEnvPath) {
+    loadEnvFile(explicitEnvPath);
+    if ((process.env.VIZLEC_SKIP_ROOT_ENV ?? "false").trim().toLowerCase() === "true") {
+      return;
+    }
+  }
   const root = findRepoRoot(process.cwd());
   const envPath = path.join(root, ".env");
   loadEnvFile(envPath);

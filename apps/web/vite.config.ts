@@ -6,6 +6,7 @@ import { dirname, resolve } from "path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  base: "./",
   envPrefix: ["VITE_", "API_"],
   plugins: [react()],
   resolve: {
@@ -14,6 +15,8 @@ export default defineConfig({
     }
   },
   server: {
-    port: Number(process.env.WEB_PORT ?? 4173)
+    host: process.env.WEB_HOST ?? "127.0.0.1",
+    port: Number(process.env.WEB_PORT ?? 4173),
+    strictPort: true
   }
 });

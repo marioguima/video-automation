@@ -36,6 +36,9 @@ FlowShopy e uma plataforma content-first para criar conteudo uma vez e gerar sai
 10. `10-api-endpoint-inventory.md`
    - Inventario tecnico gerado dos endpoints HTTP declarados na API.
 
+11. `12-desktop-local-runtime.md`
+   - Arquitetura local-first em Electron, distribuicao desktop, runtime instalado e plano de execucao do produto hibrido.
+
 ## Regra de manutencao
 
 Documentacao boa e documentacao que reduz ambiguidade.

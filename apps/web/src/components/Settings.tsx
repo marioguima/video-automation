@@ -22,6 +22,23 @@ type LlmProviderBase = 'ollama' | 'gemini' | 'openai';
 type TtsProvider = 'xtts' | 'chatterbox' | 'qwen' | 'elevenlabs' | 'fish_speech' | 'f5_tts' | 'gpt_sovits' | 'openai' | 'custom';
 type VisualProvider = 'comfyui' | 'veo_extension' | 'vertex_veo' | 'custom';
 type VisualModelKind = 'text_to_image' | 'image_to_image' | 'text_to_video' | 'image_to_video';
+type DesktopRuntimeConfigState = {
+  apiHost: string;
+  apiPort: string;
+  workerPort: string;
+  webHost: string;
+  webPort: string;
+  authCookieSecure: boolean;
+  workerRequireWsOnStartup: boolean;
+};
+type DesktopRuntimePathsState = {
+  dataDir: string;
+  runtimeConfigPath: string;
+  appSettingsPath: string;
+  databasePath: string;
+  workerLogDir: string;
+  bundledNodePath: string;
+};
 type LlmProviderConfig = {
   provider: LlmProviderBase;
   label: string;
@@ -311,6 +328,14 @@ interface SettingsProps {
   setTheme: (theme: Theme) => void;
 }
 
+declare global {
+  interface Window {
+    vizlecDesktop?: {
+      openDataDir?: () => Promise<boolean>;
+    };
+  }
+}
+
 const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
   // General State
   const [isSaving, setIsSaving] = useState(false);
@@ -351,6 +376,18 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
   const [ttsProviderConfigs, setTtsProviderConfigs] = useState<Record<string, TtsProviderConfig>>(DEFAULT_TTS_PROVIDER_CONFIGS);
   const [visualProviderConfigs, setVisualProviderConfigs] = useState<Record<string, VisualProviderConfig>>(DEFAULT_VISUAL_PROVIDER_CONFIGS);
   const [idleUnloadMs, setIdleUnloadMs] = useState('900000');
+  const [desktopRuntimeConfig, setDesktopRuntimeConfig] = useState<DesktopRuntimeConfigState>({
+    apiHost: '127.0.0.1',
+    apiPort: '4110',
+    workerPort: '4111',
+    webHost: '127.0.0.1',
+    webPort: '4173',
+    authCookieSecure: false,
+    workerRequireWsOnStartup: false
+  });
+  const [desktopRuntimePaths, setDesktopRuntimePaths] = useState<DesktopRuntimePathsState | null>(null);
+  const [desktopRuntimeAvailable, setDesktopRuntimeAvailable] = useState(false);
+  const [desktopRuntimeRestartRequired, setDesktopRuntimeRestartRequired] = useState(false);
 
   type ComfyWorkflowNode = {
     inputs?: Record<string, unknown>;
@@ -834,6 +871,36 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       .catch(() => {
         // keep defaults
       });
+    apiGet<{
+      runtime: {
+        apiHost: string;
+        apiPort: number;
+        workerPort: number;
+        webHost: string;
+        webPort: number;
+        authCookieSecure: boolean;
+        workerRequireWsOnStartup: boolean;
+      };
+      paths: DesktopRuntimePathsState;
+      requiresRestart: boolean;
+    }>('/desktop/runtime-config', { cacheMs: 0, dedupe: false })
+      .then((data) => {
+        setDesktopRuntimeAvailable(true);
+        setDesktopRuntimeConfig({
+          apiHost: data.runtime.apiHost,
+          apiPort: String(data.runtime.apiPort),
+          workerPort: String(data.runtime.workerPort),
+          webHost: data.runtime.webHost,
+          webPort: String(data.runtime.webPort),
+          authCookieSecure: data.runtime.authCookieSecure,
+          workerRequireWsOnStartup: data.runtime.workerRequireWsOnStartup
+        });
+        setDesktopRuntimePaths(data.paths);
+        setDesktopRuntimeRestartRequired(Boolean(data.requiresRestart));
+      })
+      .catch(() => {
+        setDesktopRuntimeAvailable(false);
+      });
   }, []);
 
   const handleSave = async () => {
@@ -1087,6 +1154,31 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
       setSettingsError('Comfy workflow is required.');
       return;
     }
+    const apiPortValue = Number(desktopRuntimeConfig.apiPort);
+    const workerPortValue = Number(desktopRuntimeConfig.workerPort);
+    const webPortValue = Number(desktopRuntimeConfig.webPort);
+    if (desktopRuntimeAvailable) {
+      if (!desktopRuntimeConfig.apiHost.trim() || !desktopRuntimeConfig.webHost.trim()) {
+        setIsSaving(false);
+        setSettingsError('Desktop runtime hosts cannot be empty.');
+        return;
+      }
+      if (!Number.isFinite(apiPortValue) || apiPortValue <= 0) {
+        setIsSaving(false);
+        setSettingsError('Desktop API port must be a positive number.');
+        return;
+      }
+      if (!Number.isFinite(workerPortValue) || workerPortValue <= 0) {
+        setIsSaving(false);
+        setSettingsError('Desktop worker port must be a positive number.');
+        return;
+      }
+      if (!Number.isFinite(webPortValue) || webPortValue <= 0) {
+        setIsSaving(false);
+        setSettingsError('Desktop web port must be a positive number.');
+        return;
+      }
+    }
     try {
       await apiPatch('/settings', {
         theme: { family: currentFamily, mode: currentMode },
@@ -1128,6 +1220,19 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
           idleUnloadMs: Math.trunc(idleUnloadMsValue)
         }
       });
+      if (desktopRuntimeAvailable) {
+        await apiPatch('/desktop/runtime-config', {
+          runtime: {
+            apiHost: desktopRuntimeConfig.apiHost.trim(),
+            apiPort: Math.trunc(apiPortValue),
+            workerPort: Math.trunc(workerPortValue),
+            webHost: desktopRuntimeConfig.webHost.trim(),
+            webPort: Math.trunc(webPortValue),
+            authCookieSecure: desktopRuntimeConfig.authCookieSecure,
+            workerRequireWsOnStartup: desktopRuntimeConfig.workerRequireWsOnStartup
+          }
+        });
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
@@ -1251,7 +1356,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
     { id: 'comfy' as const, label: 'ComfyUI', hint: 'Image generation', icon: Server },
     { id: 'visual' as const, label: 'Visual', hint: 'Image & video models', icon: Film },
     { id: 'tts' as const, label: 'TTS', hint: 'Voices & language', icon: Mic },
-    { id: 'runtime' as const, label: 'Runtime', hint: 'Memory behavior', icon: SettingsIcon }
+    { id: 'runtime' as const, label: 'Runtime', hint: 'Desktop & memory', icon: SettingsIcon }
   ];
 
   const duplicateTtsLanguages = useMemo(() => {
@@ -2081,12 +2186,144 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                 <SettingsIcon size={18} />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-slate-800 dark:text-white">Runtime Memory</h2>
-                <p className="text-xs text-muted-foreground">Global memory behavior for model unload.</p>
+                <h2 className="text-lg font-bold text-slate-800 dark:text-white">Runtime</h2>
+                <p className="text-xs text-muted-foreground">Desktop shell configuration, storage paths, and memory behavior.</p>
               </div>
             </div>
 
             <div className="p-8 space-y-6">
+              {desktopRuntimeAvailable ? (
+                <div className="space-y-6">
+                  <div className="rounded-[5px] border border-border p-4 bg-[hsl(var(--secondary))]/25">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Desktop Runtime</div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          These values belong to the installed desktop shell. Changing host/port behavior requires restarting the app.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => window.vizlecDesktop?.openDataDir?.()}
+                        className="h-9 px-4 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-xs font-bold uppercase tracking-widest text-foreground hover:border-orange-500/30 hover:text-orange-600 transition-all"
+                      >
+                        Open Data Folder
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API Host</label>
+                      <input
+                        value={desktopRuntimeConfig.apiHost}
+                        onChange={(e) => setDesktopRuntimeConfig((current) => ({ ...current, apiHost: e.target.value }))}
+                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">API Port</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={desktopRuntimeConfig.apiPort}
+                        onChange={(e) => setDesktopRuntimeConfig((current) => ({ ...current, apiPort: e.target.value }))}
+                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Worker Port</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={desktopRuntimeConfig.workerPort}
+                        onChange={(e) => setDesktopRuntimeConfig((current) => ({ ...current, workerPort: e.target.value }))}
+                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Web Host</label>
+                      <input
+                        value={desktopRuntimeConfig.webHost}
+                        onChange={(e) => setDesktopRuntimeConfig((current) => ({ ...current, webHost: e.target.value }))}
+                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm font-mono outline-none focus:border-primary/40 transition-all text-foreground"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Web Port</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={desktopRuntimeConfig.webPort}
+                        onChange={(e) => setDesktopRuntimeConfig((current) => ({ ...current, webPort: e.target.value }))}
+                        className="w-full h-9 bg-[hsl(var(--editor-input))] border border-[hsl(var(--editor-input-border))] rounded-[5px] px-3 text-sm outline-none focus:border-primary/40 transition-all text-foreground"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="flex items-center gap-3 rounded-[5px] border border-border p-3 bg-[hsl(var(--secondary))]/20">
+                      <input
+                        type="checkbox"
+                        checked={desktopRuntimeConfig.authCookieSecure}
+                        onChange={(e) =>
+                          setDesktopRuntimeConfig((current) => ({ ...current, authCookieSecure: e.target.checked }))
+                        }
+                      />
+                      <div>
+                        <div className="text-xs font-bold text-foreground">Secure auth cookie</div>
+                        <div className="text-[11px] text-muted-foreground">Enable only when the app is behind HTTPS/proxy scenarios.</div>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-3 rounded-[5px] border border-border p-3 bg-[hsl(var(--secondary))]/20">
+                      <input
+                        type="checkbox"
+                        checked={desktopRuntimeConfig.workerRequireWsOnStartup}
+                        onChange={(e) =>
+                          setDesktopRuntimeConfig((current) => ({
+                            ...current,
+                            workerRequireWsOnStartup: e.target.checked
+                          }))
+                        }
+                      />
+                      <div>
+                        <div className="text-xs font-bold text-foreground">Require worker WS on startup</div>
+                        <div className="text-[11px] text-muted-foreground">Keep disabled for the local-first installed mode.</div>
+                      </div>
+                    </label>
+                  </div>
+
+                  {desktopRuntimePaths && (
+                    <div className="rounded-[5px] border border-border p-4 bg-[hsl(var(--secondary))]/15 space-y-3">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Resolved Paths</div>
+                      {[
+                        ['Data directory', desktopRuntimePaths.dataDir],
+                        ['Runtime config', desktopRuntimePaths.runtimeConfigPath],
+                        ['App settings', desktopRuntimePaths.appSettingsPath],
+                        ['Database', desktopRuntimePaths.databasePath],
+                        ['Worker logs', desktopRuntimePaths.workerLogDir],
+                        ['Bundled Node', desktopRuntimePaths.bundledNodePath]
+                      ].map(([label, value]) => (
+                        <div key={label} className="space-y-1">
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</div>
+                          <div className="text-xs font-mono break-all text-foreground">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {desktopRuntimeRestartRequired && (
+                    <div className="rounded-[5px] border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-xs text-orange-300">
+                      Host, port, and shell runtime changes are applied to the desktop configuration file and require restarting the app.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-[5px] border border-border p-4 text-xs text-muted-foreground bg-[hsl(var(--secondary))]/20">
+                  Desktop runtime controls are available only when the interface is running inside VizLec Desktop.
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Idle Unload (ms)</label>
                 <input

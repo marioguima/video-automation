@@ -18,20 +18,27 @@ import type { WebSocket } from "ws";
 import {
   buildDeterministicBlocks,
   COMPOSITION_ASPECT_RATIOS,
+  DEFAULT_DESKTOP_RUNTIME_CONFIG,
+  ensureDesktopRuntimeConfigFile,
   ensureAppSettingsFile,
   ensureDataDir,
+  getDesktopRuntimeConfigPath,
+  getDesktopRuntimePaths,
   getConfig,
   getMissingAppSettingsSecrets,
   loadRootEnv,
   NARRATIVE_ROLES,
   normalizeLlmStages,
+  normalizeDesktopRuntimeConfig,
   resolveDefaultLlmModel,
   normalizeLlmProvider,
+  readDesktopRuntimeConfig,
   readAppSettingsFile,
   resolveLlmProviderSettings,
   resolveLlmProviders,
   resolveLlmStageConfig,
   sanitizeNarratedScriptText,
+  writeDesktopRuntimeConfig,
   writeAppSettingsFile,
   loadVoiceIndex,
   findVoiceById,
@@ -1748,6 +1755,34 @@ function readAppSettings(): AppSettings {
 
 function writeAppSettings(next: AppSettings): void {
   writeAppSettingsFile(config.appSettingsPath, next);
+}
+
+function isDesktopModeEnabled(): boolean {
+  return (process.env.VIZLEC_DESKTOP_MODE ?? "false").trim().toLowerCase() === "true";
+}
+
+function getDesktopRuntimeConfigFilePath(): string {
+  return process.env.VIZLEC_DESKTOP_CONFIG_PATH?.trim() || getDesktopRuntimeConfigPath(config.dataDir);
+}
+
+function readDesktopRuntimeSettings() {
+  const configPath = getDesktopRuntimeConfigFilePath();
+  return readDesktopRuntimeConfig(configPath, DEFAULT_DESKTOP_RUNTIME_CONFIG);
+}
+
+function writeDesktopRuntimeSettings(next: Partial<typeof DEFAULT_DESKTOP_RUNTIME_CONFIG>): void {
+  const configPath = getDesktopRuntimeConfigFilePath();
+  const current = ensureDesktopRuntimeConfigFile(configPath, DEFAULT_DESKTOP_RUNTIME_CONFIG);
+  writeDesktopRuntimeConfig(
+    configPath,
+    normalizeDesktopRuntimeConfig(
+      {
+        ...current,
+        ...next
+      },
+      DEFAULT_DESKTOP_RUNTIME_CONFIG
+    )
+  );
 }
 
 function initializeAppSettings(): void {
@@ -4363,8 +4398,8 @@ fastify.get(
   }
 );
 
-fastify.patch(
-  "/settings",
+  fastify.patch(
+    "/settings",
   {
     schema: {
       tags: ["Settings"],
@@ -6937,6 +6972,73 @@ fastify.get(
     return reply.code(201).send({
       ...serializeContentItem(refreshed ?? item)
     });
+    }
+  );
+
+  fastify.get(
+    "/desktop/runtime-config",
+    {
+      schema: {
+        tags: ["Settings"],
+        summary: "Obtém a configuração do runtime desktop",
+        description: "Retorna configuração local do shell desktop e paths resolvidos"
+      }
+    },
+    async (request, reply) => {
+      if (!isDesktopModeEnabled()) {
+        return reply.code(404).send({ error: "desktop_runtime_unavailable" });
+      }
+      const runtime = readDesktopRuntimeSettings();
+      const paths = getDesktopRuntimePaths(config.dataDir);
+      return {
+        runtime,
+        paths: {
+          ...paths,
+          bundledNodePath:
+            process.env.DESKTOP_RUNTIME_NODE_PATH?.trim() ||
+            process.env.npm_node_execpath?.trim() ||
+            process.execPath
+        },
+        requiresRestart: true
+      };
+    }
+  );
+
+  fastify.patch(
+    "/desktop/runtime-config",
+    {
+      schema: {
+        tags: ["Settings"],
+        summary: "Atualiza a configuração do runtime desktop",
+        description: "Atualiza o runtime local do desktop. Alterações exigem reinício do app."
+      }
+    },
+    async (request, reply) => {
+      if (!isDesktopModeEnabled()) {
+        return reply.code(404).send({ error: "desktop_runtime_unavailable" });
+      }
+      const body = (request.body ?? {}) as {
+        runtime?: {
+          apiHost?: string;
+          apiPort?: number;
+          workerPort?: number;
+          webHost?: string;
+          webPort?: number;
+          authCookieSecure?: boolean;
+          workerRequireWsOnStartup?: boolean;
+        };
+      };
+      const runtimeBody = body.runtime;
+      if (!runtimeBody) {
+        return reply.code(400).send({ error: "missing runtime body" });
+      }
+      const normalized = normalizeDesktopRuntimeConfig(runtimeBody, readDesktopRuntimeSettings());
+      writeDesktopRuntimeSettings(normalized);
+      return reply.code(200).send({
+        ok: true,
+        runtime: readDesktopRuntimeSettings(),
+        requiresRestart: true
+      });
     }
   );
 

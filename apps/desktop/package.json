@@ -1,0 +1,19 @@
+{
+  "name": "@vizlec/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "dev": "electron .",
+    "build": "echo 'desktop shell uses source files directly'",
+    "lint": "echo 'lint not configured'",
+    "typecheck": "echo 'typecheck not configured'"
+  },
+  "dependencies": {
+    "tsx": "^4.19.1"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0"
+  }
+}

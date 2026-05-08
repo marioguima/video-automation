@@ -1,0 +1,43 @@
+{
+  "appId": "com.vizlec.desktop",
+  "productName": "VizLec Desktop",
+  "directories": {
+    "output": "dist/desktop"
+  },
+  "asar": false,
+  "files": [
+    "apps/desktop/**/*",
+    "apps/api/src/**/*",
+    "apps/api/package.json",
+    "apps/worker/src/**/*",
+    "apps/worker/package.json",
+    "apps/web/dist/**/*",
+    "packages/shared/src/**/*",
+    "packages/shared/package.json",
+    "packages/db/src/**/*",
+    "packages/db/prisma/**/*",
+    "packages/db/package.json",
+    "config/**/*",
+    "node_modules/**/*",
+    "package.json",
+    "pnpm-lock.yaml"
+  ],
+  "extraResources": [
+    {
+      "from": "apps/desktop/vendor",
+      "to": "vendor"
+    }
+  ],
+  "extraMetadata": {
+    "main": "apps/desktop/main.mjs"
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  }
+}

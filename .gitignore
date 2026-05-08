@@ -62,6 +62,7 @@ release/
 releases/
 out/
 **/out/
+apps/desktop/vendor/
 *.exe
 *.dmg
 *.app

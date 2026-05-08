@@ -1,16 +1,29 @@
 {
   "name": "vizlec",
+  "version": "0.0.1",
   "private": true,
+  "description": "VizLec local-first desktop and content production runtime.",
+  "author": "VizLec",
+  "main": "apps/desktop/main.mjs",
   "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": "22.17.1",
+    "pnpm": "9.12.3"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
+    "prepare:desktop-node": "node scripts/prepare-desktop-node.mjs",
     "dev:api": "pnpm --filter @vizlec/api dev",
     "dev:worker": "pnpm --filter @vizlec/worker dev",
     "dev:web": "pnpm --filter @vizlec/web dev",
+    "dev:desktop": "pnpm prepare:desktop-node && node scripts/dev-desktop.mjs",
     "dev": "pnpm -r --parallel dev",
+    "build:web": "pnpm --filter @vizlec/web build",
+    "build:desktop": "pnpm prepare:desktop-node && pnpm build:web",
+    "dist:desktop": "pnpm build:desktop && electron-builder --config apps/desktop/electron-builder.json",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
@@ -18,5 +31,9 @@
     "verify:critical": "pnpm --filter @vizlec/api typecheck && pnpm --filter @vizlec/web typecheck && pnpm --filter @vizlec/api run test:one -- test/correlation-id-traceability.test.ts",
     "setup:hooks": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-hooks.ps1",
     "db:migrate": "node scripts/prisma-migrate.cjs"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.0.12"
   }
 }

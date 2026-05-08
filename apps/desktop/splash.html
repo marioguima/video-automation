@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' 'unsafe-inline' data:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VizLec Desktop</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg-a: #8a2be2;
+        --bg-b: #c13df0;
+        --text: #ffffff;
+        --track: rgba(102, 16, 130, 0.42);
+        --track-border: rgba(91, 8, 117, 0.58);
+        --fill-a: #ff5fe1;
+        --fill-b: #39c6ff;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; }
+      body {
+        margin: 0;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: linear-gradient(135deg, var(--bg-a) 0%, var(--bg-b) 100%);
+        font-family: "Segoe UI", "Arial", sans-serif;
+        color: var(--text);
+      }
+      .caption {
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        padding: 8px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .shell {
+        width: min(760px, calc(100vw - 48px));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 30px;
+      }
+      .brand-lockup {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .logo {
+        width: 74px;
+        height: 60px;
+        border-radius: 18px;
+        background: #fff;
+        display: grid;
+        place-items: center;
+      }
+      .logo-glyph {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px 18px 18px 10px;
+        background: linear-gradient(180deg, #a53cff 0%, #8528d9 100%);
+        position: relative;
+      }
+      .logo-glyph::after {
+        content: "";
+        position: absolute;
+        top: 9px;
+        right: -1px;
+        width: 13px;
+        height: 16px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.98);
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(40px, 5vw, 54px);
+        line-height: 1;
+        letter-spacing: -0.04em;
+        font-weight: 700;
+      }
+      .brand-accent {
+        font-weight: 300;
+      }
+      .stage {
+        width: min(500px, 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      .track {
+        position: relative;
+        width: 100%;
+        height: 24px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: var(--track);
+        border: 1px solid var(--track-border);
+        box-shadow: inset 0 2px 7px rgba(52, 0, 63, 0.25);
+      }
+      .fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--fill-a) 0%, #d14fff 34%, var(--fill-b) 100%);
+        transition: width 140ms linear;
+      }
+      .fill::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.32) 50%, transparent 100%);
+        transform: translateX(-100%);
+        animation: shimmer 1.8s linear infinite;
+      }
+      .progress-meta {
+        font-size: 15px;
+        line-height: 1;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.96);
+      }
+      .message {
+        margin: 0;
+        min-height: 1.4em;
+        text-align: center;
+        font-size: 24px;
+        line-height: 1.2;
+        font-weight: 700;
+        color: var(--text);
+      }
+      @keyframes shimmer {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(100%); }
+      }
+      @media (max-width: 720px) {
+        .shell { gap: 28px; }
+        .brand-lockup { gap: 14px; }
+        .logo {
+          width: 64px;
+          height: 52px;
+          border-radius: 16px;
+        }
+        .message { font-size: 18px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="caption">DESKTOP</div>
+    <div class="shell">
+      <div class="brand-lockup">
+        <div class="logo" aria-hidden="true">
+          <div class="logo-glyph"></div>
+        </div>
+        <h1>VizLec<span class="brand-accent">{desktop}</span></h1>
+      </div>
+      <div class="stage">
+        <div class="track">
+          <div class="fill" id="fill"></div>
+        </div>
+        <div class="progress-meta" id="progress-label">Carregamento 0%</div>
+        <p class="message" id="message">Preparando ambiente desktop.</p>
+      </div>
+    </div>
+    <script>
+      const fill = document.getElementById("fill");
+      const progressLabel = document.getElementById("progress-label");
+      const message = document.getElementById("message");
+
+      window.__applyBootstrapState = (state) => {
+        const nextProgress = Math.max(0, Math.min(100, Number(state?.progress ?? 0)));
+        fill.style.width = nextProgress + "%";
+        progressLabel.textContent = "Carregamento " + Math.round(nextProgress) + "%";
+        message.textContent = state?.message || "Preparando ambiente desktop.";
+        document.title = state?.title || "VizLec Desktop";
+      };
+    </script>
+  </body>
+</html>
