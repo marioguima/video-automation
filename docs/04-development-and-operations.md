@@ -16,7 +16,7 @@ Requisitos:
   - ComfyUI;
   - XTTS/Chatterbox/Qwen TTS.
 
-## Instalar dependencias
+## Instalar dependências
 
 ```powershell
 pnpm install
@@ -117,7 +117,7 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4273/
 
 ## Login local atual
 
-Usuario dev:
+Usuário dev:
 
 ```text
 email: marioguimaraes@flowshopy.com
@@ -126,7 +126,7 @@ senha: TempPass123!
 
 Se a senha precisar ser resetada, usar script local com Prisma/argon2 apontando para `data/data.db`.
 
-## Validacao
+## Validação
 
 Typecheck API:
 
@@ -146,7 +146,7 @@ Typecheck worker:
 pnpm --filter @flowshopy/worker typecheck
 ```
 
-Verificacao critica:
+Verificacao crítica:
 
 ```powershell
 pnpm verify:critical
@@ -177,7 +177,7 @@ Se isso ocorrer:
 
 - rode pacotes individualmente;
 - valide fora do sandbox quando permitido;
-- nao assuma erro de codigo sem reproduzir localmente.
+- não assuma erro de codigo sem reproduzir localmente.
 
 ## Logs
 
@@ -197,28 +197,28 @@ logs/worker-job-events.log
 ```
 
 `worker-actions.log` registra eventos operacionais gerais do worker. `worker-job-events.log`
-registra eventos JSONL por job, incluindo segmentacao, TTS, imagem, render e falhas por bloco,
-para permitir diagnostico sem depender apenas do console.
+registra eventos JSONL por job, incluindo segmentação, TTS, imagem, render e falhas por bloco,
+para permitir diagnóstico sem depender apenas do console.
 
 Os timestamps desses arquivos devem ser gravados no horario local real do processo, com offset
-explicito, por exemplo `2026-05-02T19:22:36.452-03:00` no Brasil.
-`WORKER_LOG_DIR` pode sobrescrever esse diretorio quando for necessario.
+explícito, por exemplo `2026-05-02T19:22:36.452-03:00` no Brasil.
+`WORKER_LOG_DIR` pode sobrescrever esse diretório quando for necessário.
 
 ## Fluxo de trabalho recomendado
 
 1. Ler `docs/08-roadmap-status-and-handoff.md`.
-2. Ler a especificacao do que sera alterado.
+2. Ler a específicacao do que será alterado.
 3. Fazer mudancas pequenas.
 4. Rodar typecheck do pacote alterado.
 5. Rodar teste relacionado.
 6. Atualizar docs se mudar decisao/contrato.
 7. Atualizar status/handoff.
 
-## Regras de implementacao
+## Regras de implementação
 
-- Nao editar `G:\tool\flowshopy`.
-- Nao remover `Course/Module/Lesson` ainda.
-- Nao fazer rename fisico grande sem fase planejada.
+- Não editar `G:\tool\flowshopy`.
+- Não remover `Course/Module/Lesson` ainda.
+- Não fazer rename fisico grande sem fase planejada.
 - Preferir metadata para prototipar campos ainda instaveis.
 - Criar migrations somente quando contrato estiver claro.
 - Preservar fluxo legado de curso enquanto FlowShopy evolui.

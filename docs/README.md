@@ -1,53 +1,53 @@
 # FlowShopy Documentation
 
-Esta pasta contem somente a documentacao ativa do produto FlowShopy.
+Esta pasta contém somente a documentação ativa do produto FlowShopy.
 
-FlowShopy e uma plataforma content-first para criar conteudo uma vez e gerar saidas em video para multiplas plataformas, formatos e aspect ratios. A direcao do produto segue COPE: Create Once, Publish Everywhere.
+FlowShopy é uma plataforma content-first para criar conteúdo uma vez e gerar saídas em vídeo para múltiplas plataformas, formatos e aspect ratios. A direção do produto segue COPE: Create Once, Publish Everywhere.
 
 ## Ordem de leitura
 
 1. `01-product-vision.md`
-   - Define o produto, valor entregue, usuario, escopo e experiencia esperada.
+   - Define o produto, valor entregue, usuário, escopo e experiência esperada.
 
 2. `02-product-specification.md`
-   - Detalha funcionalidades, entidades de produto, fluxos, visoes de tela e criterios de aceite.
+   - Detalha funcionalidades, entidades de produto, fluxos, visões de tela e critérios de aceite.
 
 3. `03-technical-architecture.md`
-   - Explica arquitetura, stack, dominio, banco, API, worker, jobs, assets e decisoes tecnicas.
+   - Explica arquitetura, stack, domínio, banco, API, worker, jobs, assets e decisões técnicas.
 
 4. `04-development-and-operations.md`
    - Como rodar, configurar, validar, testar, debugar e operar em desenvolvimento.
 
 5. `05-production-infrastructure.md`
-   - Como empacotar, distribuir, subir em producao, infraestrutura necessaria e modelo local/cloud/hibrido.
+   - Como empacotar, distribuir, subir em produção, infraestrutura necessária e modelo local/cloud/hibrido.
 
 6. `06-integrations-and-external-services.md`
    - LLMs, Gemini, Ollama, TTS, ComfyUI, ffmpeg, Playwright, plataformas sociais, pagamentos e APIs externas.
 
 7. `07-sales-and-distribution-plan.md`
-   - Plano de venda, distribuicao, modelo comercial, onboarding, suporte, planos e go-to-market.
+   - Plano de venda, distribuição, modelo comercial, onboarding, suporte, planos e go-to-market.
 
 8. `08-roadmap-status-and-handoff.md`
-   - Estado real da implementacao, proximos passos, criterios de aceite, comandos e handoff para retomar trabalho.
+   - Estado real da implementação, próximos passos, critérios de aceite, comandos e handoff para retomar trabalho.
 
 9. `09-decision-log.md`
-   - Decisoes ja tomadas, tradeoffs, itens removidos da documentacao antiga e assuntos em aberto.
+   - Decisões já tomadas, tradeoffs, itens removidos da documentação antiga e assuntos em aberto.
 
 10. `10-api-endpoint-inventory.md`
-   - Inventario tecnico gerado dos endpoints HTTP declarados na API.
+   - Inventário técnico gerado dos endpoints HTTP declarados na API.
 
 11. `12-desktop-local-runtime.md`
-   - Arquitetura local-first em Electron, distribuicao desktop, runtime instalado e plano de execucao do produto hibrido.
+   - Arquitetura local-first em Electron, distribuição desktop, runtime instalado e plano de execução do produto híbrido.
 
-## Regra de manutencao
+## Regra de manutenção
 
-Documentacao boa e documentacao que reduz ambiguidade.
+Documentação boa é documentação que reduz ambiguidade.
 
 Ao alterar produto, arquitetura, infraestrutura ou plano comercial:
 
 - atualize o documento canônico correspondente;
-- remova duplicacoes;
-- registre decisoes relevantes em `09-decision-log.md`;
+- remova duplicações;
+- registre decisões relevantes em `09-decision-log.md`;
 - atualize o status em `08-roadmap-status-and-handoff.md`.
 
-Nao adicionar novos documentos sem necessidade clara. Se uma informacao cabe em um dos arquivos acima, ela deve ir nele.
+Não adicionar novos documentos sem necessidade clara. Se uma informação cabe em um dos arquivos acima, ela deve ir nele.

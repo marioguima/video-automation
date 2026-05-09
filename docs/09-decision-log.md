@@ -2,14 +2,14 @@
 
 ## 2026-04-29 / 2026-04-30 - Produto ativo
 
-Decisao:
+Decisão:
 
-- FlowShopy e o produto ativo em `G:\tool\video-automation`.
-- `G:\tool\flowshopy` e referencia somente leitura.
-- o foco atual do produto e `single-machine local-first`;
-- sincronizacao remota futura deve cobrir configuracoes, projetos e metadados minimos compartilhados;
-- assets pesados permanecem locais por padrao;
-- segredos internos do runtime desktop devem ser gerados no primeiro boot e persistidos localmente, sem dependencia de `.env` do usuario final.
+- FlowShopy é o produto ativo em `G:\tool\video-automation`.
+- `G:\tool\flowshopy` é referência somente leitura.
+- o foco atual do produto é `single-machine local-first`;
+- sincronização remota futura deve cobrir configurações, projetos e metadados mínimos compartilhados;
+- assets pesados permanecem locais por padrão;
+- segredos internos do runtime desktop devem ser gerados no primeiro boot e persistidos localmente, sem dependência de `.env` do usuário final.
 
 Motivo:
 
@@ -17,211 +17,211 @@ Motivo:
 - reaproveitar pipeline maduro do FlowShopy;
 - evoluir para COPE/content-first.
 
-## Dominio
+## Domínio
 
-Decisao:
+Decisão:
 
-- existem dois elementos centrais: conteudo e projeto;
-- conteudo e a base reutilizavel;
-- projeto e o agrupador que da contexto, fluxo e utilidade ao conteudo;
-- conteudo sozinho pode existir como rascunho/biblioteca, mas so ganha impacto quando associado a projeto;
-- um conteudo pode ser usado em mais de um projeto;
-- curso, canal, campanha ou musica podem ser contexto de um projeto, mas nao `kind` do projeto.
+- existem dois elementos centrais: conteúdo e projeto;
+- conteúdo é a base reutilizável;
+- projeto é o agrupador que dá contexto, fluxo e utilidade ao conteúdo;
+- conteúdo sozinho pode existir como rascunho/biblioteca, mas só ganha impacto quando associado a projeto;
+- um conteúdo pode ser usado em mais de um projeto;
+- curso, canal, campanha ou música podem ser contexto de um projeto, mas não `kind` do projeto.
 
 Motivo:
 
-- o produto precisa servir curso, YouTube, TikTok, Instagram, Facebook e musica;
-- modulo so faz sentido em curso.
+- o produto precisa servir curso, YouTube, TikTok, Instagram, Facebook e música;
+- módulo só faz sentido em curso.
 
-## 2026-04-30 - Revisao do conceito de Projeto
+## 2026-04-30 - Revisão do conceito de Projeto
 
-Decisao:
+Decisão:
 
-- projeto pode organizar curso, canal do YouTube, perfil do Instagram, pagina do Facebook, perfil do TikTok, lancamento, campanha, serie, colecao ou musica sem carregar um campo `kind`;
+- projeto pode organizar curso, canal do YouTube, perfil do Instagram, página do Facebook, perfil do TikTok, lançamento, campanha, série, coleção ou música sem carregar um campo `kind`;
 - canais/perfis/paginas podem ser contexto operacional do projeto, mas aparecem no contrato como destinations/outputs;
-- canais aparecem como destino/entrega quando um projeto publica em varios canais;
-- nao existe mais o conceito de "criar curso" como fluxo separado de produto; cursos devem entrar como projetos;
-- a producao ocorre na visao de projeto;
-- deve existir acesso rapido para iniciar por conteudo e depois associar a projeto.
+- canais aparecem como destino/entrega quando um projeto publica em vários canais;
+- não existe mais o conceito de "criar curso" como fluxo separado de produto; cursos devem entrar como projetos;
+- a produção ocorre na visão de projeto;
+- deve existir acesso rápido para iniciar por conteúdo e depois associar a projeto.
 
 Motivo:
 
-- conteudo sem projeto nao e suficiente para organizar producao nem estrategia;
-- o usuario pensa em agrupadores reais de trabalho, mas o produto nao deve forcar uma classificacao inicial do projeto;
-- o mesmo conteudo pode ser reaproveitado em varios projetos;
-- o projeto define canais de entrega, formatos possiveis e entregaveis.
+- conteúdo sem projeto não é suficiente para organizar produção nem estratégia;
+- o usuário pensa em agrupadores reais de trabalho, mas o produto não deve forçar uma classificação inicial do projeto;
+- o mesmo conteúdo pode ser reaproveitado em vários projetos;
+- o projeto define canais de entrega, formatos possíveis e entregáveis.
 
-Observacao:
+Observação:
 
-- qualquer implementacao anterior que tratou projeto como tipo/categoria deve ser revisada;
-- canais/perfis/paginas pertencem a destinations/outputs, nao ao tipo de projeto;
-- esta decisao substitui a direcao provisoria anterior.
+- qualquer implementação anterior que tratou projeto como tipo/categoria deve ser revisada;
+- canais/perfis/paginas pertencem a destinations/outputs, não ao tipo de projeto;
+- esta decisão substitui a direção provisória anterior.
 
 ## 2026-04-30 - Tela Content
 
-Decisao:
+Decisão:
 
-- a entrada `Content` deve ser voltada para producao do conteudo/roteiro;
-- configuracao de canais de entrega, formatos e aspect ratios pertence ao projeto/outputs;
-- a tela de conteudo deve ter area principal de escrita e um bloco de prompt/conversa para solicitacoes a IA;
-- conteudo precisa ser associado a projeto para entrar no fluxo de producao, mas a associacao nao deve dominar a experiencia visual da tela.
-- a tela de conteudo nao deve pedir o tipo de midia antes da escrita; video, imagem, musica, texto e PDF sao entregaveis/outputs, nao o conteudo em si.
+- a entrada `Content` deve ser voltada para produção do conteúdo/roteiro;
+- configuração de canais de entrega, formatos e aspect ratios pertence ao projeto/outputs;
+- a tela de conteúdo deve ter área principal de escrita e um bloco de prompt/conversa para solicitações a IA;
+- conteúdo precisa ser associado a projeto para entrar no fluxo de produção, mas a associação não deve dominar a experiência visual da tela.
+- a tela de conteúdo não deve pedir o tipo de mídia antes da escrita; vídeo, imagem, música, texto e PDF são entregáveis/outputs, não o conteúdo em si.
 
 Motivo:
 
-- conteudo e somente o conteudo;
-- o projeto define canais, formatos e entregaveis;
-- a tela atual estava parecendo mais configuracao de delivery channels do que producao de roteiro.
-- uma ideia nao e video, imagem ou musica; ela pode se tornar qualquer uma dessas saidas conforme o projeto/canal/formato.
+- conteúdo é somente o conteúdo;
+- o projeto define canais, formatos e entregáveis;
+- a tela atual estava parecendo mais configuração de delivery channels do que produção de roteiro.
+- uma ideia não é vídeo, imagem ou música; ela pode se tornar qualquer uma dessas saídas conforme o projeto/canal/formato.
 
-## 2026-04-30 - Produto orientado a promocao
+## 2026-04-30 - Produto orientado a promoção
 
-Decisao:
+Decisão:
 
-- FlowShopy deve ser tratado como uma maquina de atencao para promocao de produtos, ofertas e eventos;
-- o objetivo nao e gerar views vazias;
-- projetos devem poder promover um ou mais produtos por periodo;
-- short links internos redirecionaveis sao parte estrategica da evolucao do produto;
+- FlowShopy deve ser tratado como uma máquina de atenção para promoção de produtos, ofertas e eventos;
+- o objetivo não é gerar views vazias;
+- projetos devem poder promover um ou mais produtos por período;
+- short links internos redirecionáveis são parte estratégica da evolução do produto;
 - materiais publicados devem preferir short links/QR codes internos para permitir troca futura do destino real.
 
 Motivo:
 
-- links em PDFs, e-books, imagens, descricoes antigas e materiais distribuidos podem nao ser editaveis;
+- links em PDFs, e-books, imagens, descrições antigas e materiais distribuídos podem não ser editáveis;
 - ao trocar o destino de um short link, todos os materiais que usam aquele link passam a apontar para o novo produto/oferta;
-- isso conecta conteudo, atencao e resultado comercial.
+- isso conecta conteúdo, atenção e resultado comercial.
 
 ## Banco
 
-Decisao:
+Decisão:
 
-- nao renomear fisicamente tabelas agora;
-- manter Course/Module/Lesson como backing tecnico;
+- não renomear fisicamente tabelas agora;
+- manter Course/Module/Lesson como backing técnico;
 - adicionar ContentProject/ContentItem.
 
 Motivo:
 
-- entregar rapido;
+- entregar rápido;
 - reduzir risco;
 - preservar editor/jobs/render existentes.
 
-## 2026-05-05 - Saida definitiva do modelo de curso
+## 2026-05-05 - Saída definitiva do modelo de curso
 
-Decisao:
+Decisão:
 
-- o produto nao deve continuar evoluindo como gerador de aulas;
-- `Course/Module/Lesson` deixa de ser direcao de produto e passa a ser somente legado tecnico temporario;
-- o alvo oficial passa a ser uma fabrica de conteudo promocional orientada por `ContentItem`, `Project`, `ProjectContentOutput`, `NarrativeUnit` e `Composition`;
-- o legado deve ser removido progressivamente quando o fluxo novo cobrir os casos principais, e nao apenas escondido na UI.
-
-Motivo:
-
-- manter dois modelos de produto em paralelo tende a duplicar regras, linguagem e custos de manutencao;
-- curso e apenas um dos contextos possiveis de um projeto;
-- o produto precisa suportar video, imagem, clips, overlays, CTA, promocao e composicao audiovisual mais ampla do que o modelo de aula permite.
-
-## 2026-05-05 - Composicao e preview com Remotion
-
-Decisao:
-
-- `Remotion` passa a ser a direcao principal para composicao, preview e timeline;
-- `ffmpeg` permanece como infraestrutura de midia e export, nao como camada principal de autoria;
-- `slide` deixa de ser unidade central do produto e passa a ser apenas um tipo simples de composicao.
+- o produto não deve continuar evoluindo como gerador de aulas;
+- `Course/Module/Lesson` deixa de ser direção de produto e passa a ser somente legado técnico temporário;
+- o alvo oficial passa a ser uma fábrica de conteúdo promocional orientada por `ContentItem`, `Project`, `ProjectContentOutput`, `NarrativeUnit` e `Composition`;
+- o legado deve ser removido progressivamente quando o fluxo novo cobrir os casos principais, e não apenas escondido na UI.
 
 Motivo:
 
-- o produto precisa de visualizador, timeline, efeitos, transicoes, overlays e composicao declarativa;
-- `ffmpeg` e muito forte como executor, mas fraco como camada de autoria/preview;
+- manter dois modelos de produto em paralelo tende a duplicar regras, linguagem e custos de manutenção;
+- curso é apenas um dos contextos possíveis de um projeto;
+- o produto precisa suportar vídeo, imagem, clips, overlays, CTA, promoção e composição áudiovisual mais ampla do que o modelo de aula permite.
+
+## 2026-05-05 - Composição e preview com Remotion
+
+Decisão:
+
+- `Remotion` passa a ser a direção principal para composição, preview e timeline;
+- `ffmpeg` permanece como infraestrutura de mídia e export, não como camada principal de autoria;
+- `slide` deixa de ser unidade central do produto e passa a ser apenas um tipo simples de composição.
+
+Motivo:
+
+- o produto precisa de visualizador, timeline, efeitos, transições, overlays e composição declarativa;
+- `ffmpeg` é muito forte como executor, mas fraco como camada de autoria/preview;
 - o preview antes do render final reduz custo e aumenta controle editorial.
 
 ## 2026-05-05 - Novo significado de template
 
-Decisao:
+Decisão:
 
-- `template` nao deve mais significar apenas texto sobre imagem;
-- o conceito correto e um sistema de composicao formado por `StyleDNA`, `Component`, `CompositionPreset` e `VariationRules`;
-- videos devem manter identidade visual sem se tornarem clones.
-
-Motivo:
-
-- o produto precisa reaproveitar componentes testados sem cair em uma fabrica de videos parecidos;
-- uma coisa e manter consistencia de marca; outra e produzir saidas visualmente repetitivas;
-- a combinacao de componentes, presets e regras de variacao cria identidade com originalidade.
-
-## 2026-05-06 - Conteudo nasce fora do projeto
-
-Decisao:
-
-- `Content` continua sendo a area unica de criacao e edicao da materia-prima editorial;
-- `Project` nao deve duplicar essa experiencia com um segundo formulario principal de conteudo;
-- dentro do projeto, a acao correta e localizar e associar conteudos existentes;
-- um mesmo conteudo pode se relacionar com um, varios ou nenhum projeto;
-- `Studio` existe para transformar conteudo associado em output/composicao, nao para competir com a area `Content`.
+- `template` não deve mais significar apenas texto sobre imagem;
+- o conceito correto é um sistema de composição formado por `StyleDNA`, `Component`, `CompositionPreset` e `VariationRules`;
+- vídeos devem manter identidade visual sem se tornarem clones.
 
 Motivo:
 
-- conteudo e materia-prima e precisa existir por si;
-- projeto sozinho nao gera valor; ele apenas parametriza a fabrica/core;
-- duplicar a criacao de conteudo em mais de um lugar aumenta ambiguidade e deixa a UI menos clara;
-- a complexidade precisa ficar debaixo do capo, com um fluxo unico e direto para o usuario.
+- o produto precisa reaproveitar componentes testados sem cair em uma fábrica de vídeos parecidos;
+- uma coisa é manter consistência de marca; outra é produzir saídas visualmente repetitivas;
+- a combinação de componentes, presets e regras de variação cria identidade com originalidade.
 
-## Documentacao
+## 2026-05-06 - Conteúdo nasce fora do projeto
 
-Decisao:
+Decisão:
 
-- reduzir `docs` a poucos documentos canonicos;
-- remover snapshots, binarios, outputs e documentacao antiga da pasta ativa;
-- manter contexto historico resumido neste log.
+- `Content` continua sendo a área única de criação e edição da matéria-prima editorial;
+- `Project` não deve duplicar essa experiência com um segundo formulário principal de conteúdo;
+- dentro do projeto, a ação correta é localizar e associar conteúdos existentes;
+- um mesmo conteúdo pode se relacionar com um, vários ou nenhum projeto;
+- `Studio` existe para transformar conteúdo associado em output/composição, não para competir com a área `Content`.
 
 Motivo:
 
-- muita documentacao estava reduzindo clareza;
-- produto precisa de visao clara, arquitetura clara e plano executavel.
+- conteúdo é matéria-prima e precisa existir por si;
+- projeto sozinho não gera valor; ele apenas parametriza a fábrica/core;
+- duplicar a criação de conteúdo em mais de um lugar aumenta ambiguidade e deixa a UI menos clara;
+- a complexidade precisa ficar debaixo do capo, com um fluxo único e direto para o usuário.
+
+## Documentação
+
+Decisão:
+
+- reduzir `docs` a poucos documentos canônicos;
+- remover snapshots, binários, outputs e documentação antiga da pasta ativa;
+- manter contexto histórico resumido neste log.
+
+Motivo:
+
+- muita documentação estava reduzindo clareza;
+- produto precisa de visão clara, arquitetura clara e plano executável.
 
 ## Gemini
 
-Decisao:
+Decisão:
 
-- adicionar Gemini como LLM configuravel;
+- adicionar Gemini como LLM configurável;
 - exigir API key quando selecionado;
 - usar Gemini no worker para tarefas LLM.
 
 Motivo:
 
-- melhorar analise/segmentacao de roteiros;
+- melhorar análise/segmentação de roteiros;
 - permitir qualidade melhor que modelos locais pequenos.
 
-## Musica
+## Música
 
-Decisao:
+Decisão:
 
 - manter no radar;
-- na primeira versao, usuario fornece audio;
-- nao gerar musica por API agora.
+- na primeira versão, usuário fornece áudio;
+- não gerar música por API agora.
 
 Motivo:
 
-- APIs de musica ainda nao sao prioridade/viabilidade definida;
-- core de video deve vir primeiro.
+- APIs de música ainda não são prioridade/viabilidade definida;
+- core de vídeo deve vir primeiro.
 
 ## Feed/Kanban/Agenda
 
 Decisao:
 
-- Feed, Kanban e Agenda fazem parte da experiencia de produto;
-- entrar na Fase 1 como visoes iniciais simples.
+- Feed, Kanban e Agenda fazem parte da experiência de produto;
+- entrar na Fase 1 como visões iniciais simples.
 
 Motivo:
 
-- producao de conteudo se perde sem organizacao;
-- o usuario precisa enxergar acervo, status e planejamento;
-- prepara multi-tenancy/responsaveis.
+- produção de conteúdo se perde sem organização;
+- o usuário precisa enxergar acervo, status e planejamento;
+- prepara multi-tenancy/responsáveis.
 
 ## Assuntos em aberto
 
-- Como e quando remover definitivamente a linguagem de `Variant` do dominio restante.
+- Como e quando remover definitivamente a linguagem de `Variant` do domínio restante.
 - Quando criar tabela `ContentSource`.
 - Como modelar thumbnails.
-- Qual provider de animacao imagem-para-video usar.
-- Qual estrategia de analise de links de video usar.
+- Qual provider de animação imagem-para-vídeo usar.
+- Qual estratégia de análise de links de vídeo usar.
 - Quando mover de SQLite para Postgres no SaaS.
 - Como criptografar API keys em repouso.

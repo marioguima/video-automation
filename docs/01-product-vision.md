@@ -2,57 +2,58 @@
 
 ## Produto
 
-FlowShopy e uma plataforma de criacao e automacao de conteudo com foco em video, pensada como uma maquina de atencao para promocao de produtos.
+FlowShopy é uma plataforma de criação e automação de conteúdo com foco em vídeo, pensada como uma máquina de atenção para promoção de produtos.
 
-O produto segue o principio COPE: Create Once, Publish Everywhere. O usuario cria um conteudo central e gera outputs publicaveis para diferentes destinos, formatos e aspect ratios.
+O produto segue o princípio COPE: Create Once, Publish Everywhere. O usuário cria um conteúdo central e gera outputs publicáveis para diferentes destinos, formatos e aspect ratios.
 
-Na V1, o produto entrega videos. No futuro, o mesmo dominio deve aceitar imagens, carrosseis, e-books/PDFs e outros formatos, mas isso nao deve bloquear a primeira versao.
+Na V1, o produto entrega vídeos. No futuro, o mesmo domínio deve aceitar imagens, carrosséis, e-books/PDFs e outros formatos, mas isso não deve bloquear a primeira versão.
 
-O objetivo nao e gerar views vazias. O objetivo e transformar conteudo em entregaveis que atraem atencao qualificada e podem promover produtos, eventos, ofertas ou links estrategicos.
+O objetivo não é gerar views vazias. O objetivo é transformar conteúdo em entregáveis que atraem atenção qualificada e podem promover produtos, eventos, ofertas ou links estratégicos.
 
 ## Proposta de valor
 
-FlowShopy reduz o custo e a complexidade de transformar uma ideia ou roteiro em videos prontos para publicacao.
+FlowShopy reduz o custo e a complexidade de transformar uma ideia ou roteiro em vídeos prontos para publicação.
 
-O valor entregue ao usuario e:
+O valor entregue ao usuário é:
 
-- sair de uma ideia/roteiro para um video final com menos trabalho manual;
-- reutilizar o mesmo conteudo em varias plataformas;
-- controlar cada cena do video;
-- gerar narracao, imagens, prompts visuais, assets e render final em um fluxo rastreavel;
-- enxergar o andamento da producao por projeto, feed, Kanban e agenda;
-- preparar a automacao de publicacao sem perder o controle editorial.
+- sair de uma ideia/roteiro para um vídeo final com menos trabalho manual;
+- reutilizar o mesmo conteúdo em várias plataformas;
+- controlar cada cena do vídeo;
+- entrar cedo no editor quando o entregável já for um output de vídeo;
+- gerar narração, imagens, prompts visuais, assets e render final em um fluxo rastreável;
+- enxergar o andamento da produção por projeto, feed e Kanban;
+- preparar a automação de publicação sem perder o controle editorial;
 - associar projetos a produtos/ofertas promovidas;
-- permitir que links publicados continuem uteis por meio de short links redirecionaveis.
+- permitir que links publicados continuem úteis por meio de short links redirecionáveis.
 
 ## Problema que resolve
 
-Criar conteudo em video exige varias tarefas desconectadas:
+Criar conteúdo em vídeo exige várias tarefas desconectadas:
 
 - pensar pauta;
 - escrever roteiro;
 - dividir roteiro em cenas;
 - criar imagens;
-- criar movimentos/animacoes;
-- gerar ou gravar narracao;
-- editar video;
+- criar movimentos/animações;
+- gerar ou gravar narração;
+- editar vídeo;
 - adaptar formatos para plataformas;
-- acompanhar status de producao;
+- acompanhar status de produção;
 - publicar ou agendar em cada destino.
 
-Sem organizacao, o criador se perde em arquivos, versoes, plataformas, prazos, formatos e objetivos comerciais. FlowShopy centraliza esse fluxo em torno de conteudos e projetos.
+Sem organização, o criador se perde em arquivos, versões, plataformas, prazos, formatos e objetivos comerciais. FlowShopy centraliza esse fluxo em torno de conteúdos e projetos.
 
-## Usuario principal
+## Usuário principal
 
-Criador, empreendedor, educador, afiliado, gestor de conteudo ou pequena equipe que precisa produzir videos de forma recorrente.
+Criador, empreendedor, educador, afiliado, gestor de conteúdo ou pequena equipe que precisa produzir vídeos de forma recorrente.
 
-O usuario pode trabalhar sozinho ou em equipe. A arquitetura deve suportar multi-tenancy por workspace, mesmo que a primeira versao seja local/self-hosted.
+O usuário pode trabalhar sozinho ou em equipe. A arquitetura deve suportar multi-tenancy por workspace, mesmo que a primeira versão seja local/self-hosted.
 
-## Principio de dominio
+## Princípio de domínio
 
-O destino nao e o centro do produto.
+O destino não é o centro do produto.
 
-O centro e:
+O centro é:
 
 ```text
 conteudo -> projeto -> entregaveis -> publicacao/promocao
@@ -60,83 +61,103 @@ conteudo -> projeto -> entregaveis -> publicacao/promocao
 
 Existem dois elementos principais:
 
-- `Content`: a base reutilizavel. Pode nascer de ideia, roteiro, pesquisa, transcricao ou outro insumo.
-- `Project`: o conjunto de parametros que orquestra a transformacao do conteudo em entregaveis. Um conteudo sozinho pode existir como rascunho ou biblioteca, mas passa a ter impacto real quando associado a um projeto.
+- `Content`: a base reutilizável. Pode nascer de ideia, roteiro, pesquisa, transcrição ou outro insumo.
+- `Project`: o conjunto de parâmetros que orquestra a transformação do conteúdo em entregáveis. Um conteúdo sozinho pode existir como rascunho ou biblioteca, mas passa a ter impacto real quando associado a um projeto.
 
-Um projeto nao deve comecar por uma classificacao como canal, perfil, campanha ou musica. Ele e um workspace de producao com nome, descricao, destinos padrao e formatos. O assunto, objetivo comercial ou contexto editorial entram na descricao e nos conteudos associados.
+Um projeto não deve começar por uma classificação como canal, perfil, campanha ou música. Ele é um workspace de produção com nome, descrição, destinos padrão e formatos. O assunto, objetivo comercial ou contexto editorial entram na descrição e nos conteúdos associados.
 
-Um mesmo conteudo pode ser usado em mais de um projeto. O produto deve permitir enxergar facilmente onde cada conteudo esta sendo utilizado.
+Um mesmo conteúdo pode ser usado em mais de um projeto. O produto deve permitir enxergar facilmente onde cada conteúdo está sendo utilizado.
 
 Regras de produto:
 
-- conteudo e materia-prima e existe por si so;
-- projeto nao cria valor sozinho; ele precisa de conteudo associado;
-- projeto nao e o entregavel final; ele define parametros para o core/fabrica gerar o entregavel;
-- a criacao de conteudo pertence a area `Content`;
-- a area de `Project` deve localizar, associar e orquestrar conteudos existentes, nao duplicar a experiencia de escrita.
+- conteúdo é matéria-prima e existe por si só;
+- projeto não cria valor sozinho; ele precisa de conteúdo associado;
+- projeto não é o entregável final; ele define parâmetros para o core/fábrica gerar o entregável;
+- a criação de conteúdo pertence a área `Content`;
+- a área de `Project` deve localizar, associar e orquestrar conteúdos existentes, não duplicar a experiência de escrita.
 
 ## Escopo da V1
 
-V1 deve entregar o fluxo principal de video:
+V1 deve entregar o fluxo principal de vídeo:
 
-1. criar ou iniciar um conteudo;
-2. produzir/refinar o conteudo com escrita manual e/ou apoio de IA;
-3. associar o conteudo a um projeto;
-4. usar configuracoes do projeto para parametrizar a fabrica de entregaveis;
-5. materializar outputs de video 16:9 e 9:16 a partir da combinacao projeto + conteudo;
-6. gerar estrutura semantica e composicao do output selecionado;
-7. gerar/editar audio, imagem, clips, motion e CTA conforme o output;
-8. visualizar timeline/preview;
-9. renderizar video final;
-10. baixar MP4 final.
+1. criar ou iniciar um conteúdo;
+2. produzir/refinar o conteúdo com escrita manual e/ou apoio de IA;
+3. associar o conteúdo a um projeto;
+4. usar configurações do projeto para parametrizar a fábrica de entregáveis;
+5. materializar outputs de vídeo 16:9 e 9:16 a partir da combinação projeto + conteúdo;
+6. permitir abrir o editor assim que existir um output de vídeo associado ao projeto;
+7. gerar estrutura semântica e composição do output selecionado;
+8. gerar/editar áudio, imagem, clips, motion e CTA conforme o output;
+9. visualizar timeline/preview;
+10. renderizar vídeo final;
+11. baixar MP4 final.
 
 ## Visoes de produto obrigatorias
 
 ### Setup
 
-Fluxo inicial para criar projeto e/ou associar conteudo a projeto.
+Fluxo inicial para criar projeto e/ou associar conteúdo a projeto.
 
 Deve guiar:
 
 - nome do projeto;
-- descricao/contexto editorial livre;
+- descrição/contexto editorial livre;
 - destinos de entrega;
 - formatos e aspect ratios permitidos por canal;
-- primeiro conteudo;
+- primeiro conteúdo;
 - ideia/roteiro;
-- geracao de cenas.
+- geração de cenas.
 
-Tambem deve existir um acesso rapido para iniciar pela criacao de conteudo. Essa tela deve ser voltada para producao do conteudo/roteiro, com area de escrita e um bloco de prompt/conversa para pedir ajuda da IA. Ela nao deve ser a tela principal de configuracao de canais e formatos; isso pertence ao projeto.
+Também deve existir um acesso rápido para iniciar pela criação de conteúdo. Essa tela deve ser voltada para a produção do conteúdo/roteiro, com área de escrita e um bloco de prompt/conversa para pedir ajuda da IA. Ela não deve ser a tela principal de configuração de canais e formatos; isso pertence ao projeto.
 
 Regra de UX:
 
-- `Content` cria e edita conteudo;
-- `Project` associa conteudo existente e o transforma em entregavel;
-- nao deve haver duas telas principais diferentes para criar o mesmo conteudo.
+- `Content` cria e edita conteúdo;
+- `Project` associa conteúdo existente e o transforma em entregável;
+- `Editor`/`Studio` entra quando já existe um output de vídeo e deve ficar acessível desde cedo nesse fluxo;
+- não deve haver duas telas principais diferentes para criar o mesmo conteúdo.
+
+### Editor / Studio
+
+Visão operacional do entregável de vídeo.
+
+O editor não deve aparecer como etapa tardia ou escondida. Ele deve fazer sentido assim que existir um output de vídeo dentro do projeto.
+
+Regra:
+
+- se o projeto tiver um output de vídeo, o usuário deve poder entrar no editor desse output desde o início;
+- isso vale para YouTube, TikTok, Instagram, Facebook e outros canais, independentemente do aspect ratio;
+- o editor é onde o usuário acompanha as fases do output e interage com a produção;
+- o editor deve permitir ajustar prompts, revisar blocos/cenas, acompanhar geração de imagem, ver previews e, quando houver suporte no template/pipeline, visualizar animações e seus estados;
+- o editor não deve depender de o pipeline já ter concluído TTS, imagem ou render para ser útil.
+
+Objetivo:
+
+- transformar o editor no centro operacional do output de vídeo, e não em uma tela tardia acessada só depois de várias automações.
 
 ### Feed
 
-Visao visual do acervo/publicacoes do projeto.
+Visão visual do acervo/publicações do projeto.
 
-Deve mostrar conteudos em grade, com cards que representam:
+Deve mostrar conteúdos em grade, com cards que representam:
 
-- video horizontal;
-- video vertical;
+- vídeo horizontal;
+- vídeo vertical;
 - imagem;
-- combinacao video + imagem;
-- multiplos aspect ratios;
-- placeholder enquanto nao houver thumb.
+- combinação vídeo + imagem;
+- múltiplos aspect ratios;
+- placeholder enquanto não houver thumb.
 
 Fallback de preview:
 
 1. thumbnail definida;
-2. primeiro frame de video;
+2. primeiro frame de vídeo;
 3. imagem principal;
 4. placeholder com titulo/status.
 
 ### Kanban
 
-Visao de producao.
+Visão de produção.
 
 Colunas iniciais:
 
@@ -151,60 +172,64 @@ Colunas iniciais:
 
 ### Agenda
 
-Visao de prazo, responsavel e publicacao.
+Visão operacional de distribuição.
+
+Ela faz sentido quando o produto já consegue interagir com contas autorizadas do usuário e refletir operação real.
 
 Deve evoluir para:
 
-- responsavel;
+- responsável;
 - prazo;
-- data de publicacao;
+- data de publicação;
 - plataforma;
-- status;
-- notificacoes.
+- status real da plataforma;
+- notificações;
+- agendamentos e publicações reconciliados com as contas conectadas.
 
-## Musica
+## Música
 
-Musica fica no radar, mas nao e core da V1.
+Música fica no radar, mas não é core da V1.
 
 Primeiro suporte:
 
-- usuario fornece audio/musica;
-- usuario fornece prompt visual por faixa/trecho;
-- sistema gera imagens e futuramente animacoes;
-- sistema renderiza video com musica.
+- usuário fornece áudio/música;
+- usuário fornece prompt visual por faixa/trecho;
+- sistema gera imagens e futuramente animações;
+- sistema renderiza vídeo com música.
 
 Fora da V1:
 
-- gerar musica por API;
+- gerar música por API;
 - sintetizar canto/letra;
-- distribuir musica em plataformas musicais.
+- distribuir música em plataformas musicais.
 
 ## Fora do escopo imediato
 
 - e-book/PDF;
-- publicacao automatica;
+- publicação automática;
+- agenda operacional completa antes das integrações de contas;
 - Stripe/pagamentos;
-- analise completa de videos externos;
-- geracao de musica;
+- análise completa de vídeos externos;
+- geração de música;
 - marketplace de templates;
 - SaaS multi-tenant completo.
 
-Esses pontos devem ser planejados, mas nao podem bloquear o core de video.
+Esses pontos devem ser planejados, mas não podem bloquear o core de vídeo.
 
-## Promocao de produtos e short links
+## Promoção de produtos e short links
 
 Um projeto pode promover um ou mais produtos, ofertas, eventos ou destinos comerciais.
 
-Essa promocao deve suportar:
+Essa promoção deve suportar:
 
 - produto/oferta promovida;
 - link de destino;
 - QRCode;
-- periodo de inicio e fim;
+- período de início e fim;
 - troca de produto/oferta ao longo do tempo;
-- historico de alteracoes;
-- short link interno redirecionavel.
+- histórico de alterações;
+- short link interno redirecionável.
 
-Motivo: links publicados em videos, descricoes, PDFs, e-books ou imagens podem nao ser editaveis depois da distribuicao. Com short links internos, o usuario troca o destino real sem precisar alterar todos os materiais ja publicados.
+Motivo: links publicados em vídeos, descrições, PDFs, e-books ou imagens podem não ser editáveis depois da distribuição. Com short links internos, o usuário troca o destino real sem precisar alterar todos os materiais já publicados.
 
-Essa capacidade e parte central da evolucao do produto: FlowShopy deve ser uma maquina de atencao para promocao de produtos, nao apenas uma ferramenta para publicar conteudo.
+Essa capacidade é parte central da evolução do produto: FlowShopy deve ser uma máquina de atenção para promoção de produtos, não apenas uma ferramenta para publicar conteúdo.

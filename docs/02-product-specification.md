@@ -6,25 +6,39 @@
 
 Escopo de isolamento multi-tenant.
 
-Tudo que o usuario cria deve pertencer a um workspace:
+Tudo que o usuário cria deve pertencer a um workspace:
 
 - projetos;
-- conteudos;
+- conteúdos;
 - assets;
 - jobs;
-- configuracoes;
-- usuarios/membros;
+- configurações;
+- usuários/membros;
 - agentes/workers locais.
+
+Regra de produto:
+
+- o app roda instalado localmente, mas não e single-user por definição;
+- o usuário autentica primeiro e depois opera dentro de um workspace com autorização por papel;
+- a V1 precisa assumir pelo menos `owner`, `admin` e `member`, mesmo que alguns limites comerciais ainda não estejam fechados;
+- a área atual de convite de membros é apenas a semente dessa camada e ainda não representa o modelo final de equipe.
 
 ### Project
 
-Agrupador editorial/comercial. Projeto e o contexto que da utilidade ao conteudo e onde a producao passa a fluir.
+Agrupador editorial/comercial. Projeto é o contexto que da utilidade ao conteúdo e onde a produção passa a fluir.
 
-Um conteudo sozinho pode existir como ideia, rascunho ou biblioteca reutilizavel, mas so passa a ter impacto quando associado a um projeto.
+Um conteúdo sozinho pode existir como ideia, rascunho ou biblioteca reutilizável, mas só passa a ter impacto quando associado a um projeto.
 
-Regra de UX: criacao de projeto nao pede tipo/contexto inicial. O usuario informa nome e descricao, depois escolhe destinos e formatos padrao. O assunto do projeto pode ser curso, campanha, musica ou qualquer outro tema, mas isso nao deve direcionar o primeiro passo da criacao.
+Definição operacional:
 
-Regra de dominio: Project nao possui `kind`. Canal, perfil, curso, musica, campanha e formato sao contexto editorial, destination ou entregavel, nao classificacao do projeto.
+- projeto informa ao core o que se espera que seja feito com um conteúdo;
+- projeto não é um tipo de conteúdo nem um canal isolado;
+- projeto concentra objetivos, destinos, formatos, estilo, CTA, pipeline e regras de saída;
+- projeto é o contrato de intenção entre o usuário e a fábrica do FlowShopy.
+
+Regra de UX: criação de projeto não pede tipo/contexto inicial. O usuário informa nome e descrição, depois escolhe destinos e formatos padrão. O assunto do projeto pode ser campanha, música, produto, evento ou qualquer outro tema, mas isso não deve direcionar o primeiro passo da criação.
+
+Regra de domínio: Project não possui `kind`. Canal, perfil, música, campanha, produto, evento e formato são contexto editorial, destination ou entregável, não classificação do projeto.
 
 Campos conceituais:
 
@@ -36,6 +50,7 @@ Campos conceituais:
 - `styleDnaJson`
 - `defaultDestinationsJson`
 - `defaultAspectRatiosJson`
+- `outputDefinitionsJson`
 - `promotionTargetsJson`
 - `shortLinksJson`
 - `status`
@@ -51,33 +66,33 @@ Status sugeridos:
 
 ### ContentItem
 
-Unidade editorial reutilizavel.
+Unidade editorial reutilizável.
 
-Conteudo e a base para gerar entregaveis. Ele pode ser iniciado rapidamente fora de um projeto, mas precisa ser associado a pelo menos um projeto para entrar em fluxo de producao e entrega.
+Conteúdo é a base para gerar entregáveis. Ele pode ser iniciado rapidamente fora de um projeto, mas precisa ser associado a pelo menos um projeto para entrar em fluxo de produção e entrega.
 
-Um mesmo conteudo pode ser usado em projetos diferentes. O sistema deve permitir ver onde cada conteudo esta sendo usado.
+Um mesmo conteúdo pode ser usado em projetos diferentes. O sistema deve permitir ver onde cada conteúdo está sendo usado.
 
-A tela de criacao/edicao de conteudo deve ser voltada para producao do conteudo em si:
+A tela de criação/edição de conteúdo deve ser voltada para produção do conteúdo em si:
 
 - ideia;
 - pauta;
 - roteiro;
 - briefing;
 - texto base;
-- solicitacoes para IA;
-- iteracoes ate chegar a um roteiro/conteudo utilizavel.
+- solicitações para IA;
+- iteracoes até chegar a um roteiro/conteúdo utilizável.
 
-Ela nao deve concentrar configuracao de canais de entrega, aspect ratios ou formatos. Esses dados pertencem ao projeto e as variantes/entregaveis derivados do projeto.
+Ela não deve concentrar configuração de canais de entrega, aspect ratios ou formatos. Esses dados pertencem ao projeto e às variantes/entregáveis derivados do projeto.
 
 Tipos previstos:
 
 - `content`
 
-O conteudo nao deve ser classificado como video, imagem, musica, texto ou PDF no momento da criacao. Uma ideia e apenas uma ideia/conteudo. Video, imagem, texto, musica e PDF sao entregaveis/variantes definidos posteriormente pelo projeto, canal de entrega e formato.
+O conteúdo não deve ser classificado como vídeo, imagem, música, texto ou PDF no momento da criação. Uma ideia é apenas uma ideia/conteúdo. Vídeo, imagem, texto, música e PDF são entregáveis/variantes definidos posteriormente pelo projeto, canal de entrega e formato.
 
-Regra: a tela de conteudo nao deve exibir botoes como "video script", "image concept" ou "music video concept" antes do conteudo existir. Isso antecipa uma decisao de entrega que pertence ao projeto.
+Regra: a tela de conteúdo não deve exibir botoes como "vídeo script", "image concept" ou "music vídeo concept" antes do conteúdo existir. Isso antecipa uma decisao de entrega que pertence ao projeto.
 
-Regra: conteudo isolado nao gera cenas, clips ou video. Segmentacao em cenas e renderizacao pertencem ao fluxo do projeto/variante, porque somente o projeto define canal de saida, formato, aspect ratio, CTA e entregavel.
+Regra: conteúdo isolado não gera cenas, clips ou vídeo. Segmentação em cenas e renderizacao pertencem ao fluxo do projeto/variante, porque somente o projeto define canal de saída, formato, aspect ratio, CTA e entregável.
 
 Campos conceituais:
 
@@ -95,9 +110,9 @@ Campos conceituais:
 - `createdAt`
 - `updatedAt`
 
-Observacao: conteudo e uma entidade independente de projeto. A associacao com projetos deve ser feita por uma tabela de vinculo, permitindo conteudo sem projeto e conteudo usado em muitos projetos.
+Observação: conteúdo é uma entidade independente de projeto. A associação com projetos deve ser feita por uma tabela de vínculo, permitindo conteúdo sem projeto e conteúdo usado em muitos projetos.
 
-Status de producao sugeridos:
+Status de produção sugeridos:
 
 - `idea`
 - `script`
@@ -110,7 +125,7 @@ Status de producao sugeridos:
 
 ### ContentSource
 
-Fonte usada para criar ou enriquecer o conteudo.
+Fonte usada para criar ou enriquecer o conteúdo.
 
 Tipos:
 
@@ -132,19 +147,60 @@ Campos conceituais:
 - `analysisJson`
 - `status`
 
-### Variant
+### ProjectOutputDefinition
 
-Saida derivada de um ContentItem.
+Contrato declarativo de saída esperado pelo projeto.
+
+Ele descreve quais tipos de entregável o projeto quer produzir a partir de conteúdos associados.
+
+Tipos previstos:
+
+- `video`
+- `image`
+- `text`
+- `audio`
+- `ebook`
+- `infographic`
+- `carousel`
+
+Campos conceituais:
+
+- `id`
+- `workspaceId`
+- `projectId`
+- `outputType`
+- `destination`
+- `format`
+- `aspectRatio`
+- `language`
+- `ctaStrategyJson`
+- `pipelineJson`
+- `styleOverridesJson`
+- `publishPolicyJson`
+- `status`
+
+Regras:
+
+- o projeto pode ter uma ou muitas definicoes de output;
+- nem todo projeto precisa gerar vídeo;
+- o projeto pode declarar saídas futuras mesmo que a execução inicial da V1 priorize vídeo;
+- canais, formatos e pipelines devem nascer aqui, não em `ContentItem`.
+
+### ProjectContentOutput
+
+Saída derivada de um `ContentItem` dentro de um `Project`, seguindo uma `ProjectOutputDefinition`.
 
 Exemplos:
 
-- YouTube video `16:9`
+- YouTube vídeo `16:9`
 - YouTube Shorts `9:16`
 - TikTok `9:16`
 - Instagram Reels `9:16`
 - Instagram feed `1:1`
-- Facebook video `16:9`
-- Course lesson `16:9`
+- Facebook vídeo `16:9`
+- PDF derivado
+- carousel educacional
+- narração em áudio
 
 Campos conceituais:
 
@@ -152,6 +208,7 @@ Campos conceituais:
 - `workspaceId`
 - `contentItemId`
 - `projectId`
+- `projectOutputDefinitionId`
 - `destination`
 - `format`
 - `aspectRatio`
@@ -164,24 +221,23 @@ Campos conceituais:
 - `plannedPublishAt`
 - `status`
 
-Na primeira implementacao, Variant pode viver em `metadataJson` ate ficar claro o contrato final.
+Na primeira implementação, `ProjectContentOutput` pode viver parcialmente em `metadataJson` até ficar claro o contrato final.
 
 Regras:
 
-- uma Variant representa um entregavel concreto de um conteudo dentro de um projeto;
-- cenas e renders devem ser gerados a partir de uma Variant, nao do ContentItem isolado;
-- YouTube `16:9`, YouTube Shorts `9:16`, TikTok `9:16`, Instagram Reels e Facebook video sao variantes diferentes;
-- cada variante pode ter CTA especifico de canal;
-- partes comuns devem ser reaproveitadas sempre que possivel;
-- partes especificas de canal devem ser renderizadas separadamente quando isso reduzir custo e tempo.
+- um `ProjectContentOutput` representa um entregável concreto de um conteúdo dentro de um projeto;
+- cenas e renders devem ser gerados a partir de um `ProjectContentOutput`, não do `ContentItem` isolado;
+- YouTube `16:9`, YouTube Shorts `9:16`, TikTok `9:16`, Instagram Reels e Facebook vídeo são variantes diferentes;
+- cada variante pode ter CTA específico de canal;
+- partes comuns devem ser reaproveitadas sempre que possível;
+- partes específicas de canal devem ser renderizadas separadamente quando isso reduzir custo e tempo.
 
 ### DeliveryChannel
 
-Canal de saida/entrega associado a um projeto ou variante.
+Canal de saída/entrega associado a um projeto ou variante.
 
 Tipos previstos:
 
-- `course`
 - `youtube`
 - `youtube_shorts`
 - `instagram_reels`
@@ -194,29 +250,28 @@ Tipos previstos:
 
 Regras:
 
-- canal define formatos possiveis;
-- formato define tipo de entregavel: video, imagem, texto, PDF ou combinacao;
+- canal define formatos possíveis;
+- formato define tipo de entregável: vídeo, imagem, texto, PDF ou combinação;
 - aspect ratio/dimensoes devem respeitar o canal;
-- V1 foca em video, mas texto/imagem/PDF devem ficar previstos.
+- V1 foca em vídeo, mas texto/imagem/PDF devem ficar previstos.
 
-Mapeamento inicial de entregaveis:
+Mapeamento inicial de entregáveis:
 
-| Canal | Entregaveis previstos |
+| Canal | Entregáveis previstos |
 | --- | --- |
-| Curso | video horizontal |
-| YouTube | video horizontal, Shorts vertical, futuro Community post texto/imagem/enquete |
-| TikTok | video vertical |
-| Instagram | video vertical, imagem, carousel futuro |
-| Facebook | video horizontal, video vertical, imagem, texto futuro |
-| PDF/Lead magnet | PDF derivado do conteudo, futuro |
+| YouTube | vídeo horizontal, Shorts vertical, futuro Community post texto/imagem/enquete |
+| TikTok | vídeo vertical |
+| Instagram | vídeo vertical, imagem, carousel futuro |
+| Facebook | vídeo horizontal, vídeo vertical, imagem, texto futuro |
+| PDF/Lead magnet | PDF derivado do conteúdo, futuro |
 
-Itens a verificar antes de implementar formatos nao-video:
+Itens a verificar antes de implementar formatos não-vídeo:
 
 - recursos e limites atuais da aba Comunidade do YouTube;
-- dimensoes recomendadas para imagens e videos no Facebook;
+- dimensões recomendadas para imagens e vídeos no Facebook;
 - formatos aceitos no Instagram feed/Reels/carousel;
-- limites e requisitos de APIs de publicacao;
-- melhores praticas para PDF/isca digital por tipo de conteudo.
+- limites e requisitos de APIs de publicação;
+- melhores praticas para PDF/isca digital por tipo de conteúdo.
 
 ### PromotionTarget
 
@@ -240,23 +295,23 @@ Campos conceituais:
 Regras:
 
 - um projeto pode promover mais de um produto;
-- promocoes podem ter periodo de inicio e fim;
+- promoções podem ter período de início e fim;
 - o produto promovido pode mudar ao longo do tempo;
 - materiais publicados devem preferir short links internos em vez de URLs finais;
-- trocar o destino do short link deve atualizar o destino de todos os materiais ja distribuidos que usam aquele short link.
+- trocar o destino do short link deve atualizar o destino de todos os materiais já distribuídos que usam aquele short link.
 
 ### ShortLink
 
-Link curto interno redirecionavel.
+Link curto interno redirecionável.
 
 Uso:
 
-- descricoes de video;
+- descrições de vídeo;
 - PDFs/e-books;
 - QRCode;
 - imagens;
 - posts;
-- materiais que podem nao ser editaveis depois da publicacao.
+- materiais que podem não ser editáveis depois da publicação.
 
 Campos conceituais:
 
@@ -271,17 +326,17 @@ Campos conceituais:
 
 Requisitos futuros:
 
-- historico de destinos;
+- histórico de destinos;
 - cliques;
-- origem/referrer quando disponivel;
+- origem/referrer quando disponível;
 - UTM;
-- expiracao;
+- expiração;
 - QRCode;
 - auditoria.
 
 ### Scene / Block
 
-Menor unidade de geracao e revisao.
+Menor unidade de geração e revisão.
 
 Campos:
 
@@ -301,181 +356,194 @@ Campos:
 
 Regras:
 
-- cenas pertencem ao fluxo de producao de uma Variant;
+- cenas pertencem ao fluxo de produção de uma Variant;
 - Nem todo texto do roteiro precisa ser narrado.
-- Uma cena pode ter texto narrado, texto em tela e notas de direcao.
+- Uma cena pode ter texto narrado, texto em tela e notas de direção.
 - `role` pode ser `core`, `intro`, `cta`, `outro` ou `platform_specific`;
-- `variantScope` pode ser `shared` ou especifico de um destino/formato;
-- Prompt de imagem deve ser especifico para a cena.
-- Prompt de animacao deve descrever movimento/camera/acao da imagem.
-- Notas de direcao devem orientar edicao, continuidade visual e restricoes que nao devem ser narradas.
-- Prompt de sound effect e opcional e pode ficar vazio quando a cena nao pede efeito sonoro.
+- `variantScope` pode ser `shared` ou específico de um destino/formato;
+- Prompt de imagem deve ser específico para a cena.
+- Prompt de animação deve descrever movimento/camera/ação da imagem.
+- Notas de direção devem orientar edição, continuidade visual e restrições que não devem ser narradas.
+- Prompt de sound effect e opcional e pode ficar vazio quando a cena não pede efeito sonoro.
+
+Regra de vocabulario:
+
+- `Scene` e `Block` são unidades editoriais/técnicas do output;
+- elas não devem ser descritas ao usuário com terminologia herdada de ensino ou estruturas equivalentes.
 
 ## Fluxos funcionais
 
 ### Fluxo 1: criar projeto
 
-1. Usuario abre Projects.
+1. Usuário abre Projects.
 2. Ve a grade visual de projetos.
 3. Escolhe criar novo projeto.
 4. Entra em uma tela separada de cadastro de projeto.
-5. Informa nome e descricao.
-6. Define destinos e aspect ratios padrao.
+5. Informa nome e descrição.
+6. Define destinos e aspect ratios padrão.
 7. Sistema cria Project.
-8. Usuario volta para o detalhe do projeto.
+8. Usuário volta para o detalhe do projeto.
 
 Aceite:
 
 - projeto aparece na lista;
-- projeto abre uma area propria com Contents, Feed, Kanban e Agenda;
-- usuario pode seguir a producao de entregaveis a partir de conteudos ja associados;
-- usuario nao cria conteudo dentro do detalhe do projeto.
+- projeto abre uma área própria com Contents, Feed e Kanban;
+- `Agenda` não precisa aparecer no fluxo principal enquanto ainda não houver integrações reais de contas/plataformas;
+- usuário pode seguir a produção de entregáveis a partir de conteúdos já associados;
+- usuário não cria conteúdo dentro do detalhe do projeto.
 
-### Fluxo 1B: iniciar por conteudo rapido
+### Fluxo 1B: iniciar por conteúdo rápido
 
-1. Usuario abre a area Content.
-2. Sistema exibe uma listagem de conteudos existentes, em fluxo semelhante a lista de cursos.
-3. Usuario aciona o botao de incluir novo conteudo.
-4. Sistema abre a tela de cadastro de conteudo.
-5. Usuario informa ideia, roteiro ou fonte.
-6. Usuario pode escrever livremente e/ou registrar uma instrucao para IA.
-7. Usuario associa o conteudo somente a um projeto existente.
-8. Sistema salva o conteudo como parte do projeto.
+1. Usuário abre a área Content.
+2. Sistema exibe uma listagem de conteúdos existentes em um fluxo próprio de biblioteca editorial.
+3. Usuário aciona o botão de incluir novo conteúdo.
+4. Sistema abre a tela de cadastro de conteúdo.
+5. Usuário informa ideia, roteiro ou fonte.
+6. Usuário pode escrever livremente e/ou registrar uma instrucao para IA.
+7. Usuário pode associar o conteúdo a um ou mais projetos existentes.
+8. Sistema salva o conteúdo e registra seus usos no workspace.
 9. Canais de entrega, formatos, cenas e renders ficam para o fluxo do projeto/variante.
 
 Aceite:
 
-- area Content abre em modo listagem;
-- listagem possui botao para incluir novo conteudo;
-- listagem mostra todos os conteudos ja criados no workspace, independente do projeto;
-- listagem deve ter foco visual no conteudo: titulo, resumo, data, status e usos;
-- projeto nao deve ser o destaque do card/lista; deve aparecer apenas como metadado secundario de uso;
+- área Content abre em modo listagem;
+- listagem possui botão para incluir novo conteúdo;
+- listagem mostra todos os conteúdos já criados no workspace, independente do projeto;
+- listagem deve ter foco visual no conteúdo: titulo, resumo, data, status e usos;
+- projeto não deve ser o destaque do card/lista; deve aparecer apenas como metadado secundario de uso;
 - listagem permite alternar entre grade e lista;
-- listagem permite filtrar por nome e data de criacao;
+- listagem permite filtrar por nome e data de criação;
 - listagem permite filtrar por projeto associado;
-- listagem permite filtrar por destination, usando destinos do conteudo quando existirem ou destinos padrao do projeto enquanto Variant/ProjectContent nao existir;
-- conteudo pode ser criado rapidamente;
-- tela prioriza escrita/producao de conteudo;
+- listagem permite filtrar por destination, usando destinos do conteúdo quando existirem ou destinos padrão do projeto enquanto Variant/ProjectContent não existir;
+- conteúdo pode ser criado rapidamente;
+- tela prioriza escrita/produção de conteúdo;
 - existe um bloco claro de prompt/solicitacao para IA;
-- cadastro de conteudo nao cria projeto;
-- conteudo precisa ser associado a um projeto existente;
-- tela Content nao gera cenas, blocos, assets ou video;
-- conteudo pode ser aberto para edicao quando ainda nao iniciou producao de entregavel;
-- V1 bloqueia edicao de conteudo que ja iniciou producao de entregavel;
-- associacao a um ou mais projetos nao bloqueia edicao por si so;
-- o bloqueio so ocorre quando algum projeto iniciou criacao/geracao de entregavel com base naquele conteudo;
-- versao futura deve permitir nova versao do conteudo quando ele ja tiver sido usado em entregaveis;
-- ao associar a projeto, o conteudo fica disponivel para o fluxo do projeto;
-- usuario consegue ver em quais projetos o conteudo esta sendo usado.
+- cadastro de conteúdo não cria projeto;
+- conteúdo pode existir sem projeto, mas precisa estar associado a um projeto para entrar em produção de entregável;
+- tela Content não gera cenas, blocos, assets ou vídeo;
+- conteúdo pode ser aberto para edição quando ainda não iniciou produção de entregável;
+- V1 bloqueia edição de conteúdo que já iniciou produção de entregável;
+- associação a um ou mais projetos não bloqueia edição por si so;
+- o bloqueio só ocorre quando algum projeto iniciou criação/geração de entregável com base naquele conteúdo;
+- versão futura deve permitir nova versão do conteúdo quando ele já tiver sido usado em entregáveis;
+- ao associar a projeto, o conteúdo fica disponível para o fluxo do projeto;
+- usuário consegue ver em quais projetos o conteúdo está sendo usado.
 
-### Fluxo 2: produzir entregavel a partir de conteudo associado
+### Fluxo 2: produzir entregável a partir de conteúdo associado
 
-1. Usuario abre um projeto com conteudo associado.
-2. Sistema lista os conteudos associados.
-3. Usuario escolhe um conteudo existente.
-4. Sistema gera cenas/blocos a partir do conteudo.
-5. Usuario abre o editor para seguir com o entregavel.
-6. Conteudo continua sendo unidade editorial generica; video, imagem, musica ou PDF sao entregaveis/variantes.
-7. Usuario inicia a producao de uma variante de video dentro do projeto.
-8. Sistema gera blocos/cenas para aquela variante.
-9. Usuario abre editor da variante.
+1. Usuário abre um projeto com conteúdo associado.
+2. Sistema lista os conteúdos associados.
+3. Usuário escolhe um conteúdo existente.
+4. Usuário escolhe qual output do projeto deseja produzir.
+5. Sistema gera um `ProjectContentOutput`.
+6. Sistema gera cenas/blocos a partir do conteúdo no contexto desse output.
+7. Usuário abre o editor para seguir com o entregável.
+8. Conteúdo continua sendo unidade editorial genérica; vídeo, imagem, texto, áudio, e-book, infográfico ou carousel são entregáveis derivados.
+9. Usuário opera a produção no contexto do output, nunca do conteúdo isolado.
 
 Aceite:
 
 - ContentItem e salvo;
-- area Content nao exibe `Generate Blocks`, `Generate Scenes` ou `Open Editor`;
-- geracao de blocos/cenas fica no projeto/variante;
-- usuario nao precisa escolher video, imagem ou musica antes de produzir o conteudo;
-- usuario nao precisa entender Course/Module/Lesson.
+- área Content não exibe `Generate Blocks`, `Generate Scenes` ou `Open Editor`;
+- geração de blocos/cenas fica no projeto/output;
+- usuário não precisa escolher vídeo, imagem, texto, áudio ou e-book antes de produzir o conteúdo;
+- usuário não precisa entender nenhuma entidade herdada do projeto anterior.
 
-### Fluxo 3: criar conteudo por ideia
+### Fluxo 3: criar conteúdo por ideia
 
-1. Usuario escreve uma ideia.
-2. Usuario escolhe modelo/LLM.
+1. Usuário escreve uma ideia.
+2. Usuário escolhe modelo/LLM.
 3. Sistema gera roteiro.
-4. Usuario revisa.
-5. Usuario associa a um projeto.
-6. Segmentacao em cenas acontece depois, no fluxo de uma variante do projeto.
+4. Usuário revisa.
+5. Usuário associa a um projeto.
+6. Segmentação em cenas acontece depois, no fluxo de uma variante do projeto.
 
-V1 pode iniciar com texto manual. Geracao por LLM entra em seguida.
+V1 pode iniciar com texto manual. Geração por LLM entra em seguida.
 
-### Fluxo 4: gerar video final
+### Fluxo 4: gerar vídeo final
 
-1. Usuario abre um projeto com conteudo associado.
-2. Projeto define canais, formatos e variantes de video.
-3. Usuario inicia a producao de uma variante.
-4. Sistema gera cenas comuns (`core`) e cenas especificas (`intro`, `cta`, `outro`, `platform_specific`) conforme o canal/formato.
+1. Usuário abre um projeto com conteúdo associado.
+2. Projeto define canais, formatos e outputs.
+3. Usuário inicia a produção de um output de vídeo.
+4. Sistema gera cenas comuns (`core`) e cenas específicas (`intro`, `cta`, `outro`, `platform_specific`) conforme o canal/formato.
 5. Sistema gera TTS.
 6. Sistema gera imagens.
 7. Sistema anima/renderiza cenas.
-8. Sistema renderiza blocos comuns reutilizaveis e blocos especificos de canal.
-9. Sistema compoe o video final da variante.
+8. Sistema renderiza blocos comuns reutilizáveis e blocos específicos de canal.
+9. Sistema compoe o vídeo final do output.
 10. Sistema disponibiliza download.
 
 Aceite:
 
 - MP4 final fica acessivel por link/download;
-- edicoes em blocos invalidam apenas dependencias necessarias;
-- mudanca em CTA de uma plataforma deve reprocessar preferencialmente so o bloco especifico e a composicao final daquela variante;
+- edições em blocos invalidam apenas dependências necessarias;
+- mudanca em CTA de uma plataforma deve reprocessar preferencialmente só o bloco específico e a composição final daquele output;
 - status de jobs aparece no produto.
 
 ### Fluxo 4B: CTAs e render por blocos
 
-1. Conteudo gera um plano base comum dentro do projeto.
-2. Cada canal/formato recebe uma Variant.
-3. Variants podem compartilhar cenas `core`.
-4. Variants podem ter cenas CTA especificas.
+1. Conteúdo gera um plano base comum dentro do projeto.
+2. Cada canal/formato recebe um output.
+3. Outputs podem compartilhar cenas `core`.
+4. Outputs podem ter cenas CTA específicas.
 5. Blocos comuns podem ser renderizados e cacheados.
-6. Blocos especificos de canal podem ser renderizados separadamente.
-7. A composicao final une blocos comuns e especificos.
+6. Blocos específicos de canal podem ser renderizados separadamente.
+7. A composição final une blocos comuns e específicos.
 
 Regras:
 
-- se a transicao entre blocos for simples, como corte seco ou fade previsivel, o sistema pode concatenar clips renderizados;
-- se a transicao depender visualmente da cena anterior/proxima, o render da variante deve recompor a borda afetada ou renderizar a sequencia final em uma passagem;
-- V1 deve preferir transicoes simples entre blocos variaveis para permitir cache e reaproveitamento;
-- CTAs devem poder ser diferentes por plataforma sem exigir re-render completo do conteudo comum;
-- exemplos de CTA: YouTube pede inscricao no canal, Facebook pede seguir a pagina, TikTok pode pedir tocar no botao de seguir do perfil.
+- se a transição entre blocos for simples, como corte seco ou fade previsivel, o sistema pode concatenar clips renderizados;
+- se a transição depender visualmente da cena anterior/proxima, o render da variante deve recompor a borda afetada ou renderizar a sequencia final em uma passagem;
+- V1 deve preferir transições simples entre blocos variáveis para permitir cache e reaproveitamento;
+- CTAs devem poder ser diferentes por plataforma sem exigir re-render completo do conteúdo comum;
+- exemplos de CTA: YouTube pede inscrição no canal, Facebook pede seguir a página, TikTok pode pedir tocar no botão de seguir do perfil.
 
 ### Fluxo 5: Feed
 
-1. Usuario abre Feed.
-2. Sistema lista conteudos do projeto em grade.
+1. Usuário abre Feed.
+2. Sistema lista conteúdos do projeto em grade.
 3. Cada card mostra preview, status, destinos e aspect ratios.
-4. Conteudos sem asset usam placeholder.
+4. Conteúdos sem asset usam placeholder.
 
 Aceite:
 
 - grade funciona sem thumbnails reais;
-- card deixa claro se e video horizontal, vertical, imagem ou misto;
-- usuario consegue abrir o conteudo/editor a partir do card.
+- card deixa claro se e vídeo horizontal, vertical, imagem ou misto;
+- usuário consegue abrir o conteúdo/editor a partir do card.
 
 ### Fluxo 6: Kanban
 
-1. Usuario abre Kanban.
-2. Sistema agrupa conteudos por status.
-3. Usuario visualiza andamento.
-4. Futuro: usuario arrasta entre colunas.
+1. Usuário abre Kanban.
+2. Sistema agrupa conteúdos por status.
+3. Usuário visualiza andamento.
+4. Futuro: usuário arrasta entre colunas.
 
 Aceite inicial:
 
 - colunas aparecem;
-- conteudos aparecem na coluna correta;
+- conteúdos aparecem na coluna correta;
 - estado vazio e claro.
 
-### Fluxo 7: Agenda
+### Fluxo 7: Agenda operacional
 
-1. Usuario abre Agenda.
-2. Sistema mostra proximos prazos/publicacoes.
-3. Futuro: usuario filtra por responsavel/plataforma.
+Precondicao:
 
-Aceite inicial:
+- existe integração autorizada com contas/plataformas de distribuição;
+- o sistema consegue ler ou reconciliar agendamentos/publicações reais.
 
-- lista/agenda aparece;
-- conteudos sem data aparecem em secao "sem data";
-- dados podem vir de metadata inicialmente.
+1. Usuário abre Agenda.
+2. Sistema mostra postagens agendadas e publicações realizadas por plataforma.
+3. Sistema cruza projeto, output, responsável e status operacional.
+4. Usuário filtra por responsável, plataforma, projeto e status.
 
-## Plataformas, entregaveis e aspect ratios
+Aceite inicial correto:
+
+- agenda mostra dados operacionais reais ou reconciliados;
+- agendamentos não dependem apenas de metadata manual solta;
+- postagens/publicações podem ser vistas por plataforma;
+- conteúdos sem data real podem continuar em uma secao auxiliar, mas não devem definir a utilidade principal da Agenda.
+
+## Plataformas, entregáveis e aspect ratios
 
 Mapeamento inicial:
 
@@ -485,35 +553,34 @@ Mapeamento inicial:
 | TikTok | `9:16` |
 | Instagram | `9:16` Reels, `1:1`, `4:5`, carousel futuro |
 | Facebook | `16:9`, `9:16`, imagem/feed futuro |
-| Curso | geralmente `16:9`, mas sem restricao tecnica |
-| PDF/isca digital | dimensoes/formato a definir em feature futura |
+| PDF/isca digital | dimensões/formato a definir em feature futura |
 
-Regra: video longo `16:9` nao deve virar automaticamente vertical por crop. Uma variante curta deve poder ter roteiro/cenas proprias geradas pela LLM a partir dos pontos altos.
+Regra: vídeo longo `16:9` não deve virar automáticamente vertical por crop. Uma variante curta deve poder ter roteiro/cenas próprias geradas pela LLM a partir dos pontos altos.
 
-Regra: cada canal deve controlar quais entregaveis sao permitidos. Exemplo: TikTok nao deve sugerir imagem/PDF como entrega primaria; YouTube pode sugerir video horizontal, Shorts e futuramente Community post; Instagram/Facebook podem sugerir imagem e video.
+Regra: cada canal deve controlar quais entregáveis são permitidos. Exemplo: TikTok não deve sugerir imagem/PDF como entrega primaria; YouTube pode sugerir vídeo horizontal, Shorts e futuramente Community post; Instagram/Facebook podem sugerir imagem e vídeo.
 
-## Requisitos nao funcionais
+## Requisitos não funcionais
 
 - Local-first na V1.
-- SQLite local por padrao.
-- Worker serial por padrao para preservar VRAM.
-- Multi-workspace no dominio.
+- SQLite local por padrão.
+- Worker serial por padrão para preservar VRAM.
+- Multi-workspace no domínio.
 - Jobs rastreaveis.
 - Reprocessamento granular.
 - Assets em filesystem sob `DATA_DIR`.
-- Configuracoes por usuario/workspace.
-- UI utilizavel por nao-tecnicos.
+- Configurações por usuário/workspace.
+- UI utilizável por não-técnicos.
 
-## Criterios de aceite do MVP de FlowShopy
+## Critérios de aceite do MVP de FlowShopy
 
-- usuario cria projeto content-first;
-- usuario cria ou associa conteudo a projeto sem modulo visivel;
-- usuario gera cenas/blocos somente no contexto de projeto/variante de video;
-- usuario edita cenas no editor;
-- usuario gera assets;
-- usuario renderiza MP4;
-- Feed mostra conteudos;
-- Kanban mostra producao;
-- Agenda mostra planejamento;
+- usuário cria projeto content-first;
+- usuário cria ou associa conteúdo a projeto sem qualquer referência a estruturas herdadas;
+- usuário gera cenas/blocos somente no contexto de projeto/output de vídeo;
+- usuário edita cenas no editor;
+- usuário gera assets;
+- usuário renderiza MP4;
+- Feed mostra conteúdos;
+- Kanban mostra produção;
+- Agenda entra depois, quando houver integrações reais de contas e distribuição;
 - Gemini pode ser configurado como LLM;
-- fluxo legado de curso nao quebra.
+- referências herdadas podem continuar existindo internamente por um período, mas não aparecem como modelo do produto.

@@ -1,6 +1,6 @@
 # FlowShopy Production Infrastructure
 
-## Estrategia de distribuicao tecnica
+## Estratégia de distribuição técnica
 
 FlowShopy deve suportar tres modos:
 
@@ -8,22 +8,22 @@ FlowShopy deve suportar tres modos:
 2. Self-hosted em servidor/lab.
 3. SaaS/control plane futuro com workers/agentes locais.
 
-A V1 deve priorizar local-first porque geracao de video, imagem e TTS pode ter custo alto de GPU/API.
+A V1 deve priorizar local-first porque geração de vídeo, imagem e TTS pode ter custo alto de GPU/API.
 
-## Componentes em producao
+## Componentes em produção
 
 ### Frontend
 
-- React/Vite build estatico;
+- React/Vite build estático;
 - servido por API, servidor web ou container;
 - deve apontar para API via env/config.
 
 ### API
 
 - Node.js/Fastify;
-- autentica usuarios;
+- autentica usuários;
 - gerencia workspaces;
-- gerencia projetos/conteudos/jobs/settings;
+- gerencia projetos/conteúdos/jobs/settings;
 - expõe WebSocket/HTTP para worker/agente.
 
 ### Worker
@@ -31,7 +31,7 @@ A V1 deve priorizar local-first porque geracao de video, imagem e TTS pode ter c
 - Node.js;
 - executa jobs pesados;
 - acessa LLM/TTS/ComfyUI/ffmpeg/Playwright;
-- deve rodar proximo da GPU/servicos locais.
+- deve rodar próximo da GPU/servicos locais.
 
 ### Banco
 
@@ -59,11 +59,11 @@ Futuro:
 
 ## Infra local-first
 
-Requisitos minimos:
+Requisitos mínimos:
 
 - CPU moderna;
 - 16 GB RAM recomendado;
-- GPU NVIDIA 8 GB VRAM minimo para fluxos locais com imagem/TTS pesados;
+- GPU NVIDIA 8 GB VRAM mínimo para fluxos locais com imagem/TTS pesados;
 - disco SSD;
 - ffmpeg;
 - Node.js runtime;
@@ -82,7 +82,7 @@ Servicos locais:
 Modelo:
 
 - API e frontend em servidor;
-- worker em maquina com GPU;
+- worker em máquina com GPU;
 - SQLite em volume persistente para single-node;
 - reverse proxy HTTPS;
 - backups de `DATA_DIR`.
@@ -105,10 +105,10 @@ Modelo:
 - workers locais pareados por workspace;
 - billing Stripe;
 - conectores sociais por OAuth;
-- fila cloud para tarefas nao-GPU;
+- fila cloud para tarefas não-GPU;
 - observabilidade central.
 
-## Variaveis criticas
+## Variaveis críticas
 
 - `DATA_DIR`
 - `FLOWSHOPY_DB_URL`
@@ -120,20 +120,20 @@ Modelo:
 
 ## HTTPS e seguranca
 
-Producao deve usar:
+Produção deve usar:
 
 - HTTPS obrigatorio;
 - cookies secure;
 - secrets fortes;
 - CORS restrito;
-- backups criptografados quando possivel;
-- nao salvar API keys em texto aberto no longo prazo;
+- backups criptografados quando possível;
+- não salvar API keys em texto aberto no longo prazo;
 - mascarar secrets na UI/logs;
-- separar workspaces logicamente.
+- separar workspaces lógicamente.
 
 ## Backup
 
-Backup minimo V1:
+Backup mínimo V1:
 
 - `DATA_DIR/data.db`;
 - pasta de assets;
@@ -153,15 +153,15 @@ Recomendacao:
 - Electron ou launcher nativo;
 - iniciar API/worker;
 - definir `DATA_DIR`;
-- healthcheck de dependencias;
+- healthcheck de dependências;
 - abrir UI;
 - logs simples;
 - configurador de providers;
-- atualizacao do app.
+- atualização do app.
 
 ## Deploy container/lab
 
-Docker pode ser usado em dev/lab, mas nao deve ser dependencia obrigatoria para usuario final.
+Docker pode ser usado em dev/lab, mas não deve ser dependência obrigatoria para usuário final.
 
 Compose deve cobrir:
 
@@ -175,11 +175,11 @@ Ollama/ComfyUI/TTS podem ficar fora do compose por causa de GPU/drivers.
 
 ## Observabilidade
 
-Necessario evoluir:
+Necessário evoluir:
 
 - logs estruturados por `workspaceId`, `jobId`, `contentItemId`;
-- historico de jobs no DB;
+- histórico de jobs no DB;
 - tela diagnostics;
 - health de providers;
 - metricas de tempo por etapa;
-- erros acionaveis para usuario.
+- erros acionaveis para usuário.

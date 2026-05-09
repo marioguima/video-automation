@@ -6,10 +6,10 @@ O produto passa a assumir `local execution first`.
 
 Isso significa:
 
-- a experiencia principal roda como aplicacao instalada;
-- processamento pesado fica na maquina do cliente;
-- a nuvem deixa de ser dependencia do caminho critico de geracao;
-- servicos cloud viram `control plane`, nao `execution plane`.
+- a experiência principal roda como aplicação instalada;
+- processamento pesado fica na máquina do cliente;
+- a nuvem deixa de ser dependência do caminho crítico de geração;
+- servicos cloud viram `control plane`, não `execution plane`.
 
 ## Arquitetura alvo
 
@@ -27,87 +27,87 @@ Electron Desktop Shell
 
 ### Desktop shell
 
-Responsavel por:
+Responsável por:
 
-- iniciar a aplicacao instalada;
+- iniciar a aplicação instalada;
 - resolver o diretório local de runtime;
 - subir API e worker locais;
 - abrir a UI;
-- encerrar processos locais junto com a aplicacao;
-- concentrar integracoes desktop futuras, como atualizacao, licenca e diagnostico.
+- encerrar processos locais junto com a aplicação;
+- concentrar integrações desktop futuras, como atualização, licença e diagnóstico.
 
-Implementacao atual:
+Implementação atual:
 
 - `apps/desktop/main.mjs`
 - `apps/desktop/preload.mjs`
 
 ### UI local
 
-Responsavel por:
+Responsável por:
 
-- edicao de projetos, conteudos e blocos;
+- edição de projetos, conteúdos e blocos;
 - monitoramento de jobs;
-- configuracao de providers;
+- configuração de providers;
 - preview;
-- diagnostico operacional.
+- diagnóstico operacional.
 
-Implementacao atual:
+Implementação atual:
 
 - `apps/web`
 
 ### API local
 
-Responsavel por:
+Responsável por:
 
-- sessao local e autenticacao do produto instalado;
-- regras de dominio;
+- sessão local e autenticação do produto instalado;
+- regras de domínio;
 - persistencia em SQLite;
-- criacao e acompanhamento de jobs;
+- criação e acompanhamento de jobs;
 - stream de progresso para a UI;
-- fachada unica para a interface.
+- fachada única para a interface.
 
-Implementacao atual:
+Implementação atual:
 
 - `apps/api`
 
 ### Worker local
 
-Responsavel por:
+Responsável por:
 
-- segmentacao;
+- segmentação;
 - TTS;
-- geracao de imagem;
+- geração de imagem;
 - render de slide;
-- render de video;
-- acesso a providers e binarios locais;
-- gravacao de assets e logs tecnicos.
+- render de vídeo;
+- acesso a providers e binários locais;
+- gravação de assets e logs técnicos.
 
-Implementacao atual:
+Implementação atual:
 
 - `apps/worker`
 
 ### Control plane cloud
 
-Responsavel por:
+Responsável por:
 
 - login;
-- licenca;
-- atualizacao de versao;
+- licença;
+- atualização de versão;
 - sync opcional;
 - telemetria opcional;
-- distribuicao de catalogos e presets;
+- distribuição de catálogos e presets;
 - suporte remoto futuro.
 
-Nao fica no caminho critico de:
+Não fica no caminho crítico de:
 
 - render;
 - ffmpeg;
 - Playwright;
 - TTS;
-- geracao de imagem;
+- geração de imagem;
 - leitura/escrita de assets locais.
 
-## Decisoes tecnicas aplicadas
+## Decisões técnicas aplicadas
 
 - a UI desktop usa Electron;
 - o frontend web continua em `apps/web`;
@@ -115,13 +115,13 @@ Nao fica no caminho critico de:
 - `apps/web` agora gera build com `base: "./"` para suportar `file://`;
 - o fallback de `API_BASE` no frontend volta para `127.0.0.1` mesmo quando a UI abre fora de um host HTTP;
 - o shell desktop sobe `apps/api/src/index.ts` e `apps/worker/src/index.ts` localmente com `tsx`;
-- desenvolvimento e distribuicao usam runtime Node real para backend local, nao a ABI do Electron para `api` e `worker`;
+- desenvolvimento e distribuição usam runtime Node real para backend local, não a ABI do Electron para `api` e `worker`;
 - o build desktop prepara um `node.exe` embarcado em `apps/desktop/vendor/node` para ser incluido no instalador;
-- `DATA_DIR` virou override tecnico opcional;
-- no desktop, o runtime local usa `app.getPath("userData")/data` por padrao;
-- fora do desktop, o fallback padrao e `<repo-root>/data`;
+- `DATA_DIR` virou override técnico opcional;
+- no desktop, o runtime local usa `app.getPath("userData")/data` por padrão;
+- fora do desktop, o fallback padrão e `<repo-root>/data`;
 - portas do runtime desktop ficam em `desktop.runtime.json`;
-- segredos internos do runtime desktop sao gerados no primeiro boot e persistidos localmente.
+- segredos internos do runtime desktop são gerados no primeiro boot e persistidos localmente.
 
 ## O que fica onde
 
@@ -144,23 +144,23 @@ Nao fica no caminho critico de:
 ### Fica cloud
 
 - licenciamento
-- conta do usuario
-- catalogo de updates
+- conta do usuário
+- catálogo de updates
 - sync e backup opcionais
-- distribuicao de configuracoes globais
+- distribuição de configurações globais
 
 ### Pode existir nos dois lados
 
 - metadata de projeto
-- catalogo de presets
-- configuracoes nao sensiveis
+- catálogo de presets
+- configurações não sensíveis
 
 Regra:
 
 - o cloud coordena;
-- a maquina local executa.
+- a máquina local executa.
 
-## Fluxo de execucao
+## Fluxo de execução
 
 ```text
 Abrir app desktop
@@ -175,7 +175,7 @@ Abrir app desktop
   -> UI acompanha progresso via WS/SSE local
 ```
 
-## Modelo de evolucao
+## Modelo de evolução
 
 ### Ja implementado agora
 
@@ -184,22 +184,22 @@ Abrir app desktop
 - script `pnpm build:desktop`;
 - script `pnpm dist:desktop`;
 - script `pnpm prepare:desktop-node`;
-- inicializacao local de API e worker pelo shell;
+- inicialização local de API e worker pelo shell;
 - carregamento da UI instalada via Electron;
-- documentacao do modo local-first.
+- documentação do modo local-first.
 
-### Proximo trabalho tecnico no mesmo trilho
+### Próximo trabalho técnico no mesmo trilho
 
-1. reduzir dependencias do modelo distribuido antigo no caminho principal;
+1. reduzir dependências do modelo distribuido antigo no caminho principal;
 2. separar com mais clareza endpoints exclusivamente locais dos endpoints de control plane;
-3. criar tela de diagnostico desktop para status de API, worker e providers;
-4. mover credenciais comerciais e de licenca para integracao cloud especifica;
-5. introduzir atualizacao de aplicacao e sync opcional;
-6. remover o pareamento como requisito para fluxo local padrao.
+3. criar tela de diagnóstico desktop para status de API, worker e providers;
+4. mover credenciais comerciais e de licença para integração cloud específica;
+5. introduzir atualização de aplicação e sync opcional;
+6. remover o pareamento como requisito para fluxo local padrão.
 
-## Plano de execucao direto
+## Plano de execução direto
 
-Esse plano nao e de analise lenta por fases. Ele e a decomposicao do trabalho para continuar implementando de forma agressiva.
+Esse plano não e de análise lenta por fases. Ele é a decomposição do trabalho para continuar implementando de forma agressiva.
 
 ### Trilha 1: runtime local
 
@@ -211,35 +211,35 @@ Esse plano nao e de analise lenta por fases. Ele e a decomposicao do trabalho pa
 ### Trilha 2: simplificacao da API
 
 - identificar endpoints que ainda assumem agent remoto;
-- criar caminho local-first sem dependencia de pareamento;
+- criar caminho local-first sem dependência de pareamento;
 - preservar os contratos da UI enquanto o backend interno simplifica.
 
 ### Trilha 3: worker como engine local
 
 - tratar `apps/worker` como engine do produto instalado;
-- remover premissas de descoberta de maquina para execucao normal;
-- manter websocket/controle remoto apenas como extensao futura, nao como prerequisito.
+- remover premissas de descoberta de máquina para execução normal;
+- manter websocket/controle remoto apenas como extensao futura, não como prerequisito.
 
 ### Trilha 4: empacotamento
 
 - consolidar `electron-builder`;
 - distribuir instalador `.exe` como artefato principal para Windows;
 - incluir shell Electron + UI build + backend local + runtime Node embarcado;
-- validar distribuicao Windows;
-- incluir runtime, frontend build, schema Prisma e dependencias locais necessarias;
+- validar distribuição Windows;
+- incluir runtime, frontend build, schema Prisma e dependências locais necessarias;
 - adicionar processo de release instalavel.
 
-## Distribuicao recomendada
+## Distribuição recomendada
 
-Objetivo de experiencia:
+Objetivo de experiência:
 
-- usuario recebe um instalador `.exe`;
-- instala com proximo/proximo/concluir;
+- usuário recebe um instalador `.exe`;
+- instala com próximo/próximo/concluir;
 - abre o app;
 - configura providers;
 - usa.
 
-Conteudo do instalador:
+Conteúdo do instalador:
 
 - shell Electron;
 - frontend build;
@@ -247,20 +247,20 @@ Conteudo do instalador:
 - `apps/worker`;
 - `packages/shared`;
 - `packages/db`;
-- `node_modules` necessarios;
+- `node_modules` necessários;
 - runtime Node embarcado para subir `api` e `worker`;
-- arquivos de configuracao versionados.
+- arquivos de configuração versionados.
 
-Conteudo que nao deve ir preconfigurado no git:
+Conteúdo que não deve ir preconfigurado no git:
 
-- banco do usuario;
+- banco do usuário;
 - assets gerados;
 - segredos do cliente;
-- configuracoes locais sensiveis.
+- configurações locais sensíveis.
 
 ## Resultado esperado
 
-O repositorio deixa de ter como narrativa principal um site controlando um worker remoto. A narrativa principal passa a ser:
+O repositório deixa de ter como narrativa principal um site controlando um worker remoto. A narrativa principal passa a ser:
 
 ```text
 produto instalado

@@ -13,13 +13,13 @@ Monorepo:
 - Prisma 7;
 - SQLite via `better-sqlite3`;
 - Playwright para render HTML/CSS -> PNG;
-- ffmpeg/ffprobe para video/audio;
+- ffmpeg/ffprobe para vídeo/audio;
 - Ollama/Gemini para LLM;
 - ComfyUI para imagem atual;
 - XTTS para TTS atual;
-- providers futuros de imagem/video por configuracao, incluindo extensao Veo e motores locais.
+- providers futuros de imagem/vídeo por configuração, incluindo extensao Veo e motores locais.
 
-## Estrutura do repositorio
+## Estrutura do repositório
 
 ```text
 apps/api      API HTTP/WebSocket, auth, settings, jobs, endpoints de dominio
@@ -33,7 +33,7 @@ scripts       scripts de setup/dev/lab
 infra         infraestrutura de laboratorio/producao
 ```
 
-## Arquitetura logica
+## Arquitetura lógica
 
 ```text
 Browser UI
@@ -44,15 +44,15 @@ Browser UI
       -> LLM/TTS/ComfyUI/Playwright/ffmpeg
 ```
 
-## Dominio atual vs dominio alvo
+## Domínio atual vs domínio alvo
 
-Dominio herdado:
+Estado herdado de implementação:
 
 ```text
 Course -> Module -> Lesson -> LessonVersion -> Block -> Asset/Job
 ```
 
-Dominio alvo:
+Domínio alvo:
 
 ```text
 Workspace -> ContentItem
@@ -63,43 +63,47 @@ ProjectContent -> ProjectContentOutput -> NarrativeUnit -> Composition -> Asset/
 Composition -> Component / CompositionPreset
 ```
 
-Leitura correta do dominio:
+Leitura correta do domínio:
 
-- `ContentItem` e a materia-prima editorial;
-- `Project` e o conjunto de parametros que orienta o core/fabrica;
-- `ProjectContentOutput` e o entregavel audiovisual concreto da combinacao projeto + conteudo + output configurado;
-- `Composition` e a forma declarativa de montagem desse entregavel.
+- `ContentItem` e a matéria-prima editorial;
+- `Project` e o conjunto de parâmetros que orienta o core/fábrica;
+- `ProjectContentOutput` e o entregável áudiovisual concreto da combinação projeto + conteúdo + output configurado;
+- `Composition` e a forma declarativa de montagem desse entregável.
 
-Estrategia atual:
+Estratégia atual:
 
-- manter `Course/Module/Lesson` apenas como ponte temporaria;
 - expor `Project/ContentItem` para a UI;
-- salvar ponte em `ContentItem.metadataJson.backing`;
-- usar `ProjectContent`/`ContentProjectItem` para associar conteudo a zero, um ou muitos projetos;
+- usar `ProjectContent`/`ContentProjectItem` para associar conteúdo a zero, um ou muitos projetos;
 - migrar gradualmente para `ProjectContentOutput`, `NarrativeUnit` e `Composition` sem quebrar o pipeline atual;
-- remover o legado de curso quando o dominio novo estiver cobrindo o fluxo principal, em vez de carregar dois modelos de produto por tempo indefinido;
-- nao iniciar segmentacao/render a partir de `ContentItem` isolado na UI;
-- iniciar segmentacao/render somente no contexto de `Project` e, idealmente, `ProjectContentOutput`.
-- nao criar `ContentItem` a partir do detalhe do projeto na UX principal; a criacao pertence a area `Content`;
-- permitir no detalhe do projeto apenas encontrar, vincular e orquestrar conteudos existentes.
+- remover o legado herdado quando o domínio novo estiver cobrindo o fluxo principal, em vez de carregar dois modelos de produto por tempo indefinido;
+- não iniciar segmentação/render a partir de `ContentItem` isolado na UI;
+- iniciar segmentação/render somente no contexto de `Project` e, idealmente, `ProjectContentOutput`.
+- não criar `ContentItem` a partir do detalhe do projeto na UX principal; a criação pertence a área `Content`;
+- permitir no detalhe do projeto apenas encontrar, vincular e orquestrar conteúdos existentes.
+
+Regra rigida de produto:
+
+- `Course`, `Module`, `Lesson` e derivados não fazem parte do domínio válido do FlowShopy;
+- se ainda existirem em schema, API ou implementação, isso é apenas estado transitivo de migração;
+- o fluxo novo não pode expor esses nomes em UX, onboarding, documentação de produto ou contratos novos.
 
 Nota de produto:
 
-- `Project` e agrupador editorial/comercial, nao destino de publicacao;
-- `Project` nao possui campo `kind`;
+- `Project` e agrupador editorial/comercial, não destino de publicação;
+- `Project` não possui campo `kind`;
 - qualquer tentativa de enviar `kind` para projeto deve ser recusada;
-- canais/perfis/paginas aparecem principalmente como destinations/outputs quando um projeto publica em varios canais.
+- canais/perfis/paginas aparecem principalmente como destinations/outputs quando um projeto publica em vários canais.
 
-Principio de migracao:
+Princípio de migração:
 
-- o dominio de curso nao deve continuar recebendo novas capacidades de produto;
-- novas capacidades devem nascer em torno de `ContentItem`, `Project`, `ProjectContentOutput`, `Composition` e promocao;
-- o backing herdado so deve sobreviver enquanto for necessario para manter entrega e reduzir risco de transicao;
+- o domínio herdado não deve continuar recebendo novas capacidades de produto;
+- novas capacidades devem nascer em torno de `ContentItem`, `Project`, `ProjectContentOutput`, `Composition` e promoção;
+- o backing herdado só deve sobreviver enquanto for necessário para manter entrega e reduzir risco de transição;
 - quando um fluxo novo estabilizar, o equivalente herdado deve ser removido.
 
 ## Arquitetura alvo de produto
 
-O FlowShopy nao deve ser tratado como um gerador de aulas. Ele deve ser tratado como uma fabrica de conteudo promocional orientada por conteudo, projeto, output e composicao.
+O FlowShopy deve ser tratado como uma fábrica de conteúdo promocional orientada por conteúdo, projeto, output e composição.
 
 Fluxo alvo:
 
@@ -117,26 +121,26 @@ ContentItem
 
 Leitura correta de cada etapa:
 
-- `ContentItem`: materia-prima editorial; pode nascer de ideia, prompt, briefing, roteiro final, transcricao ou arquivo;
-- `Project association`: um mesmo conteudo pode servir a um, varios ou nenhum projeto;
-- `Project context`: marca, produto promovido, CTA, destinos, formatos e estilo;
-- `ProjectContentOutput`: entregavel concreto por canal, formato e objetivo;
-- `NarrativeStructure`: estrutura semantica do conteudo para aquele output;
-- `Composition`: timeline audiovisual declarativa;
+- `ContentItem`: matéria-prima editorial; pode nascer de ideia, prompt, briefing, roteiro final, transcrição ou arquivo;
+- `Project association`: um mesmo conteúdo pode servir a um, vários ou nenhum projeto;
+- `Project context`: marca, produto promovido, CTA, destinos, formatos, estilo e intenção declarada do que deve ser produzido;
+- `ProjectContentOutput`: entregável concreto por canal, formato e objetivo;
+- `NarrativeStructure`: estrutura semântica do conteúdo para aquele output;
+- `Composition`: timeline áudiovisual declarativa;
 - `Preview`: visualizacao antes do render final;
-- `Final render`: exportacao definitiva do entregavel.
+- `Final render`: exportacao definitiva do entregável.
 
 Regra de UX derivada:
 
-- a tela `Content` e o lugar de criar e editar materia-prima;
-- a tela `Project` e o lugar de associar conteudo, escolher output e orquestrar a fabrica;
-- `Studio` existe dentro do projeto para operar sobre conteudo associado, nao para substituir a area de escrita de conteudo.
+- a tela `Content` e o lugar de criar e editar matéria-prima;
+- a tela `Project` e o lugar de associar conteúdo, escolher output e orquestrar a fábrica;
+- `Studio` existe dentro do projeto para operar sobre conteúdo associado, não para substituir a área de escrita de conteúdo.
 
-### Estrutura semantica
+### Estrutura semântica
 
-`ContentItem` nao deve gerar "slides" diretamente. Primeiro ele deve gerar uma estrutura semantica reutilizavel.
+`ContentItem` não deve gerar "slides" diretamente. Primeiro ele deve gerar uma estrutura semântica reutilizável.
 
-Exemplos de papeis semanticos:
+Exemplos de papéis semanticos:
 
 - `hook`
 - `setup`
@@ -149,49 +153,57 @@ Exemplos de papeis semanticos:
 - `visual_beat`
 - `platform_specific`
 
-Esses papeis descrevem funcao editorial e narrativa. A composicao visual vem depois.
+Esses papéis descrevem funcao editorial e narrativa. A composição visual vem depois.
 
 ### Entidades alvo
 
-Entidades principais do dominio novo:
+Entidades principais do domínio novo:
 
-- `ContentItem`: conteudo-base;
-- `ContentSource`: origem do conteudo;
-- `Project`: contexto estrategico/comercial;
-- `ProjectContent`: vinculo reutilizavel entre conteudo e projeto;
+- `Workspace`: escopo de isolamento;
+- `WorkspaceMembership`: autorização por equipe;
+- `ContentItem`: conteúdo-base;
+- `ContentSource`: origem do conteúdo;
+- `Project`: contexto estratégico/comercial;
+- `ProjectContent`: vínculo reutilizável entre conteúdo e projeto;
 - `PromotionTarget`: produto, oferta, evento ou destino promovido;
-- `ShortLink`: link curto redirecionavel usado em CTAs e distribuicao;
-- `ProjectContentOutput`: entregavel concreto por canal/formato;
-- `NarrativeUnit`: unidade semantica derivada do conteudo;
+- `ShortLink`: link curto redirecionável usado em CTAs e distribuição;
+- `ProjectContentOutput`: entregável concreto por canal/formato;
+- `NarrativeUnit`: unidade semântica derivada do conteúdo;
 - `Composition`: timeline declarativa de um output;
-- `CompositionTrack`: trilha de video, imagem, audio, texto, overlay ou efeito;
+- `CompositionTrack`: trilha de vídeo, imagem, áudio, texto, overlay ou efeito;
 - `CompositionClip`: item concreto posicionado na timeline;
-- `Component`: primitive reutilizavel de composicao;
+- `Component`: primitive reutilizável de composição;
 - `CompositionPreset`: receita visual/motion que combina componentes;
-- `Asset`: entrada, intermediario ou saida de render.
+- `Asset`: entrada, intermediario ou saída de render.
 
-### Composicao em vez de slide
+Papéis mínimos de equipe esperados:
 
-`slide` deve deixar de ser o centro do produto. Ele pode continuar existindo como um tipo de composicao simples, mas o modelo principal precisa aceitar:
+- `owner`: controla workspace, billing e membros;
+- `admin`: administra conteúdos, projetos, settings operacionais e equipe conforme permissão;
+- `member`: produz conteúdo e opera entregáveis conforme escopo autorizado.
 
-- video puro;
+### Composição em vez de slide
+
+`slide` deve deixar de ser o centro do produto. Ele pode continuar existindo como um tipo de composição simples, mas o modelo principal precisa aceitar:
+
+- vídeo puro;
 - imagem pura;
 - imagem com motion;
-- video com overlay;
-- video com burn effects;
+- vídeo com overlay;
+- vídeo com burn effects;
 - mescla de clips e imagens;
 - CTA visual;
-- transicoes;
-- blocos comuns e blocos especificos por output.
+- transições;
+- blocos comuns e blocos específicos por output.
 
 ### Componentes e presets
 
 O conceito atual de template deve evoluir para um sistema combinavel:
 
 - `StyleDNA`: identidade da marca;
-- `Component Library`: pecas reutilizaveis;
-- `CompositionPreset`: regras de combinacao;
-- `VariationRules`: variacao controlada para evitar videos parecidos.
+- `Component Library`: pecas reutilizáveis;
+- `CompositionPreset`: regras de combinação;
+- `VariationRules`: variação controlada para evitar vídeos parecidos.
 
 Exemplos de `Component`:
 
@@ -213,48 +225,48 @@ Exemplos de `CompositionPreset`:
 - `ugc_hybrid`
 - `kinetic_cta`
 
-Regras de variacao esperadas:
+Regras de variação esperadas:
 
-- limitar repeticao de uma mesma transicao;
+- limitar repeticao de uma mesma transição;
 - alternar familias de motion;
 - variar crop/zoom dentro de faixas permitidas;
 - escolher overlays por contexto semantico;
-- permitir multiplos layouts de CTA final;
+- permitir múltiplos layouts de CTA final;
 - preservar identidade visual sem gerar clones.
 
-## Motor de composicao e render
+## Motor de composição e render
 
-Direcao aceita:
+Direção aceita:
 
-- `Remotion` deve ser a camada principal de composicao e preview;
-- `ffmpeg` deve permanecer como infraestrutura de midia, nao como modelo mental principal do produto.
+- `Remotion` deve ser a camada principal de composição e preview;
+- `ffmpeg` deve permanecer como infraestrutura de mídia, não como modelo mental principal do produto.
 
-Papeis do Remotion:
+Papéis do Remotion:
 
 - visualizador;
 - timeline;
 - preview antes do render final;
-- composicao declarativa;
+- composição declarativa;
 - biblioteca de componentes;
-- efeitos, transicoes e motion;
-- parametrizacao por dados de dominio.
+- efeitos, transições e motion;
+- parametrizacao por dados de domínio.
 
-Papeis do ffmpeg:
+Papéis do ffmpeg:
 
 - transcode;
-- normalizacao de audio/video;
+- normalizacao de áudio/vídeo;
 - proxies;
-- operacoes auxiliares de export;
+- operações auxiliares de export;
 - otimizações de pipeline.
 
 Implicacao:
 
-- `render_slide`, `render_clip` e `concat_video` sao etapas de execucao herdadas;
-- o alvo e um renderer orientado a `Composition`, onde slide passa a ser apenas um caso simples.
+- `render_slide`, `render_clip` e `concat_video` são etapas de execução herdadas;
+- o alvo é um renderer orientado a `Composition`, onde slide passa a ser apenas um caso simples.
 
 ## Banco de dados
 
-Banco padrao:
+Banco padrão:
 
 ```text
 SQLite em DATA_DIR/data.db
@@ -298,6 +310,11 @@ Modelos principais atuais:
 - `ContentProject`
 - `ContentItem`
 
+Leitura correta:
+
+- a presenca de `Course/Module/Lesson` no schema atual não autoriza continuar modelando o produto por essas entidades;
+- as proximas tabelas novas devem nascer no domínio `Project/Content/Output/Composition/Team`.
+
 ## API
 
 App:
@@ -329,21 +346,26 @@ POST /content-items/:itemId/segment
 PATCH /blocks/:blockId
 ```
 
+Direção de contrato:
+
+- endpoints novos não devem nascer com nomenclatura de curso/aula/módulo;
+- a API nova deve convergir para `projects`, `content-items`, `project-contents`, `project-output-definitions` e `project-content-outputs`.
+
 Auth:
 
 - cookie `flowshopy_session`;
 - JWT assinado por `AUTH_JWT_SECRET`;
-- workspace resolvido a partir do usuario autenticado.
+- workspace resolvido a partir do usuário autenticado.
 
 Settings:
 
-- configuracoes em arquivo JSON sob `DATA_DIR`;
+- configurações em arquivo JSON sob `DATA_DIR`;
 - LLM selecionada salva em System Settings;
 - Gemini exige API key.
-- TTS em Settings e catalogo de providers/rotas; o provider usado e escolhido pelo projeto;
-- cada lingua deve estar em no maximo uma rota TTS do catalogo;
-- geracao visual em Settings e catalogo de providers/modelos por capacidade, em vez de ComfyUI fixo;
-- projeto escolhe modelo de imagem e, quando necessario, modelo de video.
+- TTS em Settings e catálogo de providers/rotas; o provider usado e escolhido pelo projeto;
+- cada língua deve estar em no máximo uma rota TTS do catálogo;
+- geração visual em Settings e catálogo de providers/modelos por capacidade, em vez de ComfyUI fixo;
+- projeto escolhe modelo de imagem e, quando necessário, modelo de vídeo.
 
 ## Worker
 
@@ -356,18 +378,23 @@ apps/worker/src/index.ts
 Responsabilidades:
 
 - buscar jobs pendentes;
-- executar segmentacao/LLM;
-- gerar audio;
+- executar segmentação/LLM;
+- gerar áudio;
 - gerar imagens;
 - renderizar slides;
 - renderizar clips;
-- concatenar video;
+- concatenar vídeo;
 - healthcheck;
 - comunicar progresso/status.
 
-Padrao de execucao:
+Regra de papel do worker:
 
-- serial por padrao;
+- o worker e engine local de fábricacao de entregáveis;
+- ele deve ser pensado como pipeline local de transformação de conteúdo em output.
+
+Padrão de execução:
+
+- serial por padrão;
 - VRAM-friendly;
 - jobs com retries/lease;
 - assets gravados em `DATA_DIR`.
@@ -408,7 +435,7 @@ Tipos atuais/esperados:
 - `final_mp4`
 - `manifest_json`
 
-Necessario evoluir:
+Necessário evoluir:
 
 - `thumbnail`
 - `animated_scene_mp4`
@@ -445,14 +472,20 @@ apps/web/src/components/ContentProjects.tsx
 UX atual:
 
 - sidebar mostra `Projects`;
-- sidebar tambem mostra `Content` como area de listagem/cadastro de conteudos;
-- primeira tela e uma grade visual de projetos;
+- sidebar também mostra `Content` como área de listagem/cadastro de conteúdos;
+- primeira tela é uma grade visual de projetos;
 - cadastro de projeto fica em tela separada;
-- detalhe do projeto contem Contents, Feed, Kanban e Agenda;
-- a area Content lista conteudos e abre uma tela separada de cadastro;
-- o cadastro de Content associa o conteudo somente a um projeto existente;
-- a area Content nao gera cenas nem abre editor de video.
-- a listagem de Content deve destacar o conteudo; projetos aparecem apenas como usos/associacoes secundarias.
+- detalhe do projeto contém Contents, Feed e Kanban; `Agenda` volta quando houver base real de distribuição;
+- a área Content lista conteúdos e abre uma tela separada de cadastro;
+- o cadastro de Content associa o conteúdo somente a um projeto existente;
+- a área Content não gera cenas nem abre editor de vídeo.
+- a listagem de Content deve destacar o conteúdo; projetos aparecem apenas como usos/associações secundarias.
+
+Direção adicional:
+
+- a UI precisa ganhar uma camada clara de autenticação, workspace e equipe;
+- a área atual de convites é apenas uma base inicial e ainda não cobre o modelo real de autorização;
+- o próximo passo de produto é o usuário entender que escreve conteúdo, associa a projeto e escolhe o que quer gerar dali.
 
 Navegacao:
 
@@ -469,24 +502,24 @@ Implementado na tela Projects:
 - Contents;
 - Feed;
 - Kanban;
-- Agenda.
+- `Agenda` como capacidade futura, dependente de integrações de contas/plataformas.
 
 Editor de cenas:
 
-- `ttsText` editavel;
-- `onScreenJson` editavel;
-- `imagePromptJson` editavel;
-- `animationPromptJson` editavel.
-- `directionNotesJson` editavel;
-- `soundEffectPromptJson` editavel e reservado para geracao futura.
+- `ttsText` editável;
+- `onScreenJson` editável;
+- `imagePromptJson` editável;
+- `animationPromptJson` editável.
+- `directionNotesJson` editável;
+- `soundEffectPromptJson` editável e reservado para geração futura.
 
-## Integracao LLM
+## Integração LLM
 
 Providers atuais:
 
 - Ollama local;
-- Gemini cloud configuravel;
-- OpenAI aparece em configuracao mas worker ainda nao deve ser tratado como implementado para producao se nao houver caminho completo.
+- Gemini cloud configurável;
+- OpenAI aparece em configuração mas worker ainda não deve ser tratado como implementado para produção se não houver caminho completo.
 
 Gemini:
 
@@ -499,14 +532,14 @@ Uso:
 - se provider salvo for `gemini`, worker chama Gemini para tarefas LLM;
 - API exige `apiKey` para Gemini nas settings.
 
-## Pipeline de producao do projeto
+## Pipeline de produção do projeto
 
-Direcao:
+Direção:
 
-- Settings cataloga providers, rotas e modelos disponiveis;
-- o Projeto declara quais etapas de producao fazem parte do produto final;
-- cada etapa ligada aponta para uma rota/modelo do catalogo quando precisar de um provider externo;
-- o fluxo deve aceitar projetos sem TTS, sem imagem, sem video IA, ou com combinacoes diferentes dessas etapas.
+- Settings cataloga providers, rotas e modelos disponíveis;
+- o Projeto declara quais etapas de produção fazem parte do produto final;
+- cada etapa ligada aponta para uma rota/modelo do catálogo quando precisar de um provider externo;
+- o fluxo deve aceitar projetos sem TTS, sem imagem, sem vídeo IA, ou com combinacoes diferentes dessas etapas.
 
 Contrato inicial em `ContentProject.metadata.pipeline`:
 
@@ -526,129 +559,135 @@ pipeline
 - render.templateSelection: manual | random | sequential
 ```
 
+Interpretacao de produto:
+
+- esse pipeline não define apenas "como renderizar";
+- ele representa a expectativa do usuário sobre o que o core deve produzir a partir do conteúdo associado;
+- o passo seguinte e tirar esse contrato de `metadata` e leva-lo para entidades dedicadas de output.
+
 Semantica:
 
-- `metadata.pipeline` e a fonte unica de verdade para as etapas do projeto;
-- nao devem existir campos paralelos como `metadata.tts` ou `metadata.visualGeneration` no contrato novo;
+- `metadata.pipeline` e a fonte única de verdade para as etapas do projeto;
+- não devem existir campos paralelos como `metadata.tts` ou `metadata.visualGeneration` no contrato novo;
 - `audio.mode = tts`: exige `pipeline.audio.tts` com rota TTS do projeto;
-- `audio.mode = music`: audio principal vem de musica/faixa externa, sem TTS associado ao projeto;
-- `audio.mode = video_native_audio`: fala/audio vem do provider de video, respeitando limites do modelo;
-- `audio.soundFx`: efeitos sonoros entram como camada de mixagem, nao como parte obrigatoria da segmentacao;
-- `audio.backgroundMusic`: projeto seleciona musicas permitidas de uma biblioteca global ou, futuramente, um provider de musica instrumental IA;
+- `audio.mode = music`: áudio principal vem de música/faixa externa, sem TTS associado ao projeto;
+- `audio.mode = video_native_audio`: fala/audio vem do provider de vídeo, respeitando limites do modelo;
+- `audio.soundFx`: efeitos sonoros entram como camada de mixagem, não como parte obrigatoria da segmentação;
+- `audio.backgroundMusic`: projeto seleciona músicas permitidas de uma biblioteca global ou, futuramente, um provider de música instrumental IA;
 - `image.mode = generate`: gera imagens a partir das cenas;
 - `video.mode = editor_motion`: usa imagens e movimentos automatizados de editor, como pan, zoom e loop;
-- `video.mode = text_to_video`: gera video direto de texto/prompt;
-- `video.mode = image_to_video`: gera imagem base e anima com provider de video;
-- `video.mode = looped_clips`: gera poucos clipes e repete/compõe ate cobrir a duracao do produto final.
-- `render.textLayer`: define se o video final tera captions, pontos de slide ou destaques, sem obrigar `on_screen` na segmentacao.
+- `video.mode = text_to_video`: gera vídeo direto de texto/prompt;
+- `video.mode = image_to_video`: gera imagem base e anima com provider de vídeo;
+- `video.mode = looped_clips`: gera poucos clipes e repete/compõe até cobrir a duração do produto final.
+- `render.textLayer`: define se o vídeo final tera captions, pontos de slide ou destaques, sem obrigar `on_screen` na segmentação.
 
 Decisao de beta:
 
-- nao usar React Flow agora;
+- não usar React Flow agora;
 - expor cards/toggles de etapas no projeto;
 - manter o pipeline serial e validado por regras simples;
 - deixar React Flow como modo avancado futuro, quando houver ramificacoes reais e reutilizacao de steps.
 
 Exemplos:
 
-- narracao comum: `script.scene_blocks` + `audio.tts` + `image.generate` + `video.editor_motion`;
-- shorts com video IA: `script.scene_blocks` + `audio.video_native_audio` + `video.text_to_video`;
-- playlist musical simples: `script.music_storyboard` + `audio.music` + `video.looped_clips`;
+- narração comum: `script.scene_blocks` + `audio.tts` + `image.generate` + `video.editor_motion`;
+- shorts com vídeo IA: `script.scene_blocks` + `audio.video_native_audio` + `video.text_to_video`;
+- playlist músical simples: `script.music_storyboard` + `audio.music` + `video.looped_clips`;
 - imagens sociais: `script.scene_blocks` + `audio.none` + `image.generate` + `render.images_only`.
 
 ## Templates de render e textLayer
 
 Decisao:
 
-- texto na tela nao e `script.mode`;
-- texto na tela e uma camada de saida/render, controlada por template;
+- texto na tela não e `script.mode`;
+- texto na tela é uma camada de saída/render, controlada por template;
 - `script.mode` decide como o roteiro vira blocos estruturais;
 - `render.textLayer` e o template decidem como esses blocos aparecem no produto final.
 
 Responsabilidades do template:
 
 - captions: com ou sem legenda, estilo, posicao, tamanho, cor, sombra e efeito;
-- highlights: palavras ou trechos em destaque, possivelmente dirigidos por marcadores futuros como `[show]`;
-- slide_points: pontos curtos na tela, mais perto do fluxo atual de aulas;
+- highlights: palavras ou trechos em destaque, possívelmente dirigidos por marcadores futuros como `[show]`;
+- slide_points: pontos curtos na tela, mais perto de um layout de apoio textual;
 - logo: asset, posicao, tamanho e opacidade;
-- overlay: asset de video com alpha, opacidade e velocidade;
-- transicoes, enquadramento, safe areas e identidade visual.
+- overlay: asset de vídeo com alpha, opacidade e velocidade;
+- transições, enquadramento, safe áreas e identidade visual.
 
 Politicas por projeto/output:
 
-- `manual`: usuario aprova o template antes de renderizar;
+- `manual`: usuário aprova o template antes de renderizar;
 - `random`: escolhe um template permitido aleatoriamente;
-- `sequential`: percorre templates permitidos em ordem e volta ao inicio.
+- `sequential`: percorre templates permitidos em ordem e volta ao início.
 
-Implicacao para a segmentacao:
+Implicacao para a segmentação:
 
-- `buildSegmentationPrompt` nao deve gerar `on_screen`;
+- `buildSegmentationPrompt` não deve gerar `on_screen`;
 - a divisao estrutural deve produzir `source_text`, `word_count` e `duration_estimate_s`;
 - a etapa seguinte pode gerar prompts visuais, captions ou destaques conforme `render.textLayer` e template.
 
 ## Visual beats para music_storyboard
 
-`music_storyboard` nao deve ser tratado como uma sequencia de blocos de fala. Ele descreve momentos visuais de uma musica, playlist ou album.
+`music_storyboard` não deve ser tratado como uma sequencia de blocos de fala. Ele descreve momentos visuais de uma música, playlist ou album.
 
-Definicao:
+Definição:
 
-- um visual beat e uma mudanca coerente de imagem, clima, assunto, energia, camera ou acao visual;
-- no beta, visual beats podem usar duracoes fixas ou faixas aceitas pelo provider de video;
-- sincronizacao fina com musica fica para etapa posterior, usando BPM, waveform, transientes ou marcadores manuais.
+- um visual beat é uma mudanca coerente de imagem, clima, assunto, energia, camera ou ação visual;
+- no beta, visual beats podem usar durações fixas ou faixas aceitas pelo provider de vídeo;
+- sincronização fina com música fica para etapa posterior, usando BPM, waveform, transientes ou marcadores manuais.
 
-Implementacao incremental:
+Implementação incremental:
 
-- beta: segmentar roteiro/storyboard em visual beats com duracao aproximada;
-- depois: importar musica, medir duracao, BPM e transientes;
+- beta: segmentar roteiro/storyboard em visual beats com duração aproximada;
+- depois: importar música, medir duração, BPM e transientes;
 - depois: distribuir beats visuais no timeline;
-- depois: permitir loop de poucos clipes curtos sobre musicas longas;
+- depois: permitir loop de poucos clipes curtos sobre músicas longas;
 - depois: gerar uma historia visual completa para playlist/album.
 
-## Biblioteca de musicas de fundo
+## Biblioteca de músicas de fundo
 
-Direcao:
+Direção:
 
-- criar uma biblioteca global de musicas enviadas pelo usuario;
+- criar uma biblioteca global de músicas enviadas pelo usuário;
 - cada projeto escolhe quais faixas podem ser usadas como background music;
 - na renderizacao, a selecao pode ser aleatoria, sequencial ou manual;
-- a mixagem deve respeitar volume, fade, loop, crossfade e duracao final.
+- a mixagem deve respeitar volume, fade, loop, crossfade e duração final.
 
 Futuro:
 
-- adicionar providers de geracao de musica instrumental IA;
-- manter musica instrumental sem letra como caso principal para background;
-- guardar licenca/origem/metadados para evitar uso indevido em publicacao.
+- adicionar providers de geração de música instrumental IA;
+- manter música instrumental sem letra como caso principal para background;
+- guardar licença/origem/metadados para evitar uso indevido em publicação.
 
-## Pipeline de video
+## Pipeline de vídeo
 
 Fluxo esperado:
 
 1. `ContentItem.sourceText/scriptText` pode existir sem projeto e pode ser associado a um ou mais projetos.
-2. Projeto define canais, formatos e pipeline de producao.
-3. Um `ProjectContentOutput` de video escolhe modo de fala: sem fala, TTS externo ou audio nativo do motor de video.
-4. O sistema resolve `SpeechBudget` a partir da rota TTS por lingua ou do provider/modelo de video.
-5. Um `ProjectContentOutput` de video inicia a segmentacao com limites de fala/duracao ja resolvidos.
-6. Segmentacao estrutural por LLM cria `Block[]`/visual beats, sem exigir `onScreenJson`.
-7. fallback secundario usa segundo modelo Gemini quando disponivel.
-8. fallback final usa heuristica deterministica com o mesmo orcamento conhecido.
-9. criacao de `ttsText` quando a fala for externa;
-10. criacao de `imagePromptJson`
-11. criacao de `animationPromptJson`
-12. criacao/reserva de `directionNotesJson`
-13. criacao/reserva opcional de `soundEffectPromptJson`
-14. TTS gera audio quando o modo for `external_tts`
-15. ffprobe mede duracao quando existir audio externo
-16. provider visual gera imagem ou video de cena conforme capacidade escolhida
-17. Playwright renderiza slide PNG quando o fluxo for slide/imagem estatica
-18. ffmpeg renderiza clip MP4 quando necessario
-19. ffmpeg concatena/compoe video final do output
+2. Projeto define canais, formatos e pipeline de produção.
+3. Um `ProjectContentOutput` de vídeo escolhe modo de fala: sem fala, TTS externo ou áudio nativo do motor de vídeo.
+4. O sistema resolve `SpeechBudget` a partir da rota TTS por língua ou do provider/modelo de vídeo.
+5. Um `ProjectContentOutput` de vídeo inicia a segmentação com limites de fala/duração já resolvidos.
+6. Segmentação estrutural por LLM cria `Block[]`/visual beats, sem exigir `onScreenJson`.
+7. fallback secundario usa segundo modelo Gemini quando disponível.
+8. fallback final usa heurística deterministica com o mesmo orçamento conhecido.
+9. criação de `ttsText` quando a fala for externa;
+10. criação de `imagePromptJson`
+11. criação de `animationPromptJson`
+12. criação/reserva de `directionNotesJson`
+13. criação/reserva opcional de `soundEffectPromptJson`
+14. TTS gera áudio quando o modo for `external_tts`
+15. ffprobe mede duração quando existir áudio externo
+16. provider visual gera imagem ou vídeo de cena conforme capacidade escolhida
+17. Playwright renderiza slide PNG quando o fluxo for slide/imagem estática
+18. ffmpeg renderiza clip MP4 quando necessário
+19. ffmpeg concatena/compoe vídeo final do output
 
-## Orcamento de fala e segmentacao
+## Orcamento de fala e segmentação
 
 Objetivo:
 
 - evitar blocos que falham ou degradam na etapa de fala;
-- fazer a segmentacao respeitar o motor real que vai narrar a cena;
+- fazer a segmentação respeitar o motor real que vai narrar a cena;
 - manter o conceito independente do provider atual.
 
 Contrato conceitual:
@@ -668,57 +707,57 @@ SpeechBudget
 Resolucao:
 
 - `external_tts`: usar a rota TTS escolhida pelo projeto e seus limites de provider/voz;
-- nao existe TTS global ativo para producao;
-- `video_native_audio`: usar settings do provider/modelo de video escolhido para o output;
-- `none`: segmentacao pode priorizar ritmo visual, sem limite de fala;
-- se `mode` exigir fala e nao houver configuracao, bloquear antes de gerar blocos.
+- não existe TTS global ativo para produção;
+- `video_native_audio`: usar settings do provider/modelo de vídeo escolhido para o output;
+- `none`: segmentação pode priorizar ritmo visual, sem limite de fala;
+- se `mode` exigir fala e não houver configuração, bloquear antes de gerar blocos.
 
 Uso pelo segmentador:
 
 - `buildSegmentationPrompt` deve receber `SpeechBudget`;
 - o prompt deve pedir blocos dentro de `targetChars` e nunca acima de `maxChars` quando houver TTS;
-- para fala nativa de video, o prompt deve pedir blocos que caibam na duracao maxima aceita pelo provider/modelo;
+- para fala nativa de vídeo, o prompt deve pedir blocos que caibam na duração maxima aceita pelo provider/modelo;
 - a resposta do LLM deve ser validada deterministicamente antes de persistir blocos.
 - se o LLM primario falhar ou retornar JSON/blocos invalidos, o worker tenta o modelo Gemini fallback configurado;
-- se o fallback tambem falhar, o worker usa heuristica deterministica e registra isso em log.
+- se o fallback também falhar, o worker usa heurística deterministica e registra isso em log.
 
 ## Providers visuais
 
 Estado atual:
 
-- ComfyUI e o provider de imagem implementado;
-- animacao/video ainda esta como contrato futuro (`animationPromptJson`, `image_animation`, `render_animated_scene`).
+- ComfyUI é o provider de imagem implementado;
+- animação/vídeo ainda está como contrato futuro (`animationPromptJson`, `image_animation`, `render_animated_scene`).
 
-Direcao alvo:
+Direção alvo:
 
 - settings deve ter uma camada `visualGeneration` com providers e modelos;
 - cada provider declara capacidades: `text_to_image`, `image_to_image`, `text_to_video`, `image_to_video`, `native_audio`;
-- projeto/output escolhe provider/modelo de imagem e provider/modelo de video conforme formato, qualidade e custo;
-- video e opcional por projeto: um projeto pode usar apenas ComfyUI para imagem, outro pode usar Veo Extension para imagem e video;
+- projeto/output escolhe provider/modelo de imagem e provider/modelo de vídeo conforme formato, qualidade e custo;
+- vídeo e opcional por projeto: um projeto pode usar apenas ComfyUI para imagem, outro pode usar Veo Extension para imagem e vídeo;
 - o worker deve tratar cada provider por adaptador, como hoje faz com ComfyUI.
 
 Extensao Veo:
 
-- objetivo principal do FlowShopy e usar uma extensao externa para gerar imagem/video com Veo e recuperar resultados para continuar o pipeline;
+- objetivo principal do FlowShopy e usar uma extensao externa para gerar imagem/vídeo com Veo e recuperar resultados para continuar o pipeline;
 - a extensao deve ser modelada como provider `veo_extension`;
 - o contrato deve ser parecido com ComfyUI: enviar prompt/parametros/assets, acompanhar status, baixar resultado, salvar `Asset` e metadados;
-- a integracao direta com API oficial (`vertex_veo`) pode coexistir como outro provider, mas nao deve ser requisito para o fluxo principal.
+- a integração direta com API oficial (`vertex_veo`) pode coexistir como outro provider, mas não deve ser requisito para o fluxo principal.
 
 ## Substituicao de voz
 
 Objetivo:
 
-- permitir trocar a voz final de um video ja gerado usando uma amostra fornecida pelo usuario;
-- cobrir videos gerados com fala nativa do provider visual quando a voz original vier inconsistente;
-- evitar nova geracao visual cara quando apenas a voz precisa mudar.
+- permitir trocar a voz final de um vídeo já gerado usando uma amostra fornecida pelo usuário;
+- cobrir vídeos gerados com fala nativa do provider visual quando a voz original vier inconsistente;
+- evitar nova geração visual cara quando apenas a voz precisa mudar.
 
-Fluxo tecnico:
+Fluxo técnico:
 
 1. registrar `voice_sample_audio` com consentimento/metadados;
-2. extrair audio do video fonte;
-3. opcionalmente separar voz, musica e efeitos;
-4. resolver texto da cena pelo roteiro existente ou por transcricao;
-5. gerar nova fala pelo provider TTS/clonagem configurado para a lingua;
+2. extrair áudio do vídeo fonte;
+3. opcionalmente separar voz, música e efeitos;
+4. resolver texto da cena pelo roteiro existente ou por transcrição;
+5. gerar nova fala pelo provider TTS/clonagem configurado para a língua;
 6. alinhar a nova fala ao timing original;
 7. mixar voz, fundo e efeitos;
 8. salvar `voice_replaced_video_mp4` como novo asset derivado.
@@ -739,58 +778,58 @@ voiceReplacement
 
 Dependencias futuras:
 
-- source separation para preservar musica/ambiencia quando necessario;
+- source separation para preservar música/ambiencia quando necessário;
 - forced alignment/time stretching para manter sincronismo;
 - politica de direitos/consentimento para amostras de voz;
-- invalidacao de assets quando a amostra, voz alvo, roteiro ou video fonte mudar.
+- invalidacao de assets quando a amostra, voz alvo, roteiro ou vídeo fonte mudar.
 
 ## Outputs, CTA e render por blocos
 
 Objetivo:
 
 - reaproveitar cenas comuns entre canais;
-- permitir CTA e linguagem especificos por plataforma;
+- permitir CTA e linguagem específicos por plataforma;
 - evitar re-render completo quando muda apenas uma parte variavel.
 
 Modelo:
 
-- `ProjectContentOutput`: entregavel especifico de um conteudo dentro de um projeto, como YouTube `16:9`, Shorts `9:16`, TikTok `9:16` ou Facebook video;
+- `ProjectContentOutput`: entregável específico de um conteúdo dentro de um projeto, como YouTube `16:9`, Shorts `9:16`, TikTok `9:16` ou Facebook vídeo;
 - `Block.role`: `core`, `intro`, `cta`, `outro`, `platform_specific`;
-- `Block.outputScope`: `shared` para blocos comuns ou identificador do output/canal para blocos especificos;
+- `Block.outputScope`: `shared` para blocos comuns ou identificador do output/canal para blocos específicos;
 - `renderPlanJson`: ordem dos blocos que compoem cada output;
-- `ctaStrategyJson`: texto, tom, acao e restricoes do CTA por canal.
+- `ctaStrategyJson`: texto, tom, ação e restrições do CTA por canal.
 
-Estrategia de render:
+Estratégia de render:
 
 - renderizar blocos `core` e cachear seus assets;
-- renderizar blocos especificos por output quando necessario;
-- montar o video final por output usando os blocos comuns e especificos;
-- se a transicao entre blocos for simples, concatenar clips prontos;
-- se a transicao depender de continuidade visual entre duas cenas, re-renderizar a borda afetada ou a sequencia final do output;
-- V1 deve preferir transicoes simples entre blocos variaveis para preservar velocidade, cache e previsibilidade.
+- renderizar blocos específicos por output quando necessário;
+- montar o vídeo final por output usando os blocos comuns e específicos;
+- se a transição entre blocos for simples, concatenar clips prontos;
+- se a transição depender de continuidade visual entre duas cenas, re-renderizar a borda afetada ou a sequencia final do output;
+- V1 deve preferir transições simples entre blocos variáveis para preservar velocidade, cache e previsibilidade.
 
 Exemplos:
 
-- YouTube: CTA pode pedir inscricao no canal;
-- Facebook: CTA pode pedir seguir a pagina;
-- TikTok: CTA pode pedir tocar no botao de seguir do perfil;
-- Shorts/Reels/TikTok podem exigir ritmo, texto em tela e CTA diferentes do video horizontal.
+- YouTube: CTA pode pedir inscrição no canal;
+- Facebook: CTA pode pedir seguir a página;
+- TikTok: CTA pode pedir tocar no botão de seguir do perfil;
+- Shorts/Reels/TikTok podem exigir ritmo, texto em tela e CTA diferentes do vídeo horizontal.
 
 ## Reprocessamento granular
 
 Regras:
 
-- mudou `ttsText`: invalidar audio, clip e final;
+- mudou `ttsText`: invalidar áudio, clip e final;
 - mudou `imagePromptJson`: invalidar imagem, slide, clip e final;
 - mudou `onScreenJson`: invalidar slide, clip e final;
-- mudou `animationPromptJson`: invalidar animacao, clip e final;
+- mudou `animationPromptJson`: invalidar animação, clip e final;
 - mudou `soundEffectPromptJson`: invalidar sound effect, clip e final;
 - mudou template: invalidar slide, clip e final.
 
 Estado atual:
 
 - `PATCH /blocks/:blockId` apaga assets locais afetados por `ttsText`, `onScreenJson`, `imagePromptJson`, `animationPromptJson` e `soundEffectPromptJson`;
-- o asset `sound_effect_audio` ainda nao e gerado, mas o contrato ja esta reservado.
+- o asset `sound_effect_audio` ainda não e gerado, mas o contrato já está reservado.
 
 ## Segurança
 
@@ -799,16 +838,20 @@ V1 local/self-hosted:
 - auth por cookie/JWT;
 - workspace isolation;
 - secrets em `.env`/settings locais;
-- nao commitar chaves API;
-- em producao, HTTPS obrigatorio;
+- não commitar chaves API;
+- em produção, HTTPS obrigatorio;
 - `AUTH_COOKIE_SECURE=true` em HTTPS;
 - secrets fortes para JWT e agent control.
 
-## Decisoes tecnicas
+## Decisões técnicas
 
 - manter monorepo pnpm;
 - manter SQLite na V1 local-first;
-- manter backing Course/Module/Lesson por ora;
 - evitar refactor fisico grande antes do fluxo content-first ficar usavel;
-- usar metadata para campos instaveis ate estabilizar contrato;
+- usar metadata para campos instaveis até estabilizar contrato;
 - adicionar tabelas dedicadas quando houver uso consistente.
+
+Decisao adicional:
+
+- não aceitar novas features ancoradas em nomenclatura ou fluxo de curso/aula/módulo;
+- toda feature nova deve ser defendida em termos de conteúdo, projeto, output, composição, equipe e promoção.

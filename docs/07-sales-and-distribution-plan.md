@@ -2,7 +2,7 @@
 
 ## Posicionamento
 
-FlowShopy e uma ferramenta para criadores e equipes que querem transformar ideias e roteiros em entregaveis publicaveis para multiplas plataformas, com foco inicial em video e evolucao para promocao de produtos.
+FlowShopy é uma ferramenta para criadores e equipes que querem transformar ideias e roteiros em entregáveis publicáveis para múltiplas plataformas, com foco inicial em vídeo e evolução para promoção de produtos.
 
 Mensagem central:
 
@@ -12,30 +12,30 @@ Crie o conteudo uma vez. Gere entregaveis para todos os canais. Promova produtos
 
 ## Publico alvo inicial
 
-- criadores de conteudo;
+- criadores de conteúdo;
 - afiliados;
 - produtores de cursos;
 - social media;
-- pequenos negocios;
+- pequenos negócios;
 - educadores;
 - equipes pequenas de marketing.
-- empreendedores e afiliados que usam conteudo para vender produtos;
-- produtores que precisam trocar ofertas/links sem perder materiais ja publicados.
+- empreendedores e afiliados que usam conteúdo para vender produtos;
+- produtores que precisam trocar ofertas/links sem perder materiais já publicados.
 
 ## Oferta inicial
 
 Produto local-first com assinatura mensal.
 
-O usuario paga pela ferramenta e usa suas proprias chaves de API quando escolher providers cloud.
+O usuário paga pela ferramenta e usa suas próprias chaves de API quando escolher providers cloud.
 
 Beneficios:
 
 - custo previsivel para o produto;
-- usuario controla uso de APIs;
+- usuário controla uso de APIs;
 - menor risco de custo operacional para a empresa;
-- viavel para usuarios com GPU/local setup.
-- conecta producao de conteudo a promocao de produtos;
-- permite estrategia futura de short links redirecionaveis.
+- viavel para usuários com GPU/local setup.
+- conecta produção de conteúdo a promoção de produtos;
+- permite estratégia futura de short links redirecionáveis.
 
 ## Planos sugeridos
 
@@ -43,9 +43,9 @@ Beneficios:
 
 - uso individual;
 - projetos limitados;
-- execucao local;
-- suporte basico;
-- sem automacao de publicacao.
+- execução local;
+- suporte básico;
+- sem automação de publicação.
 
 ### Creator
 
@@ -59,10 +59,10 @@ Beneficios:
 ### Team
 
 - workspaces multiusuario;
-- permissoes;
+- permissões;
 - responsaveis;
 - agenda;
-- publicacao/agendamento;
+- publicação/agendamento;
 - armazenamento maior;
 - suporte prioritario.
 
@@ -74,12 +74,12 @@ Beneficios:
 - treinamento;
 - suporte dedicado.
 
-## Distribuicao
+## Distribuição
 
 ### V1
 
 - instalador ou pacote local;
-- documentacao clara;
+- documentação clara;
 - onboarding guiado;
 - trial manual ou licença simples;
 - comunidade/lista de espera.
@@ -88,7 +88,7 @@ Beneficios:
 
 - site com checkout Stripe;
 - billing portal;
-- licenca por workspace;
+- licença por workspace;
 - atualizador do app;
 - onboarding automatizado.
 
@@ -97,13 +97,13 @@ Beneficios:
 - control plane cloud;
 - workers locais;
 - planos por uso;
-- colaboracao por equipe.
+- colaboração por equipe.
 
 ## Canais de aquisicao
 
-- YouTube demonstrando criacao de videos;
-- conteudo sobre COPE;
-- conteudo sobre maquina de atencao para promocao de produtos;
+- YouTube demonstrando criação de vídeos;
+- conteúdo sobre COPE;
+- conteúdo sobre máquina de atenção para promoção de produtos;
 - comunidades de criadores;
 - afiliados/produtores;
 - parcerias com social medias;
@@ -112,14 +112,14 @@ Beneficios:
 
 ## Onboarding ideal
 
-1. usuario instala;
+1. usuário instala;
 2. cria conta/workspace;
 3. configura Gemini ou Ollama;
 4. configura TTS;
 5. cria primeiro projeto;
 6. cola roteiro/ideia;
 7. gera cenas;
-8. gera primeiro video;
+8. gera primeiro vídeo;
 9. baixa MP4.
 
 Tempo alvo para primeiro valor:
@@ -132,21 +132,21 @@ menos de 30 minutos para primeiro video curto simples
 
 Suporte precisa cobrir:
 
-- setup de dependencias;
+- setup de dependências;
 - GPU/VRAM;
 - providers externos;
 - erros de render;
 - problemas de login;
-- configuracao de API keys;
+- configuração de API keys;
 - backup/restore.
 
-## Metricas de negocio
+## Metricas de negócio
 
-- ativacao: primeiro video renderizado;
-- tempo ate primeiro video;
-- videos renderizados por usuario;
+- ativacao: primeiro vídeo renderizado;
+- tempo até primeiro vídeo;
+- vídeos renderizados por usuário;
 - projetos ativos;
-- conteudos associados a projetos;
+- conteúdos associados a projetos;
 - produtos/ofertas promovidos por projeto;
 - cliques em short links;
 - conversao por short link;
@@ -157,10 +157,10 @@ Suporte precisa cobrir:
 
 ## Riscos comerciais
 
-- setup local pode ser dificil para usuario comum;
+- setup local pode ser dificil para usuário comum;
 - custo de APIs cloud pode assustar;
-- geracao de imagem/video local exige GPU;
-- integracoes sociais podem ter restricoes;
+- geração de imagem/vídeo local exige GPU;
+- integrações sociais podem ter restrições;
 - concorrencia de ferramentas SaaS.
 
 Mitigacoes:
@@ -170,5 +170,5 @@ Mitigacoes:
 - presets seguros;
 - providers opcionais;
 - templates prontos;
-- documentacao enxuta;
+- documentação enxuta;
 - suporte guiado.
