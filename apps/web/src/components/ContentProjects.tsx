@@ -41,6 +41,19 @@ type ProjectStatusFilter = 'all' | 'draft' | 'active' | 'archived';
 type ProjectSortKey = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'content-desc' | 'content-asc';
 type AspectRatio = CompositionAspectRatio;
 type MediaType = 'image' | 'video';
+type ContentSourceMode = 'source' | 'final_content';
+type StoredContentSourceMode = ContentSourceMode | 'provided_script';
+type EditorialState =
+  | 'source_ingested'
+  | 'source_processed'
+  | 'source_analyzed'
+  | 'script_developing'
+  | 'script_ready'
+  | 'output_adapting'
+  | 'output_structuring'
+  | 'production_ready'
+  | 'rendering'
+  | 'ready';
 type StudioChannelFilter = 'all' | string;
 type ProductionStage = 'idea' | 'script' | 'scenes' | 'assets' | 'editing' | 'ready' | 'scheduled' | 'published';
 type OutputStatus =
@@ -60,6 +73,7 @@ type ProjectOutput = {
   mediaType?: MediaType;
   destination: Destination;
   aspectRatio: AspectRatio;
+  transformPrompt?: string;
 };
 
 type ProjectTtsConfig = {
@@ -203,6 +217,8 @@ type ContentItem = {
     destinations?: Destination[];
     aspectRatios?: AspectRatio[];
     productionStage?: ProductionStage;
+    sourceMode?: StoredContentSourceMode;
+    editorialState?: EditorialState;
     plannedPublishAt?: string;
     ownerName?: string;
     thumbnailUrl?: string;
@@ -361,6 +377,45 @@ const STAGE_TONE_CLASSES: Record<ProductionStage, string> = {
   ready: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
   scheduled: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-300',
   published: 'border-green-500/25 bg-green-500/10 text-green-300'
+};
+
+const EDITORIAL_STATES: EditorialState[] = [
+  'source_ingested',
+  'source_processed',
+  'source_analyzed',
+  'script_developing',
+  'script_ready',
+  'output_adapting',
+  'output_structuring',
+  'production_ready',
+  'rendering',
+  'ready'
+];
+
+const EDITORIAL_STATE_LABELS: Record<EditorialState, string> = {
+  source_ingested: 'Source ingested',
+  source_processed: 'Source processed',
+  source_analyzed: 'Source analyzed',
+  script_developing: 'Script developing',
+  script_ready: 'Script ready',
+  output_adapting: 'Output adapting',
+  output_structuring: 'Output structuring',
+  production_ready: 'Production ready',
+  rendering: 'Rendering',
+  ready: 'Ready'
+};
+
+const EDITORIAL_STATE_TONE_CLASSES: Record<EditorialState, string> = {
+  source_ingested: 'border-slate-500/20 bg-slate-500/10 text-slate-300',
+  source_processed: 'border-sky-500/20 bg-sky-500/10 text-sky-300',
+  source_analyzed: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300',
+  script_developing: 'border-indigo-500/20 bg-indigo-500/10 text-indigo-300',
+  script_ready: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
+  output_adapting: 'border-orange-500/20 bg-orange-500/10 text-orange-300',
+  output_structuring: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
+  production_ready: 'border-fuchsia-500/20 bg-fuchsia-500/10 text-fuchsia-300',
+  rendering: 'border-violet-500/20 bg-violet-500/10 text-violet-300',
+  ready: 'border-green-500/20 bg-green-500/10 text-green-300'
 };
 
 const OUTPUT_STATUS_COLUMNS: Array<{ value: OutputStatus; label: string }> = [
@@ -558,22 +613,6 @@ const OUTPUT_CHANNELS: OutputChannel[] = [
         aspectRatio: '9:16'
       }
     ]
-  },
-  {
-    id: 'course',
-    label: 'Course',
-    hint: 'Lesson video',
-    formats: [
-      {
-        id: 'course-video-16-9',
-        channel: 'Course',
-        label: 'Lesson video',
-        mediaType: 'video',
-        hint: '16:9 landscape',
-        destination: 'course',
-        aspectRatio: '16:9'
-      }
-    ]
   }
 ];
 
@@ -735,15 +774,42 @@ function getOutputFormatsByIds(outputIds: string[]): OutputFormat[] {
   return OUTPUT_FORMATS.filter((format) => selectedIds.has(format.id));
 }
 
-function toProjectOutput(format: OutputFormat): ProjectOutput {
+function buildDefaultOutputPrompt(format: OutputFormat): string {
+  if (format.mediaType === 'video') {
+    return [
+      `Transform the shared source text into the final spoken content for a ${format.channel} video in ${format.aspectRatio}.`,
+      `Respect the tone and CTA strategy of the project.`,
+      `Return a script that is ready to be structured into scenes for this specific output.`
+    ].join(' ');
+  }
+  return [
+    `Transform the shared source text into the final content basis for a ${format.channel} image output in ${format.aspectRatio}.`,
+    `The result should describe the message that the image must represent and preserve the project's tone and CTA intent.`,
+    `Return content ready to guide image generation for this specific output.`
+  ].join(' ');
+}
+
+function toProjectOutput(format: OutputFormat, transformPrompt?: string): ProjectOutput {
   return {
     id: format.id,
     channel: format.channel,
     label: format.label,
     mediaType: format.mediaType,
     destination: format.destination,
-    aspectRatio: format.aspectRatio
+    aspectRatio: format.aspectRatio,
+    transformPrompt: transformPrompt?.trim() || buildDefaultOutputPrompt(format)
   };
+}
+
+function getProjectOutputPromptMap(project: Project): Record<string, string> {
+  const outputs = getProjectOutputs(project);
+  const map: Record<string, string> = {};
+  outputs.forEach((output) => {
+    const format = OUTPUT_FORMATS.find((item) => item.id === output.id);
+    if (!format) return;
+    map[output.id] = output.transformPrompt?.trim() || buildDefaultOutputPrompt(format);
+  });
+  return map;
 }
 
 function getProjectOutputs(project: Project): ProjectOutput[] {
@@ -753,7 +819,7 @@ function getProjectOutputs(project: Project): ProjectOutput[] {
   const aspectRatios = getProjectAspectRatios(project);
   return OUTPUT_FORMATS.filter(
     (format) => destinations.includes(format.destination) && aspectRatios.includes(format.aspectRatio)
-  ).map(toProjectOutput);
+  ).map((format) => toProjectOutput(format));
 }
 
 function formatProjectOutput(output: ProjectOutput): string {
@@ -803,6 +869,26 @@ function getItemStage(item: ContentItem): ProductionStage {
   if (stage && STAGES.some((itemStage) => itemStage.value === stage)) return stage;
   if (STAGES.some((itemStage) => itemStage.value === item.status)) return item.status as ProductionStage;
   return item.sourceText?.trim() ? 'script' : 'idea';
+}
+
+function getItemSourceMode(item: ContentItem): ContentSourceMode {
+  return item.metadata?.sourceMode === 'final_content' || item.metadata?.sourceMode === 'provided_script'
+    ? 'final_content'
+    : 'source';
+}
+
+function getItemEditorialState(item: ContentItem): EditorialState {
+  const state = item.metadata?.editorialState;
+  if (state && EDITORIAL_STATES.includes(state)) return state;
+  return getItemSourceMode(item) === 'final_content'
+    ? 'script_ready'
+    : item.sourceText?.trim()
+      ? 'script_developing'
+      : 'source_ingested';
+}
+
+function isItemScriptReady(item: ContentItem): boolean {
+  return getItemEditorialState(item) === 'script_ready';
 }
 
 function getItemAspectRatios(item: ContentItem): AspectRatio[] {
@@ -855,6 +941,11 @@ export default function ContentProjects({
   const [projectDescription, setProjectDescription] = useState('');
   const [projectCoverImageUrl, setProjectCoverImageUrl] = useState('');
   const [selectedOutputIds, setSelectedOutputIds] = useState<string[]>(DEFAULT_PROJECT_OUTPUT_IDS);
+  const [outputPromptById, setOutputPromptById] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      OUTPUT_FORMATS.map((format) => [format.id, buildDefaultOutputPrompt(format)])
+    )
+  );
   const [ttsRouteOptions, setTtsRouteOptions] = useState<TtsRouteOption[]>([]);
   const [imageModelOptions, setImageModelOptions] = useState<VisualModelOption[]>([]);
   const [videoModelOptions, setVideoModelOptions] = useState<VisualModelOption[]>([]);
@@ -870,6 +961,10 @@ export default function ContentProjects({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isCreateContentOpen, setIsCreateContentOpen] = useState(false);
+  const [newContentTitle, setNewContentTitle] = useState('');
+  const [newContentSourceText, setNewContentSourceText] = useState('');
+  const [newContentSourceMode, setNewContentSourceMode] = useState<ContentSourceMode>('source');
   const projectFilterMenuRef = useRef<HTMLDivElement | null>(null);
   const projectSortMenuRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -911,6 +1006,15 @@ export default function ContentProjects({
   const selectedOutputFormats = useMemo(
     () => getOutputFormatsByIds(selectedOutputIds),
     [selectedOutputIds]
+  );
+
+  const selectedOutputPromptEntries = useMemo(
+    () =>
+      selectedOutputFormats.map((format) => ({
+        format,
+        prompt: outputPromptById[format.id] ?? buildDefaultOutputPrompt(format)
+      })),
+    [outputPromptById, selectedOutputFormats]
   );
 
   const selectedTtsRoute = useMemo(
@@ -1225,6 +1329,9 @@ export default function ContentProjects({
     setProjectDescription('');
     setProjectCoverImageUrl('');
     setSelectedOutputIds(DEFAULT_PROJECT_OUTPUT_IDS);
+    setOutputPromptById(
+      Object.fromEntries(OUTPUT_FORMATS.map((format) => [format.id, buildDefaultOutputPrompt(format)]))
+    );
     setPipelineScriptMode('scene_blocks');
     setPipelineAudioMode('tts');
     setPipelineImageMode('generate');
@@ -1243,6 +1350,10 @@ export default function ContentProjects({
     setProjectDescription(project.description ?? '');
     setProjectCoverImageUrl(typeof project.metadata?.coverImageUrl === 'string' ? project.metadata.coverImageUrl : '');
     setSelectedOutputIds(getProjectOutputIds(project));
+    setOutputPromptById((current) => ({
+      ...current,
+      ...getProjectOutputPromptMap(project)
+    }));
     const pipeline = getProjectPipelineConfig(project);
     setPipelineScriptMode(pipeline.script.mode ?? 'scene_blocks');
     setPipelineAudioMode(pipeline.audio.mode ?? 'none');
@@ -1310,7 +1421,7 @@ export default function ContentProjects({
         metadata: {
           defaultDestinations: uniqueValues(outputFormats.map((format) => format.destination)),
           defaultAspectRatios: uniqueValues(outputFormats.map((format) => format.aspectRatio)),
-          defaultOutputs: outputFormats.map(toProjectOutput),
+          defaultOutputs: outputFormats.map((format) => toProjectOutput(format, outputPromptById[format.id])),
           pipeline,
           coverImageUrl: projectCoverImageUrl.trim() || undefined,
           product: 'flowshopy'
@@ -1358,9 +1469,23 @@ export default function ContentProjects({
   };
 
   const toggleOutputFormat = (formatId: string) => {
+    const format = OUTPUT_FORMATS.find((item) => item.id === formatId);
+    if (format) {
+      setOutputPromptById((current) => ({
+        ...current,
+        [formatId]: current[formatId] ?? buildDefaultOutputPrompt(format)
+      }));
+    }
     setSelectedOutputIds((current) =>
       current.includes(formatId) ? current.filter((item) => item !== formatId) : [...current, formatId]
     );
+  };
+
+  const resetCreateContentForm = () => {
+    setNewContentTitle('');
+    setNewContentSourceText('');
+    setNewContentSourceMode('source');
+    setIsCreateContentOpen(false);
   };
 
   const updateItem = async (item: ContentItem, payload: { status?: string; metadata?: Record<string, unknown> }) => {
@@ -1384,14 +1509,60 @@ export default function ContentProjects({
     });
   };
 
+  const markItemScriptReady = async (item: ContentItem) => {
+    await updateItem(item, {
+      status: 'script',
+      metadata: {
+        productionStage: 'script',
+        editorialState: 'script_ready'
+      }
+    });
+  };
+
+  const createContentForProject = async () => {
+    if (!selectedProjectId) return;
+    const title = newContentTitle.trim();
+    const sourceText = newContentSourceText.trim();
+    if (!title) {
+      setError('Digite um título para o conteúdo.');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const editorialState: EditorialState = newContentSourceMode === 'final_content' ? 'script_ready' : sourceText ? 'script_developing' : 'source_ingested';
+      const productionStage: ProductionStage = newContentSourceMode === 'final_content' ? 'script' : sourceText ? 'script' : 'idea';
+      const created = await apiPost<ContentItem>('/content-items', {
+        kind: 'content',
+        title,
+        sourceText,
+        status: productionStage,
+        metadata: {
+          productionStage,
+          sourceMode: newContentSourceMode,
+          editorialState
+        },
+        projectIds: [selectedProjectId]
+      });
+      await Promise.all([loadItems(selectedProjectId), loadProjects(), loadLibraryItems()]);
+      resetCreateContentForm();
+      setStatus(`Content created: ${created.title}.`);
+      await openStudio(created);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create content.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const linkExistingContentToProject = async (item: ContentItem) => {
     if (!selectedProjectId) return;
     setBusy(true);
     setError(null);
     try {
       const projectIds = Array.from(new Set([...(item.projectIds ?? []), selectedProjectId]));
-      const linkedItem = await apiPatch<ContentItem>(`/content-items/${item.id}`, { projectIds });
-      await ensureEditorForItem(linkedItem, { silent: true });
+      await apiPatch<ContentItem>(`/content-items/${item.id}`, { projectIds });
       await Promise.all([loadItems(selectedProjectId), loadProjects(), loadLibraryItems()]);
       setStatus(`Content linked: ${item.title}.`);
       if (projectIds.length > 0) {
@@ -1470,6 +1641,15 @@ export default function ContentProjects({
     const editorEntityId = item.metadata?.backing?.lessonId;
     if (!editorEntityId || !onOpenEditor) return;
     onOpenEditor({ editorEntityId, title: item.title });
+  };
+
+  const openLegacyEditor = async (item: ContentItem) => {
+    const editorEntityId = item.metadata?.backing?.lessonId;
+    if (editorEntityId) {
+      openEditorForItem(item);
+      return;
+    }
+    await ensureEditorForItem(item, { openWhenReady: true });
   };
 
   const ensureEditorForItem = async (item: ContentItem, options?: { openWhenReady?: boolean; silent?: boolean }) => {
@@ -1743,12 +1923,31 @@ export default function ContentProjects({
             <Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/10 text-cyan-300">
               Content
             </Badge>
+            <Badge variant="outline" className="border-border bg-background/60 text-foreground">
+              {getItemSourceMode(item) === 'final_content' ? 'Final content' : 'Source mode'}
+            </Badge>
+            <Badge variant="secondary" className={EDITORIAL_STATE_TONE_CLASSES[getItemEditorialState(item)]}>
+              {EDITORIAL_STATE_LABELS[getItemEditorialState(item)]}
+            </Badge>
             <Badge variant="secondary" className={STAGE_TONE_CLASSES[getItemStage(item)]}>
               {STAGES.find((stage) => stage.value === getItemStage(item))?.label ?? getItemStage(item)}
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{item.sourceText}</p>
         </div>
+        {!isItemScriptReady(item) && item.sourceText?.trim() ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(event) => {
+              event.stopPropagation();
+              void markItemScriptReady(item);
+            }}
+            disabled={busy}
+          >
+            Mark script ready
+          </Button>
+        ) : null}
       </div>
       </article>
     );
@@ -1756,7 +1955,9 @@ export default function ContentProjects({
   const renderStudio = () => {
     const selectedTarget = promotionTargets[0] ?? null;
     const selectedBacking = selectedStudioItem?.metadata?.backing ?? null;
-    const selectedItemHasEditor = Boolean(selectedBacking?.lessonId && onOpenEditor);
+    const selectedItemHasLegacyEditor = Boolean(selectedBacking?.lessonId && onOpenEditor);
+    const selectedEditorialState = selectedStudioItem ? getItemEditorialState(selectedStudioItem) : null;
+    const selectedItemScriptReady = selectedStudioItem ? isItemScriptReady(selectedStudioItem) : false;
     const visibleOutputColumns = OUTPUT_STATUS_COLUMNS.map((column) => ({
       ...column,
       items: selectedOutputColumns.find((candidate) => candidate.value === column.value)?.items ?? []
@@ -1776,15 +1977,31 @@ export default function ContentProjects({
               </button>
               <div>
                 <h2 className="text-3xl font-bold leading-tight text-slate-800 dark:text-white">{selectedStudioItem?.title ?? 'Content'}</h2>
+                {selectedEditorialState ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="border-border bg-background/60 text-foreground">
+                      {selectedStudioItem && getItemSourceMode(selectedStudioItem) === 'final_content' ? 'Final content' : 'Source mode'}
+                    </Badge>
+                    <Badge variant="secondary" className={EDITORIAL_STATE_TONE_CLASSES[selectedEditorialState]}>
+                      {EDITORIAL_STATE_LABELS[selectedEditorialState]}
+                    </Badge>
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {selectedStudioItem ? (
+              {selectedStudioItem && !selectedItemScriptReady && selectedStudioItem.sourceText?.trim() ? (
+                <Button variant="default" onClick={() => markItemScriptReady(selectedStudioItem)} disabled={busy}>
+                  Mark script ready
+                </Button>
+              ) : null}
+              {selectedStudioItem && onOpenEditor ? (
                 <Button
-                  onClick={() => openEditorForItem(selectedStudioItem)}
-                  disabled={busy || !selectedItemHasEditor}
+                  variant="outline"
+                  onClick={() => openLegacyEditor(selectedStudioItem)}
+                  disabled={busy}
                 >
-                  {selectedItemHasEditor ? 'Open Editor' : 'Editor Initializing'}
+                  {selectedItemHasLegacyEditor ? 'Open Legacy Editor' : 'Enable Legacy Editor'}
                 </Button>
               ) : null}
             </div>
@@ -1872,15 +2089,19 @@ export default function ContentProjects({
                   <div>
                     <h3 className="font-bold">Selected Output</h3>
                     <p className="text-sm text-muted-foreground">
-                      {!selectedItemHasEditor
-                        ? 'Prepare o editor para iniciar o fluxo deste conteúdo.'
+                      {!selectedItemScriptReady
+                        ? 'Este conteúdo ainda não chegou a script_ready. Finalize a etapa editorial antes de preparar o output.'
                         : selectedProjectContentOutput
-                          ? `${selectedProjectContentOutput.channel} • ${selectedProjectContentOutput.aspectRatio} • ${selectedProjectContentOutput.presetId}`
-                          : 'Selecione um card do kanban para ver detalhes.'}
+                        ? `${selectedProjectContentOutput.channel} • ${selectedProjectContentOutput.aspectRatio} • ${selectedProjectContentOutput.presetId}`
+                        : 'Selecione um card do kanban para ver detalhes.'}
                     </p>
                   </div>
                   {selectedProjectContentOutput && selectedStudioItem ? (
-                    <Button variant="outline" onClick={() => generateNarrative(selectedProjectContentOutput, selectedStudioItem)} disabled={busy}>
+                    <Button
+                      variant="outline"
+                      onClick={() => generateNarrative(selectedProjectContentOutput, selectedStudioItem)}
+                      disabled={busy || !selectedItemScriptReady}
+                    >
                       Build Narrative
                     </Button>
                   ) : null}
@@ -1915,11 +2136,11 @@ export default function ContentProjects({
                   </div>
                 ) : (
                   <div className="mt-4 rounded-[5px] border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                    {selectedStudioItem && selectedProjectContentOutput
+                    {!selectedItemScriptReady
+                      ? 'Conteúdo ainda em preparação editorial. Quando chegar a script_ready, o output poderá ser preparado aqui.'
+                      : selectedStudioItem && selectedProjectContentOutput
                       ? 'Ainda nao existe narrativa para este entregável.'
-                      : selectedStudioItem && selectedItemHasEditor
-                        ? 'Abra o editor para iniciar o fluxo deste conteúdo.'
-                        : 'Prepare o editor para começar o fluxo deste conteúdo.'}
+                      : 'Selecione um output e gere a narrativa inicial para começar o fluxo deste conteúdo.'}
                   </div>
                 )}
 
@@ -2427,6 +2648,48 @@ export default function ContentProjects({
               </div>
             </div>
 
+            <div className="border border-border rounded-md bg-background p-4 space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="font-bold">Preparation prompts by output</h3>
+                  <p className="text-sm text-muted-foreground">Último passo de `Preparation`: cada combinação canal + formato usa seu próprio prompt para transformar o texto bruto em conteúdo final do entregável.</p>
+                </div>
+                <Badge variant="outline" className="w-fit">
+                  {selectedOutputPromptEntries.length} prompt{selectedOutputPromptEntries.length === 1 ? '' : 's'}
+                </Badge>
+              </div>
+
+              {selectedOutputPromptEntries.length > 0 ? (
+                <div className="space-y-4">
+                  {selectedOutputPromptEntries.map(({ format, prompt }) => (
+                    <section key={format.id} className="rounded-md border border-border bg-card/60 p-3 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">{format.channel}</Badge>
+                        <Badge variant="outline">{format.aspectRatio}</Badge>
+                        <span className="text-sm font-semibold">{format.label}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{format.hint}</p>
+                      <textarea
+                        value={prompt}
+                        onChange={(event) =>
+                          setOutputPromptById((current) => ({
+                            ...current,
+                            [format.id]: event.target.value
+                          }))
+                        }
+                        rows={4}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      />
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[5px] border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                  Select at least one output to configure its preparation prompt.
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"
@@ -2521,6 +2784,9 @@ export default function ContentProjects({
                       <p className="text-sm text-muted-foreground">{items.length} associated content item{items.length === 1 ? '' : 's'}</p>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button variant="default" size="sm" onClick={() => setIsCreateContentOpen((current) => !current)}>
+                        <Plus size={14} /> Create content
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => setIsLinkExistingOpen((current) => !current)}>
                         <Plus size={14} /> Link existing
                       </Button>
@@ -2530,11 +2796,86 @@ export default function ContentProjects({
                     </div>
                   </div>
 
+                  {isCreateContentOpen && (
+                    <div className="rounded-[6px] border border-border bg-card p-4 space-y-4">
+                      <div>
+                        <h4 className="font-semibold">Create content for this project</h4>
+                        <p className="text-sm text-muted-foreground">Crie um conteúdo novo já associado ao projeto. Escolha se ele entra como fonte bruta ou como script já pronto para seguir na esteira correta.</p>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => setNewContentSourceMode('source')}
+                          className={`rounded-[6px] border px-4 py-3 text-left transition-colors ${
+                            newContentSourceMode === 'source'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border bg-background hover:border-primary/40'
+                          }`}
+                        >
+                          <div className="font-semibold">Source mode</div>
+                          <div className="mt-1 text-xs text-muted-foreground">Ideia, rascunho ou matéria-prima que ainda precisa chegar a script_ready.</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewContentSourceMode('final_content')}
+                          className={`rounded-[6px] border px-4 py-3 text-left transition-colors ${
+                            newContentSourceMode === 'final_content'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border bg-background hover:border-primary/40'
+                          }`}
+                        >
+                          <div className="font-semibold">Final content</div>
+                          <div className="mt-1 text-xs text-muted-foreground">Conteúdo final já resolvido para as saídas esperadas, entrando direto mais perto do estado `script_ready`.</div>
+                        </button>
+                      </div>
+                      <label className="block space-y-2">
+                        <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Title</span>
+                        <input
+                          value={newContentTitle}
+                          onChange={(event) => setNewContentTitle(event.target.value)}
+                          placeholder="Ex.: Oferta relâmpago de inverno"
+                          className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                        />
+                      </label>
+                      <label className="block space-y-2">
+                        <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                          {newContentSourceMode === 'final_content' ? 'Final content text' : 'Source text'}
+                        </span>
+                        <textarea
+                          value={newContentSourceText}
+                          onChange={(event) => setNewContentSourceText(event.target.value)}
+                          placeholder={
+                            newContentSourceMode === 'final_content'
+                              ? 'Cole o conteúdo final que já deve ser tratado como ponto de partida aprovado para este fluxo.'
+                              : 'Cole a ideia, briefing, rascunho ou matéria-prima que deve evoluir até script.'
+                          }
+                          rows={7}
+                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <div className="rounded-[6px] border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                        Estado inicial esperado:
+                        {' '}
+                        <span className="font-semibold text-foreground">
+                          {newContentSourceMode === 'final_content' ? 'script_ready' : newContentSourceText.trim() ? 'script_developing' : 'source_ingested'}
+                        </span>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={resetCreateContentForm} disabled={busy}>
+                          Cancel
+                        </Button>
+                        <Button onClick={createContentForProject} disabled={busy || !newContentTitle.trim()}>
+                          Create and open Studio
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {isLinkExistingOpen && (
                     <div className="rounded-[6px] border border-border bg-card p-4 space-y-4">
                       <div>
                         <h4 className="font-semibold">Link existing content</h4>
-                        <p className="text-sm text-muted-foreground">Associe conteúdo já existente da biblioteca a este projeto. A criação do conteúdo continua sendo feita no menu Content.</p>
+                        <p className="text-sm text-muted-foreground">Associe conteúdo já existente da biblioteca a este projeto sem recriar o texto base.</p>
                       </div>
                       {linkableLibraryItems.length > 0 ? (
                         <div className="space-y-2">
@@ -2566,7 +2907,7 @@ export default function ContentProjects({
                   {items.map(renderContentItem)}
                   {items.length === 0 && (
                     <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6">
-                      No associated content. Create content in the Content menu and link it here to this project.
+                      No associated content yet. Create a new content item here or link an existing one to start the Studio flow.
                     </div>
                   )}
                 </section>

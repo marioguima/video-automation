@@ -115,7 +115,8 @@ Input source
   -> Script development
   -> Script ready
   -> Project association / project context
-  -> ProjectContentOutput
+  -> Start project flow
+  -> ProjectContentOutput queue
   -> Output adaptation
   -> Output structure
   -> Composition
@@ -135,6 +136,8 @@ Leitura correta de cada etapa:
 - `ContentItem`: unidade editorial principal que representa o conteúdo dentro da esteira;
 - `Project association`: um mesmo conteúdo pode servir a um, vários ou nenhum projeto;
 - `Project context`: marca, produto promovido, CTA, destinos, formatos, estilo e intenção declarada do que deve ser produzido;
+- `Start project flow`: comando principal de início do projeto ou do conteúdo associado;
+- `ProjectContentOutput queue`: fila real de outputs respeitando limites de hardware e prioridade;
 - `ProjectContentOutput`: entregável concreto por canal, formato e objetivo;
 - `Output adaptation`: adaptação do script-base para a linguagem final do output;
 - `Output structure`: quebra do output em cenas, cards, páginas, seções ou blocos;
@@ -148,12 +151,18 @@ Princípio central:
 - link de vídeo, áudio, PDF e texto não exigem produtos diferentes;
 - eles apenas entram em posições diferentes da mesma esteira;
 - vários formatos de entrada precisam convergir para texto analisável e depois para script aprovado.
+- a preparação inicial do conteúdo é compartilhada por todos os outputs derivados;
+- a criação por output só deve começar quando o conteúdo já estiver pronto para isso.
 
 Regra de UX derivada:
 
 - a tela `Content` e o lugar de criar e editar matéria-prima;
 - a tela `Project` e o lugar de associar conteúdo, escolher output e orquestrar a fábrica;
 - `Studio` existe dentro do projeto para operar sobre conteúdo associado, não para substituir a área de escrita de conteúdo.
+- a visão principal do projeto não deve ser um pseudo-editor por output;
+- o editor de vídeo e o lugar real para blocos, prompts, ajustes e preview composicional.
+- se o modo escolhido for `final content`, a tela principal também precisa deixar claro quais outputs ainda estão sem conteúdo final.
+- se o modo escolhido for `source`, a tela principal também precisa deixar claro que cada output usará um prompt próprio de transformação.
 
 ### Estrutura semântica
 
@@ -181,6 +190,18 @@ Regra:
   - script desenvolvido a partir da fonte;
   - script pronto fornecido pelo usuário;
   - script específico já definido para um output.
+
+Regra adicional:
+
+- a atual noção de `Build Narrative` não deve sobreviver como um botão genérico acoplado a uma visão ambígua;
+- tecnicamente, ela precisa ser decomposta em:
+  - preparação do conteúdo;
+  - adaptação do script para o output;
+  - estruturação operacional do output;
+  - composição quando o output for audiovisual.
+- em `final content mode`, a etapa de adaptação pode ser reduzida, mas a verificação de cobertura por output continua obrigatória.
+- em `source mode`, a adaptação precisa ser guiada por prompts específicos de cada combinação `canal + formato`.
+- a aplicação desses prompts por saída fecha a fase `Preparation` e só depois libera `Creation`.
 
 ### Entidades alvo
 
@@ -234,6 +255,12 @@ Antes da composição, o sistema precisa aceitar estruturas operacionais diferen
 - carousel: cards/páginas;
 - e-book/PDF: capítulos, seções e blocos de leitura;
 - áudio: segmentos de narração e marcações de ritmo.
+
+Isso implica:
+
+- a preparação compartilhada do conteúdo não pertence ao editor de vídeo;
+- o preview principal de composição também não pertence à visão resumida do projeto;
+- o preview composicional deve existir no editor de vídeo quando o output já estiver em fase de criação.
 
 ### Componentes e presets
 

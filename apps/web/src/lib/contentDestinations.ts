@@ -5,8 +5,7 @@ export type Destination =
   | 'instagram_reels'
   | 'instagram_feed'
   | 'facebook_feed'
-  | 'facebook_video'
-  | 'course';
+  | 'facebook_video';
 
 export const DESTINATIONS: Array<{ value: Destination; label: string; hint: string }> = [
   { value: 'youtube', label: 'YouTube', hint: 'Long video' },
@@ -15,8 +14,7 @@ export const DESTINATIONS: Array<{ value: Destination; label: string; hint: stri
   { value: 'instagram_reels', label: 'Reels', hint: 'Vertical' },
   { value: 'instagram_feed', label: 'Instagram Feed', hint: 'Image/video' },
   { value: 'facebook_feed', label: 'Facebook Feed', hint: 'Image/feed' },
-  { value: 'facebook_video', label: 'Facebook Video', hint: 'Video/feed' },
-  { value: 'course', label: 'Course', hint: 'Lesson' }
+  { value: 'facebook_video', label: 'Facebook Video', hint: 'Video/feed' }
 ];
 
 export const DEFAULT_PROJECT_DESTINATIONS: Destination[] = ['youtube', 'youtube_shorts', 'instagram_reels'];

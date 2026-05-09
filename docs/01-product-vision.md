@@ -109,41 +109,67 @@ O que varia é apenas:
 
 Leitura de produto sugerida:
 
-1. `source_ingested`
-2. `source_processed`
-3. `source_analyzed`
-4. `script_developing`
-5. `script_ready`
-6. `output_adapting`
-7. `output_structuring`
-8. `production_ready`
-9. `rendering`
-10. `ready`
+1. `preparation`
+2. `creation`
+3. `review`
+4. `publication`
+
+Leitura correta:
+
+- `preparation` é a fase compartilhada do conteúdo, antes de existir script final por entregável;
+- `creation` é a fase em que cada entregável já pode ser produzido;
+- `review` é a fase de validação humana e ajustes finais;
+- `publication` é a fase operacional de distribuição.
+
+Os estados detalhados vivem dentro dessas fases.
+
+Exemplos de estados:
+
+- `preparation`
+  - `source_ingested`
+  - `downloading_video`
+  - `extracting_audio`
+  - `transcribing`
+  - `extracting_text`
+  - `source_processed`
+  - `source_analyzed`
+  - `script_developing`
+  - `script_ready`
+- `creation`
+  - `output_adapting`
+  - `output_structuring`
+  - `production_ready`
+  - `rendering`
+  - `ready`
+- `review`
+  - `in_review`
+  - `changes_requested`
+  - `approved`
+- `publication`
+  - `queued_for_publish`
+  - `scheduled`
+  - `published`
 
 Definição de cada etapa:
 
-- `source_ingested`: o usuário enviou ou registrou um insumo;
-- `source_processed`: o sistema extraiu o que precisava do formato de entrada;
-- `source_analyzed`: o material já foi lido editorialmente e pode orientar criação;
-- `script_developing`: o script está sendo escrito, refinado ou transformado com ajuda humana/IA;
-- `script_ready`: existe um script aprovado para seguir;
-- `output_adapting`: o script está sendo adaptado para um entregável específico;
-- `output_structuring`: o entregável já está sendo quebrado em cenas, cards, páginas, seções ou blocos;
-- `production_ready`: prompts, composição e plano operacional já estão definidos;
-- `rendering`: geração de assets e render final em andamento;
-- `ready`: entregável pronto.
+- `preparation`: fase em que diferentes entradas convergem para texto útil e, depois, para script;
+- `creation`: fase em que cada output já sabe o que precisa fazer com esse script;
+- `review`: fase em que o usuário aprova, corrige ou pede nova rodada;
+- `publication`: fase em que o material pronto é distribuído, agendado ou publicado.
 
 Princípio obrigatório:
 
 - o produto não deve tratar link de vídeo, áudio, PDF e texto como produtos diferentes;
 - o produto deve tratar esses inputs como estados diferentes de uma mesma esteira de transformação editorial.
+- a preparação inicial pertence ao conteúdo e é compartilhada por todos os entregáveis daquele conteúdo;
+- a criação de cada output só começa depois que o conteúdo já chegou ao ponto necessário para gerar script ou usar um script já fornecido.
 
 ### Convergência em script
 
 Existem duas entradas principais para a esteira:
 
 - `source mode`: o usuário fornece matéria-prima e o FlowShopy ajuda a desenvolver o script;
-- `provided script mode`: o usuário já fornece o script pronto e pula etapas anteriores.
+- `final content mode`: o usuário já fornece o conteúdo final esperado para cada saída e pula etapas anteriores.
 
 Esses dois modos não criam naturezas diferentes de conteúdo. Eles apenas colocam o conteúdo em pontos diferentes da esteira.
 
@@ -152,6 +178,14 @@ Regra de produto:
 - todo conteúdo que vai gerar output precisa chegar a `script_ready`;
 - se o usuário já trouxe o script pronto, isso só significa que etapas anteriores já vieram resolvidas;
 - o momento de ser tratado como script sempre existe.
+
+Regra importante:
+
+- `source mode` e `final content mode` são decisão do usuário, não do formato de saída;
+- em `final content mode`, o usuário não entrega apenas um script genérico do conteúdo;
+- ele precisa entregar o conteúdo final esperado para cada saída configurada no projeto;
+- se o projeto pede YouTube `16:9` e `9:16`, os dois scripts precisam existir;
+- o mesmo raciocínio vale para outras saídas, inclusive imagem, carousel, áudio e PDF quando esses formatos estiverem ativos.
 
 ### Script master e scripts por output
 
@@ -174,6 +208,34 @@ Por isso, o produto deve distinguir:
 - matéria-prima;
 - script-base aprovado;
 - script adaptado por output.
+
+Regra derivada:
+
+- `source mode` pode começar com uma única matéria-prima compartilhada;
+- `final content mode` já entra com versões finais por output esperado;
+- se faltar script para uma saída obrigatória do projeto, aquela saída não está pronta para entrar em `Creation`.
+
+### Prompts por saída
+
+Depois que o conteúdo em `source mode` chega a texto bruto utilizável, ele ainda não é conteúdo final.
+
+Nesse momento, o FlowShopy precisa processar esse texto com um prompt específico para cada saída configurada no projeto.
+
+Exemplo:
+
+- canal 1 + formato 1 = prompt 1;
+- canal 1 + formato 2 = prompt 2;
+- canal 2 + formato 1 = prompt 3;
+- canal 2 + formato 2 = prompt 4.
+
+Se o projeto tiver 3 canais e 2 formatos ativos, o sistema precisa trabalhar com 6 prompts de saída.
+
+Regra:
+
+- o texto bruto compartilhado pertence à fase `Preparation`;
+- a geração do conteúdo final por saída é o último passo da fase `Preparation`;
+- cada combinação `canal + formato` deve ter seu próprio prompt;
+- esses prompts podem nascer pré-cadastrados pela ferramenta, para reduzir carga operacional do usuário.
 
 ## Escopo da V1
 
@@ -225,6 +287,8 @@ Regra:
 
 - cada tipo de entrada pode exigir etapas diferentes de ingestão e preparação;
 - o usuário precisa enxergar que o sistema está levando aquele input até o estado em que ele possa virar script.
+- se o usuário escolher `final content mode`, a experiência precisa deixar claro quais saídas ainda estão sem conteúdo final correspondente.
+- se o usuário escolher `source mode`, a experiência precisa deixar claro que o texto bruto será transformado por prompts específicos de cada saída configurada.
 
 Regra de UX:
 
@@ -255,6 +319,14 @@ Regra adicional:
 
 - o editor não é o lugar de extrair fonte bruta nem de decidir se o conteúdo já virou script;
 - ele entra depois que já existe um output de vídeo e depois que o sistema já tem material suficiente para operar aquele output.
+- o preview composicional principal pertence ao editor de vídeo;
+- a visão de projeto não deve tentar simular o editor com um pseudo-preview técnico isolado.
+
+Princípio de interação:
+
+- o usuário não deve precisar tomar dezenas de microdecisões por output na visão principal do projeto;
+- a visão principal do projeto deve priorizar clareza de fase, estado e capacidade de disparo do fluxo;
+- a edição detalhada de blocos, prompts e pré-visualização pertence ao editor de vídeo.
 
 ### Feed
 
@@ -282,22 +354,62 @@ Visão de produção.
 
 Colunas iniciais:
 
-- Source
-- Analysis
-- Script
-- Scenes
-- Assets
-- Editing
-- Ready
-- Scheduled
-- Published
+- Preparation
+- Creation
+- Review
+- Publication
 
 Leitura correta:
 
-- `Source` cobre ingestão, extração e preparação da matéria-prima;
-- `Analysis` cobre entendimento editorial e desenvolvimento até script;
-- `Script` indica que o conteúdo já está apto para adaptação por output;
-- as demais colunas representam a produção do entregável.
+- `Preparation` cobre ingestão, extração, transcrição, análise e desenvolvimento até `script_ready`;
+- `Creation` cobre adaptação por output, estruturação, geração de assets e render;
+- `Review` cobre aprovação humana e ajustes;
+- `Publication` cobre agendamento, publicação e reconciliação operacional.
+
+Regra:
+
+- fases do Kanban não são iguais aos estados internos;
+- cada card precisa mostrar em qual fase está e qual estado detalhado está executando naquele momento.
+- se o conteúdo estiver em `provided script mode`, o Kanban também precisa deixar claro quais entregáveis já têm script final e quais ainda não têm.
+
+Exemplo:
+
+- fase: `Preparation`
+- estado: `downloading_video`
+
+Outro exemplo:
+
+- fase: `Preparation`
+- estado: `transcribing`
+
+Outro exemplo:
+
+- fase: `Creation`
+- estado: `output_structuring`
+
+Outro exemplo:
+
+- fase: `Creation`
+- estado: `rendering`
+
+### Disparo do fluxo
+
+Depois que o projeto estiver configurado, a interação principal não deve ser clicar manualmente em cada output para avançar o processo.
+
+Princípio:
+
+- o projeto deve ter um comando principal de início, como `Iniciar`;
+- esse comando dispara a esteira do conteúdo e dos entregáveis daquele projeto;
+- a execução real pode seguir em fila por limitações de hardware e prioridades locais;
+- a visão do projeto deve mostrar progresso, fase, estado e pontos de intervenção humana.
+
+Intervenções humanas esperadas:
+
+- revisar conteúdo em preparação;
+- aprovar script;
+- preencher ou revisar scripts faltantes por saída quando o modo escolhido for `provided script`;
+- ajustar prompts e blocos no editor;
+- aprovar ou corrigir entregáveis em revisão.
 
 ## Templates e estratégia de seleção
 

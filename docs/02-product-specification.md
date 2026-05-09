@@ -120,16 +120,30 @@ Observação: conteúdo é uma entidade independente de projeto. A associação 
 
 Estados editoriais sugeridos:
 
-- `source_ingested`
-- `source_processed`
-- `source_analyzed`
-- `script_developing`
-- `script_ready`
-- `output_adapting`
-- `output_structuring`
-- `production_ready`
-- `rendering`
-- `ready`
+- fase `preparation`
+  - `source_ingested`
+  - `downloading_video`
+  - `extracting_audio`
+  - `transcribing`
+  - `extracting_text`
+  - `source_processed`
+  - `source_analyzed`
+  - `script_developing`
+  - `script_ready`
+- fase `creation`
+  - `output_adapting`
+  - `output_structuring`
+  - `production_ready`
+  - `rendering`
+  - `ready`
+- fase `review`
+  - `in_review`
+  - `changes_requested`
+  - `approved`
+- fase `publication`
+  - `queued_for_publish`
+  - `scheduled`
+  - `published`
 
 Status de produção sugeridos:
 
@@ -149,7 +163,7 @@ Fonte usada para criar ou enriquecer o conteúdo.
 Tipos:
 
 - `idea`
-- `provided_script`
+- `final_content`
 - `text`
 - `audio`
 - `video_file`
@@ -238,8 +252,14 @@ Regras:
 
 - `master_script` e o script-base aprovado do conteúdo;
 - `output_script` e a adaptação do script para um output específico;
-- `provided script mode` não cria outro tipo de conteúdo; apenas coloca o conteúdo mais adiante na esteira;
+- `final content mode` não cria outro tipo de conteúdo; apenas coloca o conteúdo mais adiante na esteira;
 - o sistema deve permitir revisão humana antes de outputs seguirem para produção.
+- `script_ready` ainda pertence ao conteúdo, não ao output;
+- a produção por output só começa depois dessa convergência, salvo quando o usuário já forneceu script específico aprovado.
+- `source mode` e `final content mode` são decisão do usuário, não do formato de saída;
+- em `final content mode`, o sistema deve conseguir verificar se todos os outputs obrigatórios do projeto já receberam seus conteúdos finais;
+- quando um projeto exigir múltiplas saídas, `script_ready` do conteúdo não deve significar que todos os outputs já estão prontos para `Creation`;
+- para entrar em `Creation`, cada `ProjectContentOutput` precisa ter seu próprio script final resolvido.
 
 ### ProjectOutputDefinition
 
@@ -341,6 +361,18 @@ Regras:
 - partes específicas de canal devem ser renderizadas separadamente quando isso reduzir custo e tempo.
 - um output pode usar script derivado do conteúdo-base ou script específico já fornecido pelo usuário;
 - o output precisa saber qual preset/template foi escolhido e por qual estratégia.
+- o output não deve ser a unidade responsável pela preparação inicial do conteúdo;
+- download de vídeo, extração de áudio, transcrição e extração de texto ainda pertencem à fase de preparação compartilhada do conteúdo.
+- quando o projeto estiver em `final content mode`, cada output deve poder apontar explicitamente para o conteúdo final correspondente;
+- se um output obrigatório não tiver script final, ele deve permanecer fora da fase `Creation`.
+
+Regra adicional:
+
+- em `source mode`, cada `ProjectContentOutput` precisa ter um prompt próprio de transformação;
+- esse prompt é definido por combinação `canal + formato`;
+- a ferramenta pode fornecer prompts padrão como ponto de partida;
+- na fase atual do projeto, esses prompts devem ficar visíveis ao usuário para aprendizado e validação.
+- a execução desses prompts ainda pertence ao fechamento da fase `Preparation`;
 
 Estados sugeridos para outputs:
 
@@ -395,6 +427,27 @@ Regras:
 - um projeto pode habilitar múltiplos templates por saída;
 - a estratégia de seleção deve ser rastreável;
 - o usuário precisa conseguir decidir se quer repetição fixa, variação controlada ou rotação automática.
+
+### Orquestração de projeto
+
+A visão principal do projeto não deve obrigar o usuário a avançar manualmente output por output com uma sequência de botões.
+
+Campos conceituais:
+
+- `startPolicy`
+- `queuePolicyJson`
+- `humanGatePolicyJson`
+- `automationPolicyJson`
+
+Regras:
+
+- o projeto precisa aceitar um comando principal de início;
+- esse comando deve disparar a esteira para todos os entregáveis elegíveis;
+- a execução pode ser serial, paralela limitada ou baseada em fila, conforme hardware e regras locais;
+- pontos de revisão humana continuam existindo, mas o avanço operacional não deve depender de dezenas de cliques fragmentados.
+- antes de disparar `Creation`, o sistema precisa validar se:
+  - a preparação compartilhada do conteúdo terminou;
+  - ou, no caso de `final content mode`, se os conteúdos finais exigidos por saída já foram fornecidos.
 
 ### DeliveryChannel
 

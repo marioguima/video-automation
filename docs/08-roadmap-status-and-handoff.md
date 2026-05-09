@@ -392,6 +392,8 @@ O que ainda está enganando e precisa ser tratado como transição:
 - a UI de `ContentProjects` ainda oferece canal/output `course`, o que contradiz a direção do produto;
 - `ContentItem.kind` ainda nasce com default antigo e não representa bem a ideia de conteúdo genérico;
 - a geração de `NarrativeUnit`/`Composition` existe, mas a segmentação e a geração de assets ainda estão acopladas ao pipeline legado;
+- a visão atual de `Selected Output` e o botão `Build Narrative` ainda simplificam demais uma etapa que na prática depende da fase do conteúdo e do tipo de entregável;
+- o preview técnico atual não representa o editor de vídeo real e não deve ser confundido com a experiência final de edição;
 - equipe existe hoje como convites e papéis básicos, não como autorização completa por ação;
 - `Agenda` já existiu como metadata, mas não tem base operacional real e não deve voltar cedo.
 
@@ -402,6 +404,12 @@ Leitura correta:
 - toda decisao agora deve reduzir dependência visível do modelo antigo e aumentar confiança no fluxo `Content -> Project -> Output -> Studio -> Render`.
 - para output de vídeo, o `Studio`/editor precisa entrar cedo no fluxo e não apenas no fim da pipeline.
 - formatos de entrada diferentes não significam pipelines diferentes; eles apenas entram em estágios diferentes da mesma esteira até chegar a `script_ready`.
+- a preparação do conteúdo vem antes da criação dos outputs e é compartilhada por eles;
+- a visão principal do projeto deve priorizar fase, estado, fila e capacidade de disparo, não microdecisões manuais por output.
+- `source mode` e `final content mode` são decisão do usuário, não do formato;
+- em `final content mode`, o sistema precisa validar cobertura de conteúdo final por saída antes de entrar em `Creation`;
+- em `source mode`, o sistema precisa aplicar prompts próprios por combinação `canal + formato`.
+- a aplicação desses prompts por saída é o último passo da fase `Preparation`.
 
 ## Definição de beta funcional
 
@@ -416,13 +424,14 @@ O beta deve permitir:
 5. registrar claramente se o conteúdo ainda está em fonte bruta ou já está em script;
 6. associar conteúdo a um projeto;
 7. configurar pipeline, outputs e regras mínimas do projeto;
-8. materializar um `ProjectContentOutput` de vídeo;
-9. entrar no `Studio`/editor assim que esse output de vídeo existir;
-10. gerar adaptação/estrutura inicial do output no `Studio`;
-11. ajustar prompts, revisar previews e acompanhar as fases do output dentro do editor;
-12. seguir para segmentação/geração de assets/vídeo sem expor `course/module/lesson` ao usuário;
-13. baixar o resultado final;
-14. convidar pelo menos um membro/admin para o workspace.
+8. disparar o fluxo do projeto por um comando principal de início;
+9. colocar conteúdos e outputs em fila respeitando fase e limitação de hardware;
+10. materializar um `ProjectContentOutput` de vídeo quando o conteúdo já estiver pronto para criação;
+11. entrar no `Studio`/editor assim que esse output de vídeo existir;
+12. ajustar prompts, revisar blocos e acompanhar as fases do output dentro do editor;
+13. seguir para segmentação/geração de assets/vídeo sem expor `course/module/lesson` ao usuário;
+14. baixar o resultado final;
+15. convidar pelo menos um membro/admin para o workspace.
 
 Coisas que não precisam bloquear o beta:
 
@@ -462,6 +471,8 @@ Ações:
 - introduzir formalmente a esteira `source -> processed -> analyzed -> script_ready -> output`;
 - padronizar `ContentItem` como conteúdo genérico e não classificação de mídia;
 - introduzir distinção entre fonte, script-base e script por output;
+- distinguir `script_ready` do conteúdo e `final_content_coverage_ready` por output quando o modo escolhido for `final content`;
+- introduzir prompts padrão por combinação `canal + formato` para o fluxo `source mode`;
 - mover o máximo possível de decisao de saída para `ProjectOutputDefinition` e `ProjectContentOutput`;
 - definir o status mínimo desses objetos para o beta;
 - deixar claro onde mora `pipeline` hoje e o que ainda permanece em `metadata` por conveniência.
@@ -477,10 +488,11 @@ Objetivo: fazer o caminho principal funcionar de ponta a ponta.
 Ações:
 
 - usar `ProjectContentOutput` como entidade central do `Studio`;
-- garantir: projeto -> conteúdo associado -> script_ready -> outputs -> studio/editor -> adaptação -> estrutura -> composition -> produção;
+- garantir: projeto -> conteúdo associado -> preparation -> script_ready -> start -> outputs em fila -> studio/editor -> adaptação -> estrutura -> composition -> produção;
 - garantir que o editor fique acessível assim que existir um `ProjectContentOutput` de vídeo;
 - decidir se a segmentação beta continua usando o backing legado por baixo, mas sempre iniciada a partir de `ProjectContentOutput`;
-- parar de tratar `Build Narrative` como simples quebra de texto e redefinir essa etapa como preparação/adaptação do output;
+- parar de tratar `Build Narrative` como simples quebra de texto e redefinir essa etapa como adaptação/estruturação específica por output;
+- remover a ambiguidade da visão `Selected Output` como pseudo-editor;
 - criar ou ajustar a ponte para que `segment`, `blocks`, `assets` e `final video` sejam disparados do fluxo novo, mesmo que o worker ainda processe o legado por baixo;
 - expor no editor as fases do output, ajuste de prompts e previews de imagem/animação quando o template ou pipeline suportarem isso;
 - manter o usuário fora de `lessonVersionId`, `courseId` e afins;
@@ -530,11 +542,12 @@ Se a meta e chegar ao beta funcional o mais breve possível, a ordem deve ser es
 
 1. limpar a UX nova de referências herdadas;
 2. fechar o contrato do núcleo `Source/Content/Script/Project/Output`;
-3. fazer `ProjectContentOutput` dirigir o `Studio`/editor e o disparo da produção;
-4. consolidar equipe/autorização mínima;
-5. fechar TTS/imagem/vídeo no pipeline do projeto;
-6. validar o fluxo beta ponta a ponta várias vezes;
-7. só depois voltar para contas conectadas, agenda e distribuição.
+3. separar claramente `Preparation` de `Creation` no fluxo do produto;
+4. fazer `ProjectContentOutput` dirigir o `Studio`/editor e o disparo da produção;
+5. consolidar equipe/autorização mínima;
+6. fechar TTS/imagem/vídeo no pipeline do projeto;
+7. validar o fluxo beta ponta a ponta várias vezes;
+8. só depois voltar para contas conectadas, agenda e distribuição.
 
 O que não fazer agora:
 
@@ -555,7 +568,9 @@ O que não fazer agora:
 
 - criar/ajustar endpoints do fluxo novo para que `ProjectContentOutput` seja o ponto oficial de produção;
 - introduzir estados explícitos para `source`, `script` e `output`;
-- permitir que texto simples e script pronto entrem em pontos diferentes da mesma esteira;
+- permitir que texto simples e conteúdo final entrem em pontos diferentes da mesma esteira;
+- validar se `final content mode` recebeu todos os conteúdos finais exigidos pelos outputs configurados;
+- preparar catálogo inicial de prompts padrão por combinação `canal + formato`;
 - manter ponte interna com legado apenas como infraestrutura, sem expor ids/termos;
 - decidir se `GET /content-items/:itemId/blocks` vira compatibilidade e o fluxo principal passa a depender de output.
 
@@ -563,7 +578,7 @@ O que não fazer agora:
 
 - garantir que `Studio` abra sempre por output;
 - garantir que um output de vídeo possa entrar no editor desde o início do fluxo;
-- substituir o entendimento de `Build Narrative` por preparação e estruturação do output;
+- substituir o entendimento de `Build Narrative` por adaptação e estruturação do output;
 - garantir narrativa/composition inicial para vídeo como primeira implementação;
 - conectar operações de gerar adaptação do output, ajustar prompts, revisar previews e seguir para assets/render;
 - garantir leitura clara de status por output.
@@ -574,6 +589,14 @@ O que não fazer agora:
 - definir tratamento mínimo para texto, script pronto, áudio, vídeo por link e PDF;
 - garantir convergência obrigatória em `script_ready`;
 - introduzir gate de revisão/aprovação antes de produção automatizada.
+
+### Bloco G - Orquestração do projeto
+
+- substituir a interação principal de cliques por output por um comando de `Iniciar`;
+- refletir fases macro `Preparation`, `Creation`, `Review` e `Publication`;
+- mostrar estado detalhado dentro de cada fase, como `downloading_video`, `extracting_audio` e `transcribing`;
+- garantir que a preparação do conteúdo aconteça antes da criação dos outputs;
+- tratar fila e prioridade de outputs como parte explícita do runtime.
 
 ### Bloco D - Team beta
 
@@ -604,13 +627,16 @@ Sequencia do próximo ciclo:
 
 1. limpar `ContentProjects.tsx` e shell principal do beta;
 2. ajustar contrato de `content` para deixar explícito o estado `script_ready`;
-3. ajustar API do fluxo novo onde ainda depende de `content-item` isolado em vez de `output`;
-4. fechar `Studio` como centro operacional do output;
-5. redefinir `Build Narrative` como etapa de adaptação/estruturação do output;
-6. revisar base para presets/templates e estratégia de seleção no projeto;
-7. validar TTS/imagem/render no pipeline;
-8. revisar equipe/autorização mínima;
-9. executar validação manual completa.
+3. separar fase `Preparation` da fase `Creation` no contrato e na UI;
+4. introduzir comando principal de `Iniciar` no projeto;
+5. ajustar API do fluxo novo onde ainda depende de `content-item` isolado em vez de `output`;
+6. fechar `Studio` como centro operacional do output de vídeo;
+7. remover a ambiguidade da visão `Selected Output`;
+8. redefinir `Build Narrative` como etapa de adaptação/estruturação do output;
+9. revisar base para presets/templates e estratégia de seleção no projeto;
+10. validar TTS/imagem/render no pipeline;
+11. revisar equipe/autorização mínima;
+12. executar validação manual completa.
 
 ## Checklist antes de finalizar proxima tarefa
 
