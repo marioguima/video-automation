@@ -11,13 +11,13 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg-a: #8a2be2;
-        --bg-b: #c13df0;
+        --bg-a: #ff7a18;
+        --bg-b: #ff5a1f;
         --text: #ffffff;
-        --track: rgba(102, 16, 130, 0.42);
-        --track-border: rgba(91, 8, 117, 0.58);
-        --fill-a: #ff5fe1;
-        --fill-b: #39c6ff;
+        --track: rgba(93, 38, 8, 0.38);
+        --track-border: rgba(75, 28, 7, 0.54);
+        --fill-a: #ffd166;
+        --fill-b: #ff8f3a;
       }
       * { box-sizing: border-box; }
       html, body { width: 100%; height: 100%; }
@@ -67,7 +67,7 @@
         width: 34px;
         height: 34px;
         border-radius: 10px 18px 18px 10px;
-        background: linear-gradient(180deg, #a53cff 0%, #8528d9 100%);
+        background: linear-gradient(180deg, #ff9b3d 0%, #f97316 100%);
         position: relative;
       }
       .logo-glyph::after {
@@ -105,14 +105,14 @@
         overflow: hidden;
         background: var(--track);
         border: 1px solid var(--track-border);
-        box-shadow: inset 0 2px 7px rgba(52, 0, 63, 0.25);
+        box-shadow: inset 0 2px 7px rgba(73, 28, 7, 0.22);
       }
       .fill {
         position: absolute;
         inset: 0 auto 0 0;
         width: 0%;
         border-radius: inherit;
-        background: linear-gradient(90deg, var(--fill-a) 0%, #d14fff 34%, var(--fill-b) 100%);
+        background: linear-gradient(90deg, var(--fill-a) 0%, #ffb347 34%, var(--fill-b) 100%);
         transition: width 140ms linear;
       }
       .fill::after {

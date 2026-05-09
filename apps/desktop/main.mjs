@@ -572,7 +572,7 @@ async function createSplashWindow() {
     fullscreenable: false,
     frame: false,
     transparent: false,
-    backgroundColor: "#9f30e6",
+    backgroundColor: "#ff6a1f",
     autoHideMenuBar: true,
     show: false,
     center: true,
