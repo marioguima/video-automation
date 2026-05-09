@@ -19,4 +19,4 @@ ENV API_PORT=4010
 
 EXPOSE 4010
 
-CMD ["sh", "-lc", "pnpm db:migrate && pnpm --filter @vizlec/api start"]
+CMD ["sh", "-lc", "pnpm db:migrate && pnpm --filter @flowshopy/api start"]

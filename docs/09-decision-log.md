@@ -5,12 +5,16 @@
 Decisao:
 
 - FlowShopy e o produto ativo em `G:\tool\video-automation`.
-- `G:\tool\vizlec` e referencia somente leitura.
+- `G:\tool\flowshopy` e referencia somente leitura.
+- o foco atual do produto e `single-machine local-first`;
+- sincronizacao remota futura deve cobrir configuracoes, projetos e metadados minimos compartilhados;
+- assets pesados permanecem locais por padrao;
+- segredos internos do runtime desktop devem ser gerados no primeiro boot e persistidos localmente, sem dependencia de `.env` do usuario final.
 
 Motivo:
 
 - evitar dois produtos divergentes;
-- reaproveitar pipeline maduro do VizLec;
+- reaproveitar pipeline maduro do FlowShopy;
 - evoluir para COPE/content-first.
 
 ## Dominio

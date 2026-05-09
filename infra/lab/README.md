@@ -38,15 +38,15 @@ Persistência da GPU (`nvidia-persistenced`) é opcional no lab:
 2. Ajuste os segredos em `infra/lab/.env`.
 3. No `eternidade-server` (Debian), rode o fluxo automatizado da Fase 1:
 ```bash
-bash scripts/lab/phase1-control-plane.sh control.vizlec-dev.test
+bash scripts/lab/phase1-control-plane.sh control.flowshopy-dev.test
 ```
 Se quiser apenas gerar certificado manualmente no Debian:
 ```bash
-bash scripts/lab/generate-lab-cert.sh control.vizlec-dev.test
+bash scripts/lab/generate-lab-cert.sh control.flowshopy-dev.test
 ```
 Alternativa Windows (quando necessário):
 ```powershell
-pwsh ./scripts/lab/phase1-control-plane.ps1 -Domain control.vizlec-dev.test
+pwsh ./scripts/lab/phase1-control-plane.ps1 -Domain control.flowshopy-dev.test
 ```
 
 ## 2.1 Bootstrap one-command por máquina (Debian)
@@ -54,20 +54,20 @@ Objetivo: `deus-server` como runtime-only (sem código-fonte do produto).
 
 1. `eternidade-server` (control plane):
 ```bash
-git clone https://github.com/marioguima/vizlec.git ~/vizlec || true
-cd ~/vizlec
-bash scripts/lab/bootstrap-control-plane-debian.sh --domain control.vizlec-dev.test
+git clone https://github.com/marioguima/flowshopy.git ~/flowshopy || true
+cd ~/flowshopy
+bash scripts/lab/bootstrap-control-plane-debian.sh --domain control.flowshopy-dev.test
 ```
 
 2. `deus-server` (edge, com GPU NVIDIA) sem clonar o repositório:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marioguima/vizlec/main/scripts/lab/bootstrap-edge-debian.sh -o /tmp/bootstrap-edge-debian.sh
+curl -fsSL https://raw.githubusercontent.com/marioguima/flowshopy/main/scripts/lab/bootstrap-edge-debian.sh -o /tmp/bootstrap-edge-debian.sh
 chmod +x /tmp/bootstrap-edge-debian.sh
 bash /tmp/bootstrap-edge-debian.sh --install-ollama
 ```
 Se quiser já configurar trust TLS no `deus-server` no mesmo comando:
 ```bash
-bash /tmp/bootstrap-edge-debian.sh --setup-tls --server-ip 192.168.1.10 --ca-cert-path /tmp/rootCA.pem --domain control.vizlec-dev.test --install-ollama
+bash /tmp/bootstrap-edge-debian.sh --setup-tls --server-ip 192.168.1.10 --ca-cert-path /tmp/rootCA.pem --domain control.flowshopy-dev.test --install-ollama
 ```
 Observação: se o script indicar reboot para concluir o driver NVIDIA, reinicie e rode novamente para confirmar validações.
 No final, o script mostra status `[OK]/[WARN]` das integrações locais (`Ollama`, `ComfyUI`, `TTS`).
@@ -88,7 +88,7 @@ O arquivo está em `<CAROOT>\rootCA.pem`.
 
 2. No `developer`, execute:
 ```powershell
-pwsh ./scripts/lab/phase1-client-browser.ps1 -ServerIp 192.168.1.10 -Domain control.vizlec-dev.test -CaCertPath "C:\caminho\rootCA.pem"
+pwsh ./scripts/lab/phase1-client-browser.ps1 -ServerIp 192.168.1.10 -Domain control.flowshopy-dev.test -CaCertPath "C:\caminho\rootCA.pem"
 ```
 Isso:
 1. adiciona entrada no `hosts`;
@@ -97,18 +97,18 @@ Isso:
 
 3. No `deus-server` (Debian), execute:
 ```bash
-bash /tmp/bootstrap-edge-debian.sh --setup-tls --server-ip 192.168.1.10 --ca-cert-path /tmp/rootCA.pem --domain control.vizlec-dev.test
+bash /tmp/bootstrap-edge-debian.sh --setup-tls --server-ip 192.168.1.10 --ca-cert-path /tmp/rootCA.pem --domain control.flowshopy-dev.test
 ```
 Isso instala a CA no Debian, ajusta `/etc/hosts` e testa HTTPS.
 
 ## 5. Validação
 1. Redirect:
 ```bash
-curl -I http://control.vizlec-dev.test
+curl -I http://control.flowshopy-dev.test
 ```
 2. Health HTTPS:
 ```bash
-curl -vk https://control.vizlec-dev.test/health
+curl -vk https://control.flowshopy-dev.test/health
 ```
 
 ## 6. Observações

@@ -1,4 +1,4 @@
-# VizLec Prompt — Template Spec (HTML/CSS Slide Theme) [JSON]
+# FlowShopy Prompt — Template Spec (HTML/CSS Slide Theme) [JSON]
 
 Você é um designer de sistemas + engenheiro front-end. Defina um **template de slides** para vídeo-aulas (texto sobre imagem), pensado para renderização **HTML/CSS → PNG** via Playwright.
 Retorne **apenas JSON válido**.

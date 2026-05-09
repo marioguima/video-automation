@@ -62,17 +62,22 @@ async function runNodeCommand(command, args, options = {}) {
 }
 
 async function main() {
-  const dataDir = process.env.DATA_DIR?.trim();
-  if (!dataDir) {
-    throw new Error("DATA_DIR is required for desktop database bootstrap.");
-  }
+  const dataDir =
+    process.env.DATA_DIR?.trim() ||
+    (() => {
+      const runtimeConfigPath = process.env.FLOWSHOPY_DESKTOP_CONFIG_PATH?.trim();
+      if (runtimeConfigPath) {
+        return path.dirname(path.resolve(runtimeConfigPath));
+      }
+      return path.join(repoRoot, "data");
+    })();
 
   const runtimeNodeExecutable =
     process.env.DESKTOP_RUNTIME_NODE_PATH?.trim() ||
     process.env.npm_node_execpath?.trim() ||
     process.execPath;
 
-  const dbPath = path.join(dataDir, "vizlec.db");
+  const dbPath = path.join(dataDir, "data.db");
   const databaseUrl = `file:${normalizeFilePath(dbPath)}`;
   fs.mkdirSync(dataDir, { recursive: true });
 
@@ -85,8 +90,7 @@ async function main() {
 
   const env = {
     ...process.env,
-    DATA_DIR: dataDir,
-    VIZLEC_DB_URL: databaseUrl
+    FLOWSHOPY_DB_URL: databaseUrl
   };
 
   console.log(`Ensuring desktop SQLite schema at ${databaseUrl}`);

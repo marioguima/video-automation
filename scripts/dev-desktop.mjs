@@ -2,15 +2,38 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import http from "node:http";
+import fs from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
-const webHost = process.env.WEB_HOST?.trim() || "127.0.0.1";
-const webPort = Number(process.env.WEB_PORT ?? 4173);
+const dataDir = process.env.DATA_DIR?.trim() || path.join(repoRoot, "data");
+const runtimeConfigPath = process.env.FLOWSHOPY_DESKTOP_CONFIG_PATH?.trim() || path.join(dataDir, "desktop.runtime.json");
+const runtimeConfig = (() => {
+  try {
+    if (!fs.existsSync(runtimeConfigPath)) {
+      return {};
+    }
+    return JSON.parse(fs.readFileSync(runtimeConfigPath, "utf8"));
+  } catch {
+    return {};
+  }
+})();
+const webHost =
+  (typeof runtimeConfig.webHost === "string" && runtimeConfig.webHost.trim()) ||
+  process.env.WEB_HOST?.trim() ||
+  "127.0.0.1";
+const webPort =
+  (typeof runtimeConfig.webPort === "number" && Number.isFinite(runtimeConfig.webPort) && runtimeConfig.webPort > 0
+    ? Math.trunc(runtimeConfig.webPort)
+    : Number(process.env.WEB_PORT ?? 4173));
 
 function buildChildEnv() {
-  const env = { ...process.env };
+  const env = {
+    ...process.env,
+    WEB_HOST: webHost,
+    WEB_PORT: String(webPort)
+  };
   delete env.ELECTRON_RUN_AS_NODE;
   return env;
 }
@@ -97,8 +120,8 @@ async function killProcessTree(child) {
 
 const web = (await canReuseExistingWebServer())
   ? (console.log(`[web] reusing existing dev server at http://${webHost}:${webPort}/`), null)
-  : runProcess("web", ["--filter", "@vizlec/web", "dev"]);
-const desktop = runProcess("desktop", ["--filter", "@vizlec/desktop", "dev"]);
+  : runProcess("web", ["--filter", "@flowshopy/web", "dev"]);
+const desktop = runProcess("desktop", ["--filter", "@flowshopy/desktop", "dev"]);
 
 let shuttingDown = false;
 

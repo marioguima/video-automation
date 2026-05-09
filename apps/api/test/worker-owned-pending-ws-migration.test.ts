@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import WebSocket from "ws";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-worker-owned-pending-ws-");
+const runtime = createApiTestRuntime("flowshopy-worker-owned-pending-ws-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -90,7 +90,7 @@ test("6.8.2.6.4: POST images/final-video delegam via WS com mapeamento de status
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Pending WS",
-      email: "owner-pending-ws@vizlec.test",
+      email: "owner-pending-ws@flowshopy.test",
       password: "StrongPass123!"
     }
   });

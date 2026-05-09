@@ -51,8 +51,8 @@ import {
   type ScriptStructureMode,
   type SpeechBudget,
   type TextLayerMode
-} from "@vizlec/shared";
-import { createPrismaClient } from "@vizlec/db";
+} from "@flowshopy/shared";
+import { createPrismaClient } from "@flowshopy/db";
 
 import {
   renderImageCleanSlidePng,
@@ -515,7 +515,7 @@ async function runProcess(
         if (options.onStdoutLine) {
           options.onStdoutLine(line);
         }
-        if (options.logPrefix && line.trim().length > 0 && !line.startsWith("__VIZLEC_RESULT__")) {
+        if (options.logPrefix && line.trim().length > 0 && !line.startsWith("__FLOWSHOPY_RESULT__")) {
           console.log(`[${options.logPrefix}] ${line}`);
         }
       }
@@ -529,7 +529,7 @@ async function runProcess(
         if (options.onStderrLine) {
           options.onStderrLine(line);
         }
-        if (options.logPrefix && line.trim().length > 0 && !line.startsWith("__VIZLEC_RESULT__")) {
+        if (options.logPrefix && line.trim().length > 0 && !line.startsWith("__FLOWSHOPY_RESULT__")) {
           console.error(`[${options.logPrefix}] ${line}`);
         }
       }
@@ -542,7 +542,7 @@ async function runProcess(
         if (options.onStdoutLine) {
           options.onStdoutLine(stdoutBuffer);
         }
-        if (options.logPrefix && !stdoutBuffer.startsWith("__VIZLEC_RESULT__")) {
+        if (options.logPrefix && !stdoutBuffer.startsWith("__FLOWSHOPY_RESULT__")) {
           console.log(`[${options.logPrefix}] ${stdoutBuffer}`);
         }
       }
@@ -550,7 +550,7 @@ async function runProcess(
         if (options.onStderrLine) {
           options.onStderrLine(stderrBuffer);
         }
-        if (options.logPrefix && !stderrBuffer.startsWith("__VIZLEC_RESULT__")) {
+        if (options.logPrefix && !stderrBuffer.startsWith("__FLOWSHOPY_RESULT__")) {
           console.error(`[${options.logPrefix}] ${stderrBuffer}`);
         }
       }
@@ -663,7 +663,7 @@ async function requestJson<T>(url: string, options: HttpJsonOptions = {}): Promi
 }
 
 const apiBaseUrl = normalizeBaseUrl(
-  process.env.API_BASE_URL ?? `http://127.0.0.1:${config.apiPort}`
+  process.env.API_BASE_URL ?? `http://${config.apiHost}:${config.apiPort}`
 );
 
 function deriveWsUrlFromHttpBase(baseUrl: string): string {
@@ -675,7 +675,8 @@ function deriveWsUrlFromHttpBase(baseUrl: string): string {
 
 let agentControlToken =
   process.env.AGENT_CONTROL_TOKEN?.trim() || internalJobsEventToken;
-const agentControlTokenSecret = process.env.AGENT_CONTROL_TOKEN_SECRET?.trim() ?? "";
+const agentControlTokenSecret =
+  process.env.AGENT_CONTROL_TOKEN_SECRET?.trim() || internalJobsEventToken;
 let agentWorkspaceId = process.env.WORKSPACE_ID?.trim() ?? "";
 let agentId = process.env.AGENT_ID?.trim() ?? "";
 const agentLabel = process.env.AGENT_LABEL?.trim() ?? null;
@@ -4107,7 +4108,7 @@ async function runComfyImageGeneration(options: {
 }
 
 function normalizeTtsRequestText(text: string): string {
-  const ellipsisToken = "__VIZLEC_ELLIPSIS__";
+  const ellipsisToken = "__FLOWSHOPY_ELLIPSIS__";
   return sanitizeNarratedScriptText(text)
     .replace(/\.{3}/g, ellipsisToken)
     .replace(/\./g, ";")
@@ -4588,7 +4589,7 @@ async function runQwenTtsBatch(items: { id: string; text: string; outputPath: st
       output_path: item.outputPath
     }))
   };
-  const tmpDir = path.join(os.tmpdir(), "vizlec-tts");
+  const tmpDir = path.join(os.tmpdir(), "flowshopy-tts");
   ensureDir(tmpDir);
   const base = `tts-${Date.now()}-${randomUUID()}`;
   const inputPath = path.join(tmpDir, `${base}.json`);
@@ -4639,14 +4640,14 @@ async function runChatterboxTtsBatch(options: {
       output_path: item.outputPath
     }))
   };
-  const tmpDir = path.join(os.tmpdir(), "vizlec-tts");
+  const tmpDir = path.join(os.tmpdir(), "flowshopy-tts");
   ensureDir(tmpDir);
   const base = `tts-${Date.now()}-${randomUUID()}`;
   const inputPath = path.join(tmpDir, `${base}.json`);
   const outputPath = path.join(tmpDir, `${base}-out.json`);
   await fs.promises.writeFile(inputPath, JSON.stringify(payload), "utf8");
   try {
-    const resultPrefix = "__VIZLEC_RESULT__";
+    const resultPrefix = "__FLOWSHOPY_RESULT__";
     await runProcess(
       config.chatterboxPython,
       [CHATTERBOX_TTS_SCRIPT, "--input", inputPath, "--output", outputPath],

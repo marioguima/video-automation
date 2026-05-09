@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import WebSocket from "ws";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-correlation-id-");
+const runtime = createApiTestRuntime("flowshopy-correlation-id-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -66,7 +66,7 @@ before(async () => {
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Correlation",
-      email: "owner-correlation@vizlec.test",
+      email: "owner-correlation@flowshopy.test",
       password: "StrongPass123!"
     }
   });

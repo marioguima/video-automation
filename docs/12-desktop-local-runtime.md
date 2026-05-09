@@ -30,7 +30,7 @@ Electron Desktop Shell
 Responsavel por:
 
 - iniciar a aplicacao instalada;
-- definir `DATA_DIR` local;
+- resolver o diretório local de runtime;
 - subir API e worker locais;
 - abrir a UI;
 - encerrar processos locais junto com a aplicacao;
@@ -117,7 +117,11 @@ Nao fica no caminho critico de:
 - o shell desktop sobe `apps/api/src/index.ts` e `apps/worker/src/index.ts` localmente com `tsx`;
 - desenvolvimento e distribuicao usam runtime Node real para backend local, nao a ABI do Electron para `api` e `worker`;
 - o build desktop prepara um `node.exe` embarcado em `apps/desktop/vendor/node` para ser incluido no instalador;
-- `DATA_DIR` do desktop usa `app.getPath("userData")` quando nao houver `DATA_DIR` explicito.
+- `DATA_DIR` virou override tecnico opcional;
+- no desktop, o runtime local usa `app.getPath("userData")/data` por padrao;
+- fora do desktop, o fallback padrao e `<repo-root>/data`;
+- portas do runtime desktop ficam em `desktop.runtime.json`;
+- segredos internos do runtime desktop sao gerados no primeiro boot e persistidos localmente.
 
 ## O que fica onde
 
@@ -160,7 +164,7 @@ Regra:
 
 ```text
 Abrir app desktop
-  -> shell define DATA_DIR
+  -> shell resolve dataDir local
   -> shell sobe API local
   -> shell sobe worker local
   -> shell aguarda healthchecks

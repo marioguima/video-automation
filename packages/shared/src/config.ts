@@ -1,5 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+  DEFAULT_DESKTOP_RUNTIME_CONFIG,
+  type DesktopRuntimeConfig,
+  getDesktopRuntimeConfigPath,
+  readDesktopRuntimeConfig
+} from "./desktop-runtime-config.js";
 
 export type AppConfig = {
   dataDir: string;
@@ -7,6 +13,7 @@ export type AppConfig = {
   apiHost: string;
   apiPort: number;
   workerPort: number;
+  webHost: string;
   webPort: number;
   ollamaBaseUrl: string;
   ollamaModel: string;
@@ -81,16 +88,32 @@ function deriveDataDirFromDatabaseUrl(databaseUrl: string): string | null {
   return path.dirname(resolved);
 }
 
+function isDesktopModeEnabled(): boolean {
+  return (process.env.FLOWSHOPY_DESKTOP_MODE ?? "false").trim().toLowerCase() === "true";
+}
+
+function resolveDesktopDataDirFromConfigPath(): string | null {
+  const configPath = process.env.FLOWSHOPY_DESKTOP_CONFIG_PATH?.trim();
+  if (!configPath) {
+    return null;
+  }
+  return path.dirname(path.resolve(configPath));
+}
+
 export function resolveDataDir(databaseUrl = resolveDatabaseUrl()): string {
   const envValue = process.env.DATA_DIR?.trim();
   if (envValue && envValue.length > 0) {
     return envValue;
   }
+  const desktopDataDir = resolveDesktopDataDirFromConfigPath();
+  if (desktopDataDir) {
+    return desktopDataDir;
+  }
   const derived = deriveDataDirFromDatabaseUrl(databaseUrl);
   if (derived) {
     return derived;
   }
-  return process.cwd();
+  return path.join(resolveProjectRoot(process.cwd()), "data");
 }
 
 export function ensureDataDir(dataDir = resolveDataDir()): void {
@@ -121,15 +144,25 @@ function normalizeFilePath(filePath: string): string {
 export function resolveDatabaseUrl(dataDir?: string): string {
   const resolvedDataDir = dataDir?.trim() || process.env.DATA_DIR?.trim();
   if (resolvedDataDir && resolvedDataDir.length > 0) {
-    const dbPath = path.join(resolvedDataDir, "vizlec.db");
+    const dbPath = path.join(resolvedDataDir, "data.db");
     return `file:${normalizeFilePath(dbPath)}`;
   }
-  return "file:./vizlec.db";
+  return "file:./data.db";
+}
+
+function resolveDesktopRuntimeConfigForApp(dataDir: string): Required<DesktopRuntimeConfig> | null {
+  if (!isDesktopModeEnabled()) {
+    return null;
+  }
+  const configPath =
+    process.env.FLOWSHOPY_DESKTOP_CONFIG_PATH?.trim() || getDesktopRuntimeConfigPath(dataDir);
+  return readDesktopRuntimeConfig(configPath, DEFAULT_DESKTOP_RUNTIME_CONFIG);
 }
 
 export function getConfig(): AppConfig {
   const dataDir = resolveDataDir();
   const databaseUrl = resolveDatabaseUrl(dataDir);
+  const desktopRuntime = resolveDesktopRuntimeConfigForApp(dataDir);
   const ttsVoicesDir = process.env.TTS_VOICES_DIR ?? path.join(dataDir, "voices");
   const ttsVoicesIndex = process.env.TTS_VOICES_INDEX ?? path.join(dataDir, "voices.json");
   const ttsSettingsPath =
@@ -146,14 +179,15 @@ export function getConfig(): AppConfig {
   const xttsApiOutputDir =
     process.env.XTTS_API_OUTPUT_DIR ?? path.join(dataDir, "xtts_output");
   const xttsApiSpeakerDir = process.env.XTTS_API_SPEAKER_DIR ?? ttsVoicesDir;
-  process.env.VIZLEC_DB_URL = databaseUrl;
+  process.env.FLOWSHOPY_DB_URL = databaseUrl;
   return {
     dataDir,
     databaseUrl,
-    apiHost: process.env.API_HOST ?? "127.0.0.1",
-    apiPort: Number(process.env.API_PORT ?? 4010),
-    workerPort: Number(process.env.WORKER_PORT ?? 4011),
-    webPort: Number(process.env.WEB_PORT ?? 4173),
+    apiHost: desktopRuntime?.apiHost ?? process.env.API_HOST ?? "127.0.0.1",
+    apiPort: desktopRuntime?.apiPort ?? Number(process.env.API_PORT ?? 4010),
+    workerPort: desktopRuntime?.workerPort ?? Number(process.env.WORKER_PORT ?? 4011),
+    webHost: desktopRuntime?.webHost ?? process.env.WEB_HOST ?? "127.0.0.1",
+    webPort: desktopRuntime?.webPort ?? Number(process.env.WEB_PORT ?? 4173),
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434",
     ollamaModel: process.env.OLLAMA_MODEL ?? "llama3.2:3b",
     ollamaTimeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS ?? 600000),

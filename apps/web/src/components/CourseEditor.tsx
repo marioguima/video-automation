@@ -136,7 +136,7 @@ const CourseEditor: React.FC<CourseEditorProps> = ({ course, onSave, onCancel, o
                 value={formData.title}
                 onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
                 className="w-full border rounded-[5px] h-9 px-3 bg-[hsl(var(--editor-input))] border-[hsl(var(--editor-input-border))] text-foreground"
-                placeholder="Ex.: VizLec Pro"
+                placeholder="Ex.: FlowShopy Pro"
               />
             </div>
 

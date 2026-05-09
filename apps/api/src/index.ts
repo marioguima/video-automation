@@ -48,8 +48,8 @@ import {
   type CompositionTimeline,
   type NarrativeRole,
   type VisualGenerationCapability
-} from "@vizlec/shared";
-import { createPrismaClient } from "@vizlec/db";
+} from "@flowshopy/shared";
+import { createPrismaClient } from "@flowshopy/db";
 import { buildEndpointPurposeExplanation } from "./openapi-endpoint-explanations.js";
 import {
   buildInitialCompositionTimeline,
@@ -75,9 +75,9 @@ ensureWorkingDir(config.dataDir);
 
 const fastify = Fastify({ logger: true });
 const prisma = createPrismaClient();
-const AUTH_COOKIE_NAME = "vizlec_session";
+const AUTH_COOKIE_NAME = "flowshopy_session";
 const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
-const authJwtSecret = process.env.AUTH_JWT_SECRET?.trim() || "vizlec-dev-secret-change-in-production";
+const authJwtSecret = process.env.AUTH_JWT_SECRET?.trim() || "flowshopy-dev-secret-change-in-production";
 const internalJobsEventToken = process.env.INTERNAL_JOBS_EVENT_TOKEN?.trim() ?? "";
 const authCookieSecure = (process.env.AUTH_COOKIE_SECURE ?? "false").trim().toLowerCase() === "true";
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1542,7 +1542,7 @@ async function canAccessJobForRequest(
 const DEFAULT_INVITE_MESSAGE_TEMPLATE = [
   "Hi {{name}},",
   "",
-  "You've been invited to join VizLec as {{role}}.",
+  "You've been invited to join FlowShopy as {{role}}.",
   "",
   "Open this link to set your password and activate access:",
   "{{invite_link}}",
@@ -1585,11 +1585,11 @@ inviteLink: string;
 }
 
 function getWebBaseUrl(): string {
-  return process.env.WEB_APP_BASE_URL?.trim() || `http://127.0.0.1:${config.webPort}`;
+  return `http://${config.webHost}:${config.webPort}`;
 }
 
 function getApiBaseUrl(): string {
-  return process.env.API_BASE_URL?.trim() || `http://127.0.0.1:${config.apiPort}`;
+  return `http://${config.apiHost}:${config.apiPort}`;
 }
 
 function buildInviteLink(token: string): string {
@@ -1758,11 +1758,11 @@ function writeAppSettings(next: AppSettings): void {
 }
 
 function isDesktopModeEnabled(): boolean {
-  return (process.env.VIZLEC_DESKTOP_MODE ?? "false").trim().toLowerCase() === "true";
+  return (process.env.FLOWSHOPY_DESKTOP_MODE ?? "false").trim().toLowerCase() === "true";
 }
 
 function getDesktopRuntimeConfigFilePath(): string {
-  return process.env.VIZLEC_DESKTOP_CONFIG_PATH?.trim() || getDesktopRuntimeConfigPath(config.dataDir);
+  return process.env.FLOWSHOPY_DESKTOP_CONFIG_PATH?.trim() || getDesktopRuntimeConfigPath(config.dataDir);
 }
 
 function readDesktopRuntimeSettings() {
@@ -1835,7 +1835,7 @@ await fastify.register(websocket);
 await fastify.register(swagger, {
   openapi: {
     info: {
-      title: "VizLec API",
+      title: "FlowShopy API",
       description: "API para gerenciamento de cursos, módulos, lições e geração de conteúdo com IA",
       version: "0.0.1"
     },
@@ -1864,7 +1864,7 @@ await fastify.register(swagger, {
         cookieAuth: {
           type: "apiKey",
           in: "cookie",
-          name: "vizlec_session"
+          name: "flowshopy_session"
         }
       }
     }
@@ -12606,7 +12606,7 @@ const isDirectExecution = (() => {
   return import.meta.url === pathToFileURL(path.resolve(entry)).href;
 })();
 
-if (isDirectExecution && process.env.VIZLEC_SKIP_API_LISTEN !== "true") {
+if (isDirectExecution && process.env.FLOWSHOPY_SKIP_API_LISTEN !== "true") {
   start().catch((err) => {
     fastify.log.error(err, "Failed to start API");
     process.exit(1);

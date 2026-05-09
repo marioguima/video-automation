@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-content-cope-");
+const runtime = createApiTestRuntime("flowshopy-content-cope-");
 
 let app: FastifyInstance;
 let sessionCookie = "";
@@ -22,7 +22,7 @@ before(async () => {
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Content Owner",
-      email: "content-owner@vizlec.test",
+      email: "content-owner@flowshopy.test",
       password: "StrongPass123!"
     }
   });

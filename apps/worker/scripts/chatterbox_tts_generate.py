@@ -12,7 +12,7 @@ import torch
 import soundfile as sf
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
-RESULT_PREFIX = "__VIZLEC_RESULT__"
+RESULT_PREFIX = "__FLOWSHOPY_RESULT__"
 
 
 try:

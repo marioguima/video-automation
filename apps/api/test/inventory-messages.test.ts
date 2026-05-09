@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
 // Runtime compartilhado:
 // - cria banco temporário por teste
 // - configura env para a API rodar in-memory (fastify.inject)
 // - limpa artefatos ao final
-const runtime = createApiTestRuntime("vizlec-inventory-messages-");
+const runtime = createApiTestRuntime("flowshopy-inventory-messages-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -59,7 +59,7 @@ test("inventory messages: snapshot creates base state and delta updates it with 
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Inventory",
-      email: "owner-inventory@vizlec.test",
+      email: "owner-inventory@flowshopy.test",
       password: "StrongPass123!"
     }
   });

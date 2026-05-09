@@ -3,7 +3,7 @@ http:
     redirect-http:
       entryPoints:
         - web
-      rule: "Host(`control.vizlec-dev.test`)"
+      rule: "Host(`control.flowshopy-dev.test`)"
       middlewares:
         - https-redirect
       service: noop@internal
@@ -11,7 +11,7 @@ http:
     control-api:
       entryPoints:
         - websecure
-      rule: "Host(`control.vizlec-dev.test`)"
+      rule: "Host(`control.flowshopy-dev.test`)"
       service: control-api
       tls: {}
       middlewares:
@@ -37,5 +37,5 @@ http:
 
 tls:
   certificates:
-    - certFile: /etc/certs/control.vizlec-dev.test.pem
-      keyFile: /etc/certs/control.vizlec-dev.test-key.pem
+    - certFile: /etc/certs/control.flowshopy-dev.test.pem
+      keyFile: /etc/certs/control.flowshopy-dev.test-key.pem

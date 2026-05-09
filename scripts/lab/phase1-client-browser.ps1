@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)][string]$ServerIp,
-  [string]$Domain = "control.vizlec-dev.test",
+  [string]$Domain = "control.flowshopy-dev.test",
   [string]$HostsPath = "$env:SystemRoot\System32\drivers\etc\hosts",
   [Parameter(Mandatory = $true)][string]$CaCertPath,
   [switch]$SkipHosts,

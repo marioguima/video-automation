@@ -50,7 +50,7 @@ export function getDesktopRuntimePaths(dataDir: string): DesktopRuntimePaths {
     dataDir,
     runtimeConfigPath: getDesktopRuntimeConfigPath(dataDir),
     appSettingsPath: path.join(dataDir, "app_settings.json"),
-    databasePath: path.join(dataDir, "vizlec.db"),
+    databasePath: path.join(dataDir, "data.db"),
     workerLogDir: path.join(dataDir, "logs")
   };
 }

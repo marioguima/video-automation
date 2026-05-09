@@ -265,7 +265,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, isDarkMode }) => {
           </svg>
         </div>
       </div>
-      <span className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">VizLec</span>
+      <span className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">FlowShopy</span>
     </div>
   );
 
@@ -511,7 +511,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, isDarkMode }) => {
         
         {/* Footer Links */}
         <div className="absolute bottom-6 left-0 right-0 text-center lg:text-left lg:px-16 xl:px-24">
-            <p className="text-xs text-zinc-400 dark:text-zinc-600">© 2024 VizLec Inc. <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors ml-2">Privacy Policy</a> <span className="mx-1">•</span> <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">Terms of Service</a></p>
+            <p className="text-xs text-zinc-400 dark:text-zinc-600">© 2024 FlowShopy <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors ml-2">Privacy Policy</a> <span className="mx-1">•</span> <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">Terms of Service</a></p>
         </div>
       </div>
 
@@ -619,7 +619,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, isDarkMode }) => {
                        <Quote className={`text-orange-500 opacity-80 rotate-180`} size={32} />
                        
                        <p className={`text-xl ${cardSubText} leading-relaxed font-medium`}>
-                          "VizLec automates 90% of our workflow. It's not just a tool; it's our entire production studio in a browser."
+                          "FlowShopy automates 90% of our workflow. It's not just a tool; it's our entire production studio in a browser."
                        </p>
                        
                        <div className="flex items-center gap-4">

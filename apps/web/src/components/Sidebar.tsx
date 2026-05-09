@@ -202,7 +202,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
                     </div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-sm font-semibold text-foreground/80 truncate">{currentUser?.name ?? 'User'}</span>
-                      <span className="text-xs text-muted-foreground truncate">{currentUser?.email ?? 'user@vizlec.local'}</span>
+                      <span className="text-xs text-muted-foreground truncate">{currentUser?.email ?? 'user@flowshopy.local'}</span>
                     </div>
                  </div>
                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onLogout}>

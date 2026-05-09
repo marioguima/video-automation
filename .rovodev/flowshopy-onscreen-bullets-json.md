@@ -1,4 +1,4 @@
-# VizLec Prompt — On-screen (Title+Bullets) [JSON]
+# FlowShopy Prompt — On-screen (Title+Bullets) [JSON]
 
 Você recebe um `source_text` (trecho narrado) e deve produzir texto curto para aparecer no slide.
 Retorne **apenas JSON válido**.

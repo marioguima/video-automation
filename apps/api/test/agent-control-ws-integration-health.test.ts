@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import WebSocket from "ws";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
 // Este runtime cria um ambiente isolado para teste de API:
 // - banco temporário
 // - variáveis de ambiente de teste
 // - limpeza no final
-const runtime = createApiTestRuntime("vizlec-agent-control-ws-");
+const runtime = createApiTestRuntime("flowshopy-agent-control-ws-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -94,7 +94,7 @@ test(
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Agent WS",
-      email: "owner-agent-ws@vizlec.test",
+      email: "owner-agent-ws@flowshopy.test",
       password: "StrongPass123!"
     }
   });
@@ -926,7 +926,7 @@ test(
       method: "POST",
       url: "/auth/login",
       payload: {
-        email: "owner-agent-ws@vizlec.test",
+        email: "owner-agent-ws@flowshopy.test",
         password: "StrongPass123!"
       }
     });

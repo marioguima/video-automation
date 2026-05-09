@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOMAIN="${1:-control.vizlec-dev.test}"
+DOMAIN="${1:-control.flowshopy-dev.test}"
 LAB_ENV_PATH="${2:-infra/lab/.env}"
 SKIP_CERT="${SKIP_CERT:-0}"
 SKIP_UP="${SKIP_UP:-0}"

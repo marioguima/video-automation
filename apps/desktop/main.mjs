@@ -1,36 +1,32 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import http from "node:http";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 
 import {
   DEFAULT_DESKTOP_RUNTIME_CONFIG,
+  ensureDesktopRuntimeSecretsFile,
   ensureDesktopRuntimeConfigFile,
   getDesktopRuntimeConfigPath,
   getDesktopRuntimePaths,
-  readDesktopRuntimeConfig
+  readDesktopRuntimeConfig,
+  writeDesktopRuntimeConfig
 } from "./desktop-runtime-config.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const execFile = promisify(execFileCallback);
 const require = createRequire(import.meta.url);
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
-const desktopSessionDir = path.join(process.env.LOCALAPPDATA || __dirname, "VizLec", "electron-session");
+const desktopSessionDir = path.join(process.env.LOCALAPPDATA || __dirname, "FlowShopy", "electron-session");
 fs.mkdirSync(desktopSessionDir, { recursive: true });
 app.commandLine.appendSwitch("disk-cache-dir", desktopSessionDir);
 app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
-
-const DESKTOP_DEFAULTS = {
-  ...DEFAULT_DESKTOP_RUNTIME_CONFIG,
-  internalJobsEventToken:
-    process.env.INTERNAL_JOBS_EVENT_TOKEN ?? "vizlec-desktop-local-token",
-  authJwtSecret:
-    process.env.AUTH_JWT_SECRET ?? "vizlec-desktop-local-auth-secret",
-  agentControlTokenSecret:
-    process.env.AGENT_CONTROL_TOKEN_SECRET ?? "vizlec-desktop-local-agent-secret"
-};
 
 let mainWindow = null;
 let splashWindow = null;
@@ -71,6 +67,10 @@ function resolveDataDir() {
   const localDataDir = path.join(app.getPath("userData"), "data");
   fs.mkdirSync(localDataDir, { recursive: true });
   return localDataDir;
+}
+
+function readDesktopRuntimeSecrets(dataDir) {
+  return ensureDesktopRuntimeSecretsFile(dataDir);
 }
 
 function resolveDesktopRuntimeConfig(dataDir) {
@@ -131,6 +131,7 @@ function resolveRuntimeNodeExecutable() {
 function buildRuntimeEnv(dataDir) {
   const repoRoot = resolveRepoRoot();
   const runtimeConfig = resolveDesktopRuntimeConfig(dataDir);
+  const runtimeSecrets = readDesktopRuntimeSecrets(dataDir);
   const runtimeConfigPath = getDesktopRuntimeConfigPath(dataDir);
   const appSettingsTemplatePath = path.join(repoRoot, "config", "app_settings.template.json");
   const workerLogDir = getDesktopRuntimePaths(dataDir).workerLogDir;
@@ -138,23 +139,134 @@ function buildRuntimeEnv(dataDir) {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
     DATA_DIR: dataDir,
-    VIZLEC_DESKTOP_MODE: "true",
-    VIZLEC_DESKTOP_CONFIG_PATH: runtimeConfigPath,
-    API_HOST: runtimeConfig.apiHost,
-    API_PORT: String(runtimeConfig.apiPort),
-    WORKER_PORT: String(runtimeConfig.workerPort),
-    WEB_HOST: runtimeConfig.webHost,
-    WEB_PORT: String(runtimeConfig.webPort),
-    API_BASE_URL: `http://${runtimeConfig.apiHost}:${runtimeConfig.apiPort}`,
-    WEB_APP_BASE_URL: `http://${runtimeConfig.webHost}:${runtimeConfig.webPort}`,
+    FLOWSHOPY_DESKTOP_MODE: "true",
+    FLOWSHOPY_DESKTOP_CONFIG_PATH: runtimeConfigPath,
     APP_SETTINGS_TEMPLATE_PATH: appSettingsTemplatePath,
     WORKER_LOG_DIR: workerLogDir,
-    INTERNAL_JOBS_EVENT_TOKEN: DESKTOP_DEFAULTS.internalJobsEventToken,
-    AUTH_JWT_SECRET: DESKTOP_DEFAULTS.authJwtSecret,
-    AGENT_CONTROL_TOKEN_SECRET: DESKTOP_DEFAULTS.agentControlTokenSecret,
+    INTERNAL_JOBS_EVENT_TOKEN: runtimeSecrets.internalJobsEventToken,
+    AUTH_JWT_SECRET: runtimeSecrets.authJwtSecret,
+    AGENT_CONTROL_TOKEN_SECRET: runtimeSecrets.agentControlTokenSecret,
     AUTH_COOKIE_SECURE: runtimeConfig.authCookieSecure ? "true" : "false",
     WORKER_REQUIRE_WS_ON_STARTUP: runtimeConfig.workerRequireWsOnStartup ? "true" : "false"
   };
+}
+
+async function isPortFree(host, port) {
+  return await new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, host);
+  });
+}
+
+async function readHealthPayload(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return null;
+    }
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function findListeningPid(port) {
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await execFile("powershell", [
+        "-NoProfile",
+        "-Command",
+        `Get-NetTCPConnection -State Listen -LocalPort ${port} | Select-Object -First 1 -ExpandProperty OwningProcess`
+      ]);
+      const pid = Number(String(stdout).trim());
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const { stdout } = await execFile("lsof", ["-ti", `tcp:${port}`]);
+    const pid = Number(String(stdout).split(/\r?\n/).find(Boolean) ?? "");
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+async function killProcessByPid(pid) {
+  if (!pid) {
+    return false;
+  }
+  try {
+    if (process.platform === "win32") {
+      await execFile("taskkill", ["/PID", String(pid), "/F", "/T"]);
+    } else {
+      process.kill(pid, "SIGTERM");
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPortToFree(host, port, timeoutMs = 10_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isPortFree(host, port)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+async function findNextFreePort(host, startPort) {
+  let candidate = startPort + 1;
+  while (candidate < 65535) {
+    if (await isPortFree(host, candidate)) {
+      return candidate;
+    }
+    candidate += 1;
+  }
+  throw new Error(`No free port available after ${startPort}`);
+}
+
+async function resolveRuntimePortConflicts(dataDir) {
+  const configPath = getDesktopRuntimeConfigPath(dataDir);
+  const current = ensureDesktopRuntimeConfigFile(configPath, DEFAULT_DESKTOP_RUNTIME_CONFIG);
+  const next = { ...current };
+  let changed = false;
+  for (const [key, healthPath] of [
+    ["apiPort", "/health"],
+    ["workerPort", "/health"]
+  ]) {
+    const port = next[key];
+    const host = next.apiHost;
+    if (await isPortFree(host, port)) {
+      continue;
+    }
+    const payload = await readHealthPayload(`http://${host}:${port}${healthPath}`);
+    const looksLikeOurRuntime = payload && payload.ok === true && payload.dataDir === dataDir;
+    if (looksLikeOurRuntime) {
+      const pid = await findListeningPid(port);
+      if (pid) {
+        await killProcessByPid(pid);
+        if (await waitForPortToFree(host, port)) {
+          continue;
+        }
+      }
+    }
+    next[key] = await findNextFreePort(host, port);
+    changed = true;
+  }
+  if (changed) {
+    writeDesktopRuntimeConfig(configPath, next);
+  }
+  return changed ? next : current;
 }
 
 function emitBootstrapState(nextState) {
@@ -375,7 +487,9 @@ async function loadRenderer() {
 async function startLocalRuntime() {
   const dataDir = resolveDataDir();
   runtimeState.dataDir = dataDir;
-  const runtimeConfig = resolveDesktopRuntimeConfig(dataDir);
+  readDesktopRuntimeSecrets(dataDir);
+  updateBootstrapStage("Validando portas e runtime local...", 6, { immediate: true });
+  const runtimeConfig = await resolveRuntimePortConflicts(dataDir);
   updateBootstrapStage("Preparando banco e arquivos locais...", 8, { immediate: true });
   const dbProgressTimer = setInterval(() => {
     const next = Math.min(18, bootstrapProgressTarget + 0.8);
@@ -518,7 +632,7 @@ async function bootstrapDesktop() {
   await createSplashWindow();
   await createMainWindow();
   emitBootstrapState({
-    title: "VizLec Desktop",
+    title: "FlowShopy Desktop",
     message: "A aplicação está preparando o runtime local.",
     progress: 4,
     status: "booting"
@@ -537,7 +651,7 @@ async function bootstrapDesktop() {
     });
     await dialog.showErrorBox(
       "Falha ao iniciar o runtime local",
-      `VizLec Desktop não conseguiu iniciar a API local, o worker local ou a interface.\n\n${message}`
+      `FlowShopy Desktop não conseguiu iniciar a API local, o worker local ou a interface.\n\n${message}`
     );
   }
 
@@ -546,7 +660,7 @@ async function bootstrapDesktop() {
       await createSplashWindow();
       await createMainWindow();
       emitBootstrapState({
-        title: "VizLec Desktop",
+        title: "FlowShopy Desktop",
         message: "A aplicação está preparando o runtime local.",
         progress: 4,
         status: "booting"

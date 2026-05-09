@@ -25,7 +25,7 @@ pnpm install
 Instalar browsers Playwright:
 
 ```powershell
-pnpm --filter @vizlec/worker exec playwright install
+pnpm --filter @flowshopy/worker exec playwright install
 ```
 
 ## Banco e dados
@@ -33,13 +33,13 @@ pnpm --filter @vizlec/worker exec playwright install
 Banco dev atual:
 
 ```text
-data/vizlec.db
+data/data.db
 ```
 
 Variavel recomendada para dev local:
 
 ```text
-VIZLEC_DB_URL=file:G:/tool/video-automation/data/vizlec.db
+FLOWSHOPY_DB_URL=file:G:/tool/video-automation/data/data.db
 ```
 
 `DATA_DIR` deve apontar para:
@@ -80,13 +80,13 @@ VITE_API_BASE=http://127.0.0.1:4110
 API:
 
 ```powershell
-pnpm --filter @vizlec/api dev
+pnpm --filter @flowshopy/api dev
 ```
 
 Worker:
 
 ```powershell
-pnpm --filter @vizlec/worker dev
+pnpm --filter @flowshopy/worker dev
 ```
 
 Web:
@@ -120,30 +120,30 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4273/
 Usuario dev:
 
 ```text
-email: marioguimaraes@vizlec.com
+email: marioguimaraes@flowshopy.com
 senha: TempPass123!
 ```
 
-Se a senha precisar ser resetada, usar script local com Prisma/argon2 apontando para `data/vizlec.db`.
+Se a senha precisar ser resetada, usar script local com Prisma/argon2 apontando para `data/data.db`.
 
 ## Validacao
 
 Typecheck API:
 
 ```powershell
-pnpm --filter @vizlec/api typecheck
+pnpm --filter @flowshopy/api typecheck
 ```
 
 Typecheck web:
 
 ```powershell
-pnpm --filter @vizlec/web typecheck
+pnpm --filter @flowshopy/web typecheck
 ```
 
 Typecheck worker:
 
 ```powershell
-pnpm --filter @vizlec/worker typecheck
+pnpm --filter @flowshopy/worker typecheck
 ```
 
 Verificacao critica:
@@ -155,13 +155,13 @@ pnpm verify:critical
 Teste COPE:
 
 ```powershell
-pnpm --filter @vizlec/api run test:one -- test/content-cope-flow.test.ts
+pnpm --filter @flowshopy/api run test:one -- test/content-cope-flow.test.ts
 ```
 
 Build web:
 
 ```powershell
-pnpm --filter @vizlec/web build
+pnpm --filter @flowshopy/web build
 ```
 
 ## Problemas conhecidos em sandbox
@@ -216,7 +216,7 @@ explicito, por exemplo `2026-05-02T19:22:36.452-03:00` no Brasil.
 
 ## Regras de implementacao
 
-- Nao editar `G:\tool\vizlec`.
+- Nao editar `G:\tool\flowshopy`.
 - Nao remover `Course/Module/Lesson` ainda.
 - Nao fazer rename fisico grande sem fase planejada.
 - Preferir metadata para prototipar campos ainda instaveis.

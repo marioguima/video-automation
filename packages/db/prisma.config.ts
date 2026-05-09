@@ -6,6 +6,6 @@ export default defineConfig({
     path: "prisma/migrations"
   },
   datasource: {
-    url: env("VIZLEC_DB_URL")
+    url: env("FLOWSHOPY_DB_URL")
   }
 });

@@ -1,4 +1,4 @@
-# VizLec Prompt — Segmentation (Roteiro -> Blocos) [JSON]
+# FlowShopy Prompt — Segmentation (Roteiro -> Blocos) [JSON]
 
 Você é um sistema de análise e estruturação de conteúdo para vídeo-aulas. Receba um roteiro completo (teleprompter) e retorne **apenas JSON válido** conforme o schema abaixo.
 

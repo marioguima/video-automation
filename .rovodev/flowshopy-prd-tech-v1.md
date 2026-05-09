@@ -1,13 +1,13 @@
-# VizLec — PRD + Tech Spec (Prompt, versão completa)
+# FlowShopy — PRD + Tech Spec (Prompt, versão completa)
 
-Você é um **Product Lead + Staff Engineer** e deve escrever um documento único que funciona como **PRD + especificação técnica** para um produto chamado **VizLec**.
+Você é um **Product Lead + Staff Engineer** e deve escrever um documento único que funciona como **PRD + especificação técnica** para um produto chamado **FlowShopy**.
 
 O documento deve ser extremamente prático, com decisões claras para MVP, e detalhado o suficiente para uma equipe implementar.
 
 ---
 
 ## 1) Contexto e objetivo
-VizLec transforma o **roteiro completo** de uma aula (teleprompter, palavra por palavra) em um **vídeo final** pronto para publicar.
+FlowShopy transforma o **roteiro completo** de uma aula (teleprompter, palavra por palavra) em um **vídeo final** pronto para publicar.
 
 O vídeo final é composto por uma sequência de “slides” **estáticos** (imagens) sincronizados com a narração.
 

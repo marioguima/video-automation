@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
 // Reaproveita utilitário comum de testes:
 // - banco temporário isolado
 // - env da API para execução in-memory
 // - limpeza de artefatos após teste
-const runtime = createApiTestRuntime("vizlec-dispatch-guard-");
+const runtime = createApiTestRuntime("flowshopy-dispatch-guard-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -56,7 +56,7 @@ test("dispatch guard: user from workspace A cannot dispatch/read jobs from works
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner A",
-      email: "owner-a@vizlec.test",
+      email: "owner-a@flowshopy.test",
       password: "StrongPass123!"
     }
   });
@@ -86,7 +86,7 @@ test("dispatch guard: user from workspace A cannot dispatch/read jobs from works
   const userB = await prisma.user.create({
     data: {
       name: "User B",
-      email: "user-b@vizlec.test",
+      email: "user-b@flowshopy.test",
       passwordHash: "hash-b",
       role: "member"
     }

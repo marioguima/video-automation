@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import WebSocket from "ws";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-worker-ws-command-path-");
+const runtime = createApiTestRuntime("flowshopy-worker-ws-command-path-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -88,7 +88,7 @@ test("6.8.2.6.7 cenário A/D: enqueue wake via WS e hard-cleanup online/offline"
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner WS Command Path",
-      email: "owner-ws-command-path@vizlec.test",
+      email: "owner-ws-command-path@flowshopy.test",
       password: "StrongPass123!"
     }
   });

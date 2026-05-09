@@ -2,14 +2,15 @@ const runtimeHost =
   typeof window !== 'undefined' && window.location.hostname
     ? window.location.hostname
     : '127.0.0.1';
-export const API_BASE =
+const FALLBACK_API_BASE =
   import.meta.env.VITE_API_BASE ??
   import.meta.env.API_BASE_URL ??
   `http://${runtimeHost}:4010`;
+let resolvedApiBasePromise: Promise<string> | null = null;
 
 const inflight = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { ts: number; data: unknown }>();
-const UNAUTHORIZED_EVENT = 'vizlec:unauthorized';
+const UNAUTHORIZED_EVENT = 'flowshopy:unauthorized';
 
 function formatApiError(error: string | undefined, fallback: string): string {
   if (!error) return fallback;
@@ -22,6 +23,32 @@ function formatApiError(error: string | undefined, fallback: string): string {
 function emitUnauthorized(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+}
+
+async function resolveApiBase(): Promise<string> {
+  if (resolvedApiBasePromise) {
+    return resolvedApiBasePromise;
+  }
+  resolvedApiBasePromise = (async () => {
+    if (typeof window === 'undefined') {
+      return FALLBACK_API_BASE;
+    }
+    const desktop = (window as Window & {
+      flowshopyDesktop?: {
+        getRuntimeInfo?: () => Promise<{ apiUrl?: string }>;
+      };
+    }).flowshopyDesktop;
+    if (!desktop?.getRuntimeInfo) {
+      return FALLBACK_API_BASE;
+    }
+    try {
+      const runtime = await desktop.getRuntimeInfo();
+      return runtime.apiUrl?.trim() || FALLBACK_API_BASE;
+    } catch {
+      return FALLBACK_API_BASE;
+    }
+  })();
+  return resolvedApiBasePromise;
 }
 
 export async function apiGet<T>(
@@ -38,7 +65,8 @@ export async function apiGet<T>(
   if (dedupe && inflight.has(path)) {
     return inflight.get(path) as Promise<T>;
   }
-  const request = fetch(`${API_BASE}${path}`, { credentials: 'include' })
+  const request = resolveApiBase()
+    .then((apiBase) => fetch(`${apiBase}${path}`, { credentials: 'include' }))
     .then(async (res) => {
       if (res.status === 401) {
         emitUnauthorized();
@@ -61,7 +89,8 @@ export async function apiGet<T>(
 }
 
 export async function apiPost<T>(path: string, payload: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const apiBase = await resolveApiBase();
+  const res = await fetch(`${apiBase}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -78,7 +107,8 @@ export async function apiPost<T>(path: string, payload: unknown): Promise<T> {
 }
 
 export async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const apiBase = await resolveApiBase();
+  const res = await fetch(`${apiBase}${path}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -95,7 +125,8 @@ export async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const apiBase = await resolveApiBase();
+  const res = await fetch(`${apiBase}${path}`, {
     method: 'DELETE',
     credentials: 'include'
   });
@@ -109,4 +140,5 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export const API_BASE = FALLBACK_API_BASE;
 export { UNAUTHORIZED_EVENT };

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import { URL } from "node:url";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
 // Teste da Camada 1 do item 6.8.2.4:
@@ -10,7 +10,7 @@ import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 // - Invitation precisa nascer e ser listada no workspace do usuário autenticado;
 // - usuário de um workspace não pode operar recursos (course/invitation) de outro workspace;
 // - ao aceitar convite, o novo usuário deve ser vinculado ao workspace do convite.
-const runtime = createApiTestRuntime("vizlec-workspace-layer1-");
+const runtime = createApiTestRuntime("flowshopy-workspace-layer1-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -38,7 +38,7 @@ test("layer1 workspace ownership: course + invitation are isolated per workspace
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Layer1",
-      email: "owner-layer1@vizlec.test",
+      email: "owner-layer1@flowshopy.test",
       password: "StrongPass123!"
     }
   });
@@ -65,7 +65,7 @@ test("layer1 workspace ownership: course + invitation are isolated per workspace
   const inviterB = await prisma.user.create({
     data: {
       name: "Inviter B",
-      email: "inviter-b-layer1@vizlec.test",
+      email: "inviter-b-layer1@flowshopy.test",
       passwordHash: "hash-b",
       role: "admin"
     }
@@ -127,7 +127,7 @@ test("layer1 workspace ownership: course + invitation are isolated per workspace
     url: "/team/invitations",
     headers: { cookie },
     payload: {
-      email: "invite-a-layer1@vizlec.test",
+      email: "invite-a-layer1@flowshopy.test",
       role: "member"
     }
   });
@@ -148,7 +148,7 @@ test("layer1 workspace ownership: course + invitation are isolated per workspace
     data: {
       workspaceId: workspaceB.id,
       inviteeName: "Foreign Invite",
-      email: "invite-b-layer1@vizlec.test",
+      email: "invite-b-layer1@flowshopy.test",
       role: "member",
       tokenHash: "foreign-token-hash-layer1",
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -190,7 +190,7 @@ test("layer1 workspace ownership: course + invitation are isolated per workspace
   });
   assert.equal(acceptRes.statusCode, 200);
   const acceptedUser = acceptRes.json() as { user: { id: string; email: string } };
-  assert.equal(acceptedUser.user.email, "invite-a-layer1@vizlec.test");
+  assert.equal(acceptedUser.user.email, "invite-a-layer1@flowshopy.test");
 
   const acceptedMembership = await prisma.workspaceMembership.findUnique({
     where: {

@@ -1,6 +1,6 @@
 {
-  "appId": "com.vizlec.desktop",
-  "productName": "VizLec Desktop",
+  "appId": "com.flowshopy.desktop",
+  "productName": "FlowShopy Desktop",
   "directories": {
     "output": "dist/desktop"
   },

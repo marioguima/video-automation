@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-generation-cancel-guard-");
+const runtime = createApiTestRuntime("flowshopy-generation-cancel-guard-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -35,7 +35,7 @@ test("generation cancel endpoints validate clientId(agentId) by workspace", asyn
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Cancel",
-      email: "owner-cancel@vizlec.test",
+      email: "owner-cancel@flowshopy.test",
       password: "StrongPass123!"
     }
   });

@@ -7,7 +7,7 @@ import {
   type CompositionPresetId,
   type CompositionTimeline,
   type NarrativeRole
-} from "@vizlec/shared";
+} from "@flowshopy/shared";
 
 export type GeneratedNarrativeUnit = {
   order: number;

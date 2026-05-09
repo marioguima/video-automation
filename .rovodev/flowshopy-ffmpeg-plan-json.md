@@ -1,4 +1,4 @@
-# VizLec Prompt — FFmpeg Plan (Slides -> Video) [JSON]
+# FlowShopy Prompt — FFmpeg Plan (Slides -> Video) [JSON]
 
 Você é um engenheiro de vídeo. Crie um plano de comandos (alto nível) para gerar o vídeo final a partir de slides e áudios.
 Retorne **apenas JSON válido**.

@@ -540,12 +540,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         void fetchMetrics();
       }, 180);
     };
-    window.addEventListener('vizlec:ws', onWs as EventListener);
+    window.addEventListener('flowshopy:ws', onWs as EventListener);
     return () => {
       if (inventoryRefreshTimerRef.current) {
         window.clearTimeout(inventoryRefreshTimerRef.current);
       }
-      window.removeEventListener('vizlec:ws', onWs as EventListener);
+      window.removeEventListener('flowshopy:ws', onWs as EventListener);
     };
   }, [fetchMetrics]);
 

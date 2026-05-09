@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOMAIN="control.vizlec-dev.test"
-REPO_URL="https://github.com/marioguima/vizlec.git"
-REPO_DIR="${HOME}/vizlec"
+DOMAIN="control.flowshopy-dev.test"
+REPO_URL="https://github.com/marioguima/flowshopy.git"
+REPO_DIR="${HOME}/flowshopy"
 BRANCH=""
 SKIP_DOCKER=0
 SKIP_MKCERT=0
@@ -14,7 +14,7 @@ Uso:
   bash scripts/lab/bootstrap-control-plane-debian.sh [opcoes]
 
 Opcoes:
-  --domain <dominio>         Dominio do control plane (padrao: control.vizlec-dev.test)
+  --domain <dominio>         Dominio do control plane (padrao: control.flowshopy-dev.test)
   --repo-url <url>           URL do repositorio git
   --repo-dir <caminho>       Diretorio local do repositorio
   --branch <nome>            Branch para checkout/update

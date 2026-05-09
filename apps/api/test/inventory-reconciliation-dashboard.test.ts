@@ -3,10 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import test, { after, before } from "node:test";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-inventory-reconciliation-");
+const runtime = createApiTestRuntime("flowshopy-inventory-reconciliation-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -32,7 +32,7 @@ test("dashboard inventory reconciliation: detecta divergencia base x disco, reca
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Inventory Recon",
-      email: "owner-inventory-recon@vizlec.test",
+      email: "owner-inventory-recon@flowshopy.test",
       password: "StrongPass123!"
     }
   });

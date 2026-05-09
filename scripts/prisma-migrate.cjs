@@ -24,6 +24,22 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+function readRuntimeConfig() {
+  const runtimeConfigPath =
+    process.env.FLOWSHOPY_DESKTOP_CONFIG_PATH?.trim() ||
+    path.join(process.env.DATA_DIR?.trim() || path.join(rootDir, "data"), "desktop.runtime.json");
+  try {
+    if (!fs.existsSync(runtimeConfigPath)) {
+      return {};
+    }
+    return JSON.parse(fs.readFileSync(runtimeConfigPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+const runtimeConfig = readRuntimeConfig();
+
 function normalizeFilePath(filePath) {
   if (process.platform === "win32") {
     return filePath.replace(/\\/g, "/");
@@ -33,22 +49,30 @@ function normalizeFilePath(filePath) {
 
 let dataDir = process.env.DATA_DIR?.trim();
 if (!dataDir) {
-  console.error("Set DATA_DIR in .env before running migrations.");
-  process.exit(1);
+  const runtimeConfigPath = process.env.FLOWSHOPY_DESKTOP_CONFIG_PATH?.trim();
+  if (runtimeConfigPath) {
+    dataDir = path.dirname(path.resolve(runtimeConfigPath));
+  } else {
+    dataDir = path.join(rootDir, "data");
+  }
 }
 
-const dbPath = path.join(dataDir, "vizlec.db");
+const dbPath = path.join(dataDir, "data.db");
 const databaseUrl = `file:${normalizeFilePath(dbPath)}`;
-process.env.VIZLEC_DB_URL = databaseUrl;
+process.env.FLOWSHOPY_DB_URL = databaseUrl;
 
 fs.mkdirSync(dataDir, { recursive: true });
 console.log(`Using SQLite at ${databaseUrl}`);
 
 async function isApiRunning() {
+  const port =
+    typeof runtimeConfig.apiPort === "number" && Number.isFinite(runtimeConfig.apiPort)
+      ? runtimeConfig.apiPort
+      : 4010;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 800);
-    const res = await fetch("http://127.0.0.1:4010/health", {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, {
       signal: controller.signal
     }).finally(() => clearTimeout(timeout));
     return res.ok;
@@ -58,7 +82,10 @@ async function isApiRunning() {
 }
 
 async function isWorkerRunning() {
-  const port = Number(process.env.WORKER_PORT ?? 4011);
+  const port =
+    typeof runtimeConfig.workerPort === "number" && Number.isFinite(runtimeConfig.workerPort)
+      ? runtimeConfig.workerPort
+      : 4011;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 800);

@@ -1,6 +1,6 @@
-# VizLec Prompt — Job State Machine (Pipeline) [JSON]
+# FlowShopy Prompt — Job State Machine (Pipeline) [JSON]
 
-Defina uma máquina de estados para o pipeline do VizLec, considerando reprocessamento por bloco e idempotência.
+Defina uma máquina de estados para o pipeline do FlowShopy, considerando reprocessamento por bloco e idempotência.
 Retorne **apenas JSON válido**.
 
 ## Requisitos

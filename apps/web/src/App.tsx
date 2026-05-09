@@ -428,7 +428,7 @@ const App: React.FC = () => {
               progressTotal?: number | null;
             } & EntityChangedPayload;
           };
-          window.dispatchEvent(new CustomEvent('vizlec:ws', { detail: data }));
+          window.dispatchEvent(new CustomEvent('flowshopy:ws', { detail: data }));
           if (data.event === 'job_update') {
             const payload = data.payload;
             const buildStatus = payload?.buildStatus;

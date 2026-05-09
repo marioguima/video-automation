@@ -68,10 +68,10 @@ const HELP_DATA: HelpCategory[] = [
     topics: [
       {
         id: 'welcome',
-        title: 'Welcome to VizLec',
+        title: 'Welcome to FlowShopy',
         content: [
-          { id: 'b1', type: 'title', text: 'Introduction to VizLec Platform' },
-          { id: 'b2', type: 'paragraph', text: 'VizLec is an AI-powered video creation platform designed for educators and content creators. It streamlines the process of converting scripts into engaging video lessons.' },
+          { id: 'b1', type: 'title', text: 'Introduction to FlowShopy Platform' },
+          { id: 'b2', type: 'paragraph', text: 'FlowShopy is an AI-powered video creation platform designed for educators and content creators. It streamlines the process of converting scripts into engaging video lessons.' },
           { id: 'b3', type: 'paragraph', text: 'In this section, we will guide you through the initial setup, understanding the dashboard, and creating your very first project from scratch.' }
         ]
       },
@@ -80,7 +80,7 @@ const HELP_DATA: HelpCategory[] = [
         title: 'Setting up your account',
         content: [
           { id: 'b4', type: 'title', text: 'Completing your Profile' },
-          { id: 'b5', type: 'paragraph', text: 'To get the most out of VizLec, ensure your profile is 100% complete. Navigate to the Settings tab to update your personal information and preferences.' }
+          { id: 'b5', type: 'paragraph', text: 'To get the most out of FlowShopy, ensure your profile is 100% complete. Navigate to the Settings tab to update your personal information and preferences.' }
         ]
       }
     ]
@@ -95,7 +95,7 @@ const HELP_DATA: HelpCategory[] = [
         title: 'Understanding Blocks',
         content: [
           { id: 'b6', type: 'title', text: 'The Logic of Lesson Blocks' },
-          { id: 'b7', type: 'paragraph', text: 'A lesson in VizLec is composed of multiple "blocks". Each block represents a distinct segment of your video, containing script, audio, visual assets, and on-screen text.' },
+          { id: 'b7', type: 'paragraph', text: 'A lesson in FlowShopy is composed of multiple "blocks". Each block represents a distinct segment of your video, containing script, audio, visual assets, and on-screen text.' },
           { id: 'b8', type: 'paragraph', text: 'You can drag and drop these blocks to reorder the flow of your narrative. The AI engine processes each block independently before stitching them into a final video.' }
         ]
       },
@@ -104,7 +104,7 @@ const HELP_DATA: HelpCategory[] = [
         title: 'AI Generation Features',
         content: [
           { id: 'b9', type: 'title', text: 'Generating Visuals and Audio' },
-          { id: 'b10', type: 'paragraph', text: 'VizLec uses advanced generative models. For audio, simply type your script and select a voice. For visuals, describe the scene in the prompt box, and the AI will create a unique image asset.' }
+          { id: 'b10', type: 'paragraph', text: 'FlowShopy uses advanced generative models. For audio, simply type your script and select a voice. For visuals, describe the scene in the prompt box, and the AI will create a unique image asset.' }
         ]
       }
     ]

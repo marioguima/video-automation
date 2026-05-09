@@ -1,5 +1,5 @@
 param(
-  [string]$Domain = "control.vizlec-dev.test",
+  [string]$Domain = "control.flowshopy-dev.test",
   [string]$LabEnvPath = "infra/lab/.env",
   [switch]$SkipCert,
   [switch]$SkipUp

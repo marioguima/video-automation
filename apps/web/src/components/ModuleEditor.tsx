@@ -193,7 +193,7 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
       }
     };
 
-    window.addEventListener('vizlec:ws', onWs as EventListener);
+    window.addEventListener('flowshopy:ws', onWs as EventListener);
     return () => {
       Object.values(segmentWaitersRef.current).forEach((waiter) => {
         try {
@@ -203,7 +203,7 @@ const ModuleEditor: React.FC<ModuleEditorProps> = ({ moduleId, module, dispatchA
         }
       });
       segmentWaitersRef.current = {};
-      window.removeEventListener('vizlec:ws', onWs as EventListener);
+      window.removeEventListener('flowshopy:ws', onWs as EventListener);
     };
   }, []);
 

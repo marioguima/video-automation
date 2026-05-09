@@ -1,9 +1,9 @@
-# VizLec — Especificação Técnica Inicial (Prompt)
+# FlowShopy — Especificação Técnica Inicial (Prompt)
 
-Você é um Product + Engineering lead. Crie uma **especificação técnica inicial** (mistura de PRD + desenho técnico) para um produto chamado **VizLec**.
+Você é um Product + Engineering lead. Crie uma **especificação técnica inicial** (mistura de PRD + desenho técnico) para um produto chamado **FlowShopy**.
 
 ## Contexto
-VizLec transforma o **roteiro completo** de uma aula (teleprompter, palavra por palavra) em um **vídeo final** composto por slides (imagens) sincronizados com áudio (TTS). O usuário não precisa de editor visual; precisa do resultado final e de uma UI simples para revisar e regerar partes.
+FlowShopy transforma o **roteiro completo** de uma aula (teleprompter, palavra por palavra) em um **vídeo final** composto por slides (imagens) sincronizados com áudio (TTS). O usuário não precisa de editor visual; precisa do resultado final e de uma UI simples para revisar e regerar partes.
 
 Tudo deve rodar **localmente** (local-first):
 - LLM: **Ollama**

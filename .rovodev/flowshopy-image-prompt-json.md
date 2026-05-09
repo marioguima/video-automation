@@ -1,4 +1,4 @@
-# VizLec Prompt — Image Prompt (por bloco) [JSON]
+# FlowShopy Prompt — Image Prompt (por bloco) [JSON]
 
 Você cria o **prompt variável do bloco** para gerar uma imagem no ComfyUI, baseado no texto narrado.
 Retorne **apenas JSON válido**.

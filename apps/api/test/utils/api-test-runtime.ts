@@ -154,7 +154,7 @@ function applyBlockSceneNotesAndSoundEffectMigrationIfNeeded(rootDir: string, db
 }
 
 function cloneAndResetDatabase(rootDir: string, targetDbPath: string): void {
-  const templateDbPath = path.join(rootDir, "data", "vizlec.db");
+  const templateDbPath = path.join(rootDir, "data", "data.db");
   if (!fs.existsSync(templateDbPath)) {
     throw new Error(`Database template not found at ${templateDbPath}`);
   }
@@ -192,7 +192,7 @@ export function createApiTestRuntime(tempPrefix: string): ApiTestRuntime {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), tempPrefix));
   const dataDir = path.join(tempDir, "data");
   fs.mkdirSync(dataDir, { recursive: true });
-  const dbPath = path.join(dataDir, "vizlec.db");
+  const dbPath = path.join(dataDir, "data.db");
   const databaseUrl = normalizeFileUrl(dbPath);
 
   return {
@@ -204,11 +204,11 @@ export function createApiTestRuntime(tempPrefix: string): ApiTestRuntime {
     resetDatabase: () => cloneAndResetDatabase(rootDir, dbPath),
     configureEnv: () => {
       process.env.DATA_DIR = dataDir;
-      process.env.VIZLEC_DB_URL = databaseUrl;
+      process.env.FLOWSHOPY_DB_URL = databaseUrl;
       process.env.INTERNAL_JOBS_EVENT_TOKEN = "test-internal-token";
       process.env.AUTH_JWT_SECRET = "test-jwt-secret";
       process.env.AUTH_COOKIE_SECURE = "false";
-      process.env.VIZLEC_SKIP_API_LISTEN = "true";
+      process.env.FLOWSHOPY_SKIP_API_LISTEN = "true";
     },
     cleanup: () => {
       if (process.cwd().startsWith(tempDir)) {

@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-auth-scope-");
+const runtime = createApiTestRuntime("flowshopy-auth-scope-");
 
 let app: FastifyInstance;
 
@@ -30,7 +30,7 @@ after(async () => {
 // Fluxo E2E do escopo de autenticação:
 // bootstrap -> sessão válida -> contexto -> novo login -> mesmo workspace.
 test("auth scope flow: bootstrap -> me/context -> login keeps same workspace", async () => {
-  const email = "owner-auth-scope@vizlec.test";
+  const email = "owner-auth-scope@flowshopy.test";
   const password = "StrongPass123!";
   const newPassword = "NewStrongPass123!";
 

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-generation-queue-guard-");
+const runtime = createApiTestRuntime("flowshopy-generation-queue-guard-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -35,7 +35,7 @@ test("generation queue endpoints enforce clientId(agentId) workspace guard", asy
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Queue",
-      email: "owner-queue@vizlec.test",
+      email: "owner-queue@flowshopy.test",
       password: "StrongPass123!"
     }
   });

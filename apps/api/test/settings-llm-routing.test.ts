@@ -3,7 +3,7 @@ import test, { after, before } from "node:test";
 import type { FastifyInstance } from "fastify";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
-const runtime = createApiTestRuntime("vizlec-settings-stage-strategies-");
+const runtime = createApiTestRuntime("flowshopy-settings-stage-strategies-");
 
 let app: FastifyInstance;
 let sessionCookie = "";
@@ -21,7 +21,7 @@ before(async () => {
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Settings Owner",
-      email: "settings-owner@vizlec.test",
+      email: "settings-owner@flowshopy.test",
       password: "StrongPass123!"
     }
   });

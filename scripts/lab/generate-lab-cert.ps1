@@ -1,5 +1,5 @@
 param(
-  [string]$Domain = "control.vizlec-dev.test",
+  [string]$Domain = "control.flowshopy-dev.test",
   [string]$OutDir = "infra/lab/certs",
   [switch]$SkipAutoInstall
 )

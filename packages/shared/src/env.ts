@@ -49,10 +49,10 @@ function findRepoRoot(startDir: string): string {
 }
 
 export function loadRootEnv(): void {
-  const explicitEnvPath = process.env.VIZLEC_ENV_FILE?.trim();
+  const explicitEnvPath = process.env.FLOWSHOPY_ENV_FILE?.trim();
   if (explicitEnvPath) {
     loadEnvFile(explicitEnvPath);
-    if ((process.env.VIZLEC_SKIP_ROOT_ENV ?? "false").trim().toLowerCase() === "true") {
+    if ((process.env.FLOWSHOPY_SKIP_ROOT_ENV ?? "false").trim().toLowerCase() === "true") {
       return;
     }
   }

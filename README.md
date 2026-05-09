@@ -55,7 +55,7 @@ packages/shared shared runtime helpers
 
 ```powershell
 pnpm install
-pnpm --filter @vizlec/worker exec playwright install
+pnpm --filter @flowshopy/worker exec playwright install
 ```
 
 Criar o `.env` raiz a partir do exemplo e ajustar os segredos locais:
@@ -72,8 +72,8 @@ API_PORT=4110
 WORKER_PORT=4111
 API_BASE_URL=http://127.0.0.1:4110
 WEB_APP_BASE_URL=http://127.0.0.1:4273
-INTERNAL_JOBS_EVENT_TOKEN=vizlec-local-dev-internal-token
-AGENT_CONTROL_TOKEN_SECRET=vizlec-local-dev-agent-token
+INTERNAL_JOBS_EVENT_TOKEN=flowshopy-local-dev-internal-token
+AGENT_CONTROL_TOKEN_SECRET=flowshopy-local-dev-agent-token
 ```
 
 Configurar frontend dev:
@@ -340,11 +340,11 @@ agent_hello_ack
 ## Validar
 
 ```powershell
-pnpm --filter @vizlec/api typecheck
-pnpm --filter @vizlec/web typecheck
-pnpm --filter @vizlec/worker typecheck
+pnpm --filter @flowshopy/api typecheck
+pnpm --filter @flowshopy/web typecheck
+pnpm --filter @flowshopy/worker typecheck
 pnpm verify:critical
-pnpm --filter @vizlec/api run test:one -- test/content-cope-flow.test.ts
+pnpm --filter @flowshopy/api run test:one -- test/content-cope-flow.test.ts
 ```
 
 ## Pendencias tecnicas
@@ -356,7 +356,7 @@ pnpm --filter @vizlec/api run test:one -- test/content-cope-flow.test.ts
 
 ## Regra importante
 
-`G:\tool\vizlec` foi usado como referencia tecnica historica. Nao editar esse projeto.
+`G:\tool\flowshopy` foi usado como referencia tecnica historica. Nao editar esse projeto.
 
 Toda implementacao ativa deve acontecer neste repositorio:
 

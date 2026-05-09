@@ -330,7 +330,7 @@ interface SettingsProps {
 
 declare global {
   interface Window {
-    vizlecDesktop?: {
+    flowshopyDesktop?: {
       openDataDir?: () => Promise<boolean>;
     };
   }
@@ -2204,7 +2204,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                       </div>
                       <button
                         type="button"
-                        onClick={() => window.vizlecDesktop?.openDataDir?.()}
+                        onClick={() => window.flowshopyDesktop?.openDataDir?.()}
                         className="h-9 px-4 rounded-[5px] border border-[hsl(var(--editor-input-border))] bg-[hsl(var(--editor-input))] text-xs font-bold uppercase tracking-widest text-foreground hover:border-orange-500/30 hover:text-orange-600 transition-all"
                       >
                         Open Data Folder
@@ -2320,7 +2320,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                 </div>
               ) : (
                 <div className="rounded-[5px] border border-border p-4 text-xs text-muted-foreground bg-[hsl(var(--secondary))]/20">
-                  Desktop runtime controls are available only when the interface is running inside VizLec Desktop.
+                  Desktop runtime controls are available only when the interface is running inside FlowShopy Desktop.
                 </div>
               )}
 

@@ -1,5 +1,5 @@
 {
-  "name": "@vizlec/worker",
+  "name": "@flowshopy/worker",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -12,8 +12,8 @@
     "test:one": "tsx --test"
   },
   "dependencies": {
-    "@vizlec/db": "workspace:*",
-    "@vizlec/shared": "workspace:*",
+    "@flowshopy/db": "workspace:*",
+    "@flowshopy/shared": "workspace:*",
     "playwright": "^1.50.0",
     "ws": "^8.18.0"
   },

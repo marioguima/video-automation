@@ -1,14 +1,14 @@
-# VizLec Prompt — ComfyUI Workflow Map (Parametrização) [JSON]
+# FlowShopy Prompt — ComfyUI Workflow Map (Parametrização) [JSON]
 
-Você é um engenheiro de integração. Sua tarefa é definir como o VizLec deve parametrizar e executar um workflow do **ComfyUI** via API.
+Você é um engenheiro de integração. Sua tarefa é definir como o FlowShopy deve parametrizar e executar um workflow do **ComfyUI** via API.
 Retorne **apenas JSON válido**.
 
 ## Objetivo
-- Mapear entradas do VizLec (prompt do bloco, negative prompt do template, seed, resolução, steps etc.) para um workflow do ComfyUI.
+- Mapear entradas do FlowShopy (prompt do bloco, negative prompt do template, seed, resolução, steps etc.) para um workflow do ComfyUI.
 - Definir contrato de execução: enqueue, polling, obtenção do output e erros.
 
 ## Regras
-- Considerar que o VizLec terá:
+- Considerar que o FlowShopy terá:
   - `block_prompt` (variável por slide)
   - `master_positive_prompt` (fixo do template)
   - `negative_prompt` (fixo do template)

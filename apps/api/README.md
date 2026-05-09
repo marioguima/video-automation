@@ -1,6 +1,6 @@
-# VizLec API
+# FlowShopy API
 
-API REST do VizLec, construída com [Fastify](https://fastify.dev/).
+API REST do FlowShopy, construída com [Fastify](https://fastify.dev/).
 
 ## Iniciando
 
@@ -61,7 +61,7 @@ Com a API rodando, acesse:
 
 ### Autenticação
 
-A maioria dos endpoints requer autenticação via cookie de sessão (`vizlec_session`).
+A maioria dos endpoints requer autenticação via cookie de sessão (`flowshopy_session`).
 
 **Endpoints públicos** (não requerem autenticação):
 - `/health`
@@ -107,7 +107,7 @@ apps/api/
 - **[@scalar/fastify-api-reference](https://github.com/scalar/scalar)** - Documentação interativa
 - **[@fastify/jwt](https://github.com/fastify/fastify-jwt)** - Autenticação JWT
 - **[@fastify/websocket](https://github.com/fastify/fastify-websocket)** - WebSocket para eventos em tempo real
-- **[Prisma](https://www.prisma.io/)** - ORM (via `@vizlec/db`)
+- **[Prisma](https://www.prisma.io/)** - ORM (via `@flowshopy/db`)
 
 ## Scripts disponíveis
 
@@ -128,7 +128,7 @@ apps/api/
 pnpm test
 
 # ou pela raiz do monorepo
-pnpm --filter @vizlec/api test
+pnpm --filter @flowshopy/api test
 ```
 
 ### Rodar um único arquivo de teste
@@ -138,7 +138,7 @@ pnpm --filter @vizlec/api test
 pnpm test:one -- test/auth-scope-flow.test.ts
 
 # ou pela raiz do monorepo
-pnpm --filter @vizlec/api run test:one -- test/auth-scope-flow.test.ts
+pnpm --filter @flowshopy/api run test:one -- test/auth-scope-flow.test.ts
 ```
 
 ### Teste do fluxo de escopo

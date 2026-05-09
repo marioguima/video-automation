@@ -666,7 +666,7 @@ type SoundEffectPromptEditorProps = {
 };
 
 const MAX_IMAGE_SEED = 2147483647;
-const ASSETS_JOB_STORAGE_KEY = 'vizlec_assets_job';
+const ASSETS_JOB_STORAGE_KEY = 'flowshopy_assets_job';
 
 const clampSeedValue = (value: number) => {
   if (!Number.isFinite(value)) return 0;
@@ -2473,9 +2473,9 @@ const Editor: React.FC<EditorProps> = ({
       }
     };
 
-    window.addEventListener('vizlec:ws', onWsEvent as EventListener);
+    window.addEventListener('flowshopy:ws', onWsEvent as EventListener);
     return () => {
-      window.removeEventListener('vizlec:ws', onWsEvent as EventListener);
+      window.removeEventListener('flowshopy:ws', onWsEvent as EventListener);
     };
   }, [invalidateFinalVideoLocal, selectedVersionId]);
 
@@ -3551,7 +3551,7 @@ const Editor: React.FC<EditorProps> = ({
     });
   };
 
-  // 6.8.2.6.13: editor job lifecycle uses WS-only events (`vizlec:ws`).
+  // 6.8.2.6.13: editor job lifecycle uses WS-only events (`flowshopy:ws`).
 
   useEffect(() => {
     if (!isGeneratingFinalVideo) {

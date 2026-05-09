@@ -32,7 +32,7 @@ interface TeamProps {
 const DEFAULT_INVITE_MESSAGE_TEMPLATE = [
   'Hi {{name}},',
   '',
-  "You've been invited to join VizLec as {{role}}.",
+  "You've been invited to join FlowShopy as {{role}}.",
   '',
   'Open this link to set your password and activate access:',
   '{{invite_link}}',
@@ -92,7 +92,7 @@ const Team: React.FC<TeamProps> = ({ currentUser }) => {
       name: first?.name?.trim() || 'there',
       email: first?.email?.trim().toLowerCase() || 'teammate@company.com',
       role: role === 'admin' ? 'Admin' : 'Member',
-      invite_link: 'https://your-vizlec-host/?invite=YOUR_TOKEN',
+      invite_link: 'https://your-flowshopy-host/?invite=YOUR_TOKEN',
       expires_at: new Date(Date.now() + expiresInHours * 60 * 60 * 1000).toISOString()
     };
   }, [parsedRecipients, role, expiresInHours]);

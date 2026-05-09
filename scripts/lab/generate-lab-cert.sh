@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOMAIN="${1:-control.vizlec-dev.test}"
+DOMAIN="${1:-control.flowshopy-dev.test}"
 OUT_DIR="${2:-infra/lab/certs}"
 
 install_mkcert() {

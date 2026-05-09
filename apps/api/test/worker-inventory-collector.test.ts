@@ -13,7 +13,7 @@ test("worker inventory collector: snapshot/delta detecta exclusao manual e evita
   // 1) validar snapshot inicial com N arquivos de audio;
   // 2) validar delta negativo apos exclusao manual no disco;
   // 3) validar que duas varreduras sem mudanca nao geram delta.
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vizlec-worker-inventory-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowshopy-worker-inventory-"));
   const audioDir = path.join(tempDir, "courses", "c1", "modules", "m1", "lessons", "l1");
   fs.mkdirSync(audioDir, { recursive: true });
 

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-contextBridge.exposeInMainWorld("vizlecDesktop", {
+contextBridge.exposeInMainWorld("flowshopyDesktop", {
   getRuntimeInfo: () => ipcRenderer.invoke("desktop:get-runtime-info"),
   getBootstrapState: () => ipcRenderer.invoke("desktop:get-bootstrap-state"),
   openDataDir: () => ipcRenderer.invoke("desktop:open-data-dir"),

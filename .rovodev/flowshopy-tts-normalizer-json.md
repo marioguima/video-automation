@@ -1,4 +1,4 @@
-# VizLec Prompt — TTS Text Normalizer (Pronunciation helper) [JSON]
+# FlowShopy Prompt — TTS Text Normalizer (Pronunciation helper) [JSON]
 
 Você recebe um texto que será narrado via TTS. Seu objetivo é sugerir uma versão `tts_text` que soe natural no TTS.
 Retorne **apenas JSON válido**.

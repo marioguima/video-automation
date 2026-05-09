@@ -3,13 +3,13 @@ set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
   echo "Uso: bash scripts/lab/phase1-edge-client-debian.sh <SERVER_IP> <CA_CERT_PATH> [DOMAIN]"
-  echo "Exemplo: bash scripts/lab/phase1-edge-client-debian.sh 192.168.1.10 /tmp/rootCA.pem control.vizlec-dev.test"
+  echo "Exemplo: bash scripts/lab/phase1-edge-client-debian.sh 192.168.1.10 /tmp/rootCA.pem control.flowshopy-dev.test"
   exit 1
 fi
 
 SERVER_IP="$1"
 CA_CERT_PATH="$2"
-DOMAIN="${3:-control.vizlec-dev.test}"
+DOMAIN="${3:-control.flowshopy-dev.test}"
 HOSTS_FILE="/etc/hosts"
 
 echo "== Fase 1 / deus-server (Debian) =="

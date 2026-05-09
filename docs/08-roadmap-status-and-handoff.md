@@ -21,7 +21,7 @@ Nota importante de produto:
 
 Implementado:
 
-- monorepo VizLec trazido para `G:\tool\video-automation`;
+- monorepo FlowShopy trazido para `G:\tool\video-automation`;
 - `ContentProject` e `ContentItem` no banco/API; na UX, `ContentProject` e exibido como `Project`;
 - endpoints basicos de conteudo;
 - tela `Projects`;
@@ -122,7 +122,7 @@ Prioridade de arquitetura a partir desta decisao:
 ## Credencial local de dev
 
 ```text
-email: marioguimaraes@vizlec.com
+email: marioguimaraes@flowshopy.com
 senha: TempPass123!
 ```
 
@@ -144,12 +144,12 @@ VITE_API_BASE=http://127.0.0.1:4110
 ## Validacoes realizadas
 
 - `pnpm verify:critical`
-- `pnpm --filter @vizlec/api typecheck`
-- `pnpm --filter @vizlec/web typecheck`
-- `pnpm --filter @vizlec/worker typecheck`
-- `pnpm --filter @vizlec/web build`
-- `pnpm --filter @vizlec/api run test:one -- test/content-cope-flow.test.ts`
-- `pnpm --filter @vizlec/api run test:one -- test/content-cope-flow.test.ts test/endpoint-ownership-inventory.test.ts`
+- `pnpm --filter @flowshopy/api typecheck`
+- `pnpm --filter @flowshopy/web typecheck`
+- `pnpm --filter @flowshopy/worker typecheck`
+- `pnpm --filter @flowshopy/web build`
+- `pnpm --filter @flowshopy/api run test:one -- test/content-cope-flow.test.ts`
+- `pnpm --filter @flowshopy/api run test:one -- test/content-cope-flow.test.ts test/endpoint-ownership-inventory.test.ts`
 
 ## Arquivos de implementacao relevantes
 

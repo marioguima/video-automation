@@ -111,22 +111,12 @@ Modelo:
 ## Variaveis criticas
 
 - `DATA_DIR`
-- `VIZLEC_DB_URL`
-- `API_HOST`
-- `API_PORT`
-- `WORKER_PORT`
-- `WEB_APP_BASE_URL`
-- `API_BASE_URL`
+- `FLOWSHOPY_DB_URL`
 - `AUTH_JWT_SECRET`
 - `AUTH_COOKIE_SECURE`
 - `INTERNAL_JOBS_EVENT_TOKEN`
 - `AGENT_CONTROL_TOKEN_SECRET`
-- `OLLAMA_BASE_URL`
-- `COMFYUI_BASE_URL`
-- `TTS_PROVIDER`
-- `XTTS_API_BASE_URL`
 - `APP_SETTINGS_PATH`
-- `COMFY_SETTINGS_PATH`
 
 ## HTTPS e seguranca
 
@@ -145,7 +135,7 @@ Producao deve usar:
 
 Backup minimo V1:
 
-- `DATA_DIR/vizlec.db`;
+- `DATA_DIR/data.db`;
 - pasta de assets;
 - settings JSON;
 - vozes/custom assets.
@@ -193,4 +183,3 @@ Necessario evoluir:
 - health de providers;
 - metricas de tempo por etapa;
 - erros acionaveis para usuario.
-

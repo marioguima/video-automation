@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDeterministicBlocks } from "@vizlec/shared";
+import { buildDeterministicBlocks } from "@flowshopy/shared";
 
 test("deterministic segment fallback respects max words derived from speech budget", () => {
   const scriptText =

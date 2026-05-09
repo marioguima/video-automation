@@ -3,7 +3,7 @@ set -euo pipefail
 
 SERVER_IP=""
 CA_CERT_PATH=""
-DOMAIN="control.vizlec-dev.test"
+DOMAIN="control.flowshopy-dev.test"
 INSTALL_GPU=1
 AUTO_REBOOT=0
 INSTALL_OLLAMA=0
@@ -18,7 +18,7 @@ Uso:
 Opcoes:
   --server-ip <ip>           IP do control plane (obrigatorio com --setup-tls)
   --ca-cert-path <arquivo>   Caminho do rootCA.pem (obrigatorio com --setup-tls)
-  --domain <dominio>         Dominio do control plane (padrao: control.vizlec-dev.test)
+  --domain <dominio>         Dominio do control plane (padrao: control.flowshopy-dev.test)
   --setup-tls                Configura hosts + trust da CA para HTTPS do lab
   --no-gpu                   Nao instala stack NVIDIA
   --auto-reboot              Reinicia automaticamente se necessario
@@ -113,7 +113,7 @@ ensure_non_free_sources() {
     return
   fi
 
-  sudo cp "${sources}" "${sources}.bak-vizlec" 2>/dev/null || true
+  sudo cp "${sources}" "${sources}.bak-flowshopy" 2>/dev/null || true
 
   sudo sed -i -E \
     's/^deb (.*) main$/deb \1 main contrib non-free non-free-firmware/g' \

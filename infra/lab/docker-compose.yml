@@ -1,7 +1,7 @@
 services:
   reverse-proxy:
     image: traefik:v3.3
-    container_name: vizlec-lab-traefik
+    container_name: flowshopy-lab-traefik
     restart: unless-stopped
     command:
       - --configFile=/etc/traefik/traefik.yml
@@ -19,7 +19,7 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile.api
-    container_name: vizlec-lab-control-api
+    container_name: flowshopy-lab-control-api
     restart: unless-stopped
     environment:
       DATA_DIR: /data

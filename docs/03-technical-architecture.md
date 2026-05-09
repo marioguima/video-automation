@@ -257,7 +257,7 @@ Implicacao:
 Banco padrao:
 
 ```text
-SQLite em DATA_DIR/vizlec.db
+SQLite em DATA_DIR/data.db
 ```
 
 ORM:
@@ -331,7 +331,7 @@ PATCH /blocks/:blockId
 
 Auth:
 
-- cookie `vizlec_session`;
+- cookie `flowshopy_session`;
 - JWT assinado por `AUTH_JWT_SECRET`;
 - workspace resolvido a partir do usuario autenticado.
 

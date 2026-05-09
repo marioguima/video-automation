@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import type { FastifyInstance } from "fastify";
-import { createPrismaClient, type PrismaClient } from "@vizlec/db";
+import { createPrismaClient, type PrismaClient } from "@flowshopy/db";
 import { createApiTestRuntime } from "./utils/api-test-runtime.ts";
 
 // Teste das camadas 2/3/4 do item 6.8.2.4:
 // - Module/Lesson/LessonVersion/Block/Asset/Job/Notification precisam carregar workspaceId;
 // - operações de leitura/escrita em rotas de domínio não podem atravessar workspace;
 // - listagens por workspace não podem retornar dados "estrangeiros".
-const runtime = createApiTestRuntime("vizlec-workspace-layer234-");
+const runtime = createApiTestRuntime("flowshopy-workspace-layer234-");
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -35,7 +35,7 @@ test("layer2/3/4 workspace ownership: module/lesson/version/block/job/notificati
     url: "/auth/bootstrap-admin",
     payload: {
       name: "Owner Layer234",
-      email: "owner-layer234@vizlec.test",
+      email: "owner-layer234@flowshopy.test",
       password: "StrongPass123!"
     }
   });
@@ -60,7 +60,7 @@ test("layer2/3/4 workspace ownership: module/lesson/version/block/job/notificati
   const userB = await prisma.user.create({
     data: {
       name: "User B",
-      email: "user-b-layer234@vizlec.test",
+      email: "user-b-layer234@flowshopy.test",
       passwordHash: "hash-b",
       role: "admin"
     }
