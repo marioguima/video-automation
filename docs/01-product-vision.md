@@ -76,6 +76,105 @@ Regras de produto:
 - a criação de conteúdo pertence a área `Content`;
 - a área de `Project` deve localizar, associar e orquestrar conteúdos existentes, não duplicar a experiência de escrita.
 
+## Esteira editorial
+
+O ponto mais importante do domínio é este: o formato de entrada não define uma pipeline separada. O que muda é em que estágio da esteira aquele insumo entra.
+
+Exemplos:
+
+- uma ideia em texto já entra como matéria-prima textual;
+- um PDF entra antes, porque precisa ter o texto extraído;
+- um áudio entra antes, porque precisa ser transcrito;
+- um link de vídeo entra ainda antes, porque pode exigir download, extração de áudio e speech-to-text;
+- um script pronto entra mais adiante, porque já chega perto do estado de script aprovado.
+
+Ou seja: entradas diferentes não existem para criar pipelines diferentes. Elas existem porque cada insumo chega em um estado diferente e precisa caminhar até um mesmo ponto de convergência.
+
+Esse ponto comum é:
+
+```text
+script_ready
+```
+
+Todo conteúdo que vai virar entregável precisa, em algum momento, chegar a script.
+
+O que varia é apenas:
+
+- quais etapas anteriores ainda faltam;
+- quanto de automação será usado;
+- quanto de revisão humana será exigido;
+- se o usuário já forneceu o script pronto ou se ele ainda será desenvolvido.
+
+### Estados da esteira
+
+Leitura de produto sugerida:
+
+1. `source_ingested`
+2. `source_processed`
+3. `source_analyzed`
+4. `script_developing`
+5. `script_ready`
+6. `output_adapting`
+7. `output_structuring`
+8. `production_ready`
+9. `rendering`
+10. `ready`
+
+Definição de cada etapa:
+
+- `source_ingested`: o usuário enviou ou registrou um insumo;
+- `source_processed`: o sistema extraiu o que precisava do formato de entrada;
+- `source_analyzed`: o material já foi lido editorialmente e pode orientar criação;
+- `script_developing`: o script está sendo escrito, refinado ou transformado com ajuda humana/IA;
+- `script_ready`: existe um script aprovado para seguir;
+- `output_adapting`: o script está sendo adaptado para um entregável específico;
+- `output_structuring`: o entregável já está sendo quebrado em cenas, cards, páginas, seções ou blocos;
+- `production_ready`: prompts, composição e plano operacional já estão definidos;
+- `rendering`: geração de assets e render final em andamento;
+- `ready`: entregável pronto.
+
+Princípio obrigatório:
+
+- o produto não deve tratar link de vídeo, áudio, PDF e texto como produtos diferentes;
+- o produto deve tratar esses inputs como estados diferentes de uma mesma esteira de transformação editorial.
+
+### Convergência em script
+
+Existem duas entradas principais para a esteira:
+
+- `source mode`: o usuário fornece matéria-prima e o FlowShopy ajuda a desenvolver o script;
+- `provided script mode`: o usuário já fornece o script pronto e pula etapas anteriores.
+
+Esses dois modos não criam naturezas diferentes de conteúdo. Eles apenas colocam o conteúdo em pontos diferentes da esteira.
+
+Regra de produto:
+
+- todo conteúdo que vai gerar output precisa chegar a `script_ready`;
+- se o usuário já trouxe o script pronto, isso só significa que etapas anteriores já vieram resolvidas;
+- o momento de ser tratado como script sempre existe.
+
+### Script master e scripts por output
+
+O conteúdo pode convergir para um script-base aprovado, mas isso não significa que todos os outputs usarão exatamente o mesmo texto final.
+
+Exemplo:
+
+- tema central: como ganhar dinheiro;
+- script master: versão editorial base do tema;
+- output A: vídeo YouTube horizontal com 5 minutos;
+- output B: vídeo curto vertical com 60 segundos;
+- output C: publicação em imagem com texto;
+- output D: carousel;
+- output E: e-book.
+
+Todos podem nascer do mesmo tema e até do mesmo script-base, mas a linguagem final de cada saída pode divergir.
+
+Por isso, o produto deve distinguir:
+
+- matéria-prima;
+- script-base aprovado;
+- script adaptado por output.
+
 ## Escopo da V1
 
 V1 deve entregar o fluxo principal de vídeo:
@@ -85,12 +184,14 @@ V1 deve entregar o fluxo principal de vídeo:
 3. associar o conteúdo a um projeto;
 4. usar configurações do projeto para parametrizar a fábrica de entregáveis;
 5. materializar outputs de vídeo 16:9 e 9:16 a partir da combinação projeto + conteúdo;
-6. permitir abrir o editor assim que existir um output de vídeo associado ao projeto;
-7. gerar estrutura semântica e composição do output selecionado;
-8. gerar/editar áudio, imagem, clips, motion e CTA conforme o output;
-9. visualizar timeline/preview;
-10. renderizar vídeo final;
-11. baixar MP4 final.
+6. fazer o conteúdo chegar a `script_ready`, seja por criação assistida ou por script já fornecido;
+7. adaptar esse script para cada output de vídeo selecionado;
+8. permitir abrir o editor assim que existir um output de vídeo associado ao projeto;
+9. gerar estrutura semântica e composição do output selecionado;
+10. gerar/editar áudio, imagem, clips, motion e CTA conforme o output;
+11. visualizar timeline/preview;
+12. renderizar vídeo final;
+13. baixar MP4 final.
 
 ## Visoes de produto obrigatorias
 
@@ -109,6 +210,21 @@ Deve guiar:
 - geração de cenas.
 
 Também deve existir um acesso rápido para iniciar pela criação de conteúdo. Essa tela deve ser voltada para a produção do conteúdo/roteiro, com área de escrita e um bloco de prompt/conversa para pedir ajuda da IA. Ela não deve ser a tela principal de configuração de canais e formatos; isso pertence ao projeto.
+
+Também deve aceitar múltiplos tipos de entrada, sempre deixando claro em que etapa da esteira o conteúdo está:
+
+- texto;
+- script pronto;
+- áudio;
+- vídeo local;
+- link de vídeo;
+- PDF;
+- outros formatos futuros.
+
+Regra:
+
+- cada tipo de entrada pode exigir etapas diferentes de ingestão e preparação;
+- o usuário precisa enxergar que o sistema está levando aquele input até o estado em que ele possa virar script.
 
 Regra de UX:
 
@@ -134,6 +250,11 @@ Regra:
 Objetivo:
 
 - transformar o editor no centro operacional do output de vídeo, e não em uma tela tardia acessada só depois de várias automações.
+
+Regra adicional:
+
+- o editor não é o lugar de extrair fonte bruta nem de decidir se o conteúdo já virou script;
+- ele entra depois que já existe um output de vídeo e depois que o sistema já tem material suficiente para operar aquele output.
 
 ### Feed
 
@@ -161,7 +282,8 @@ Visão de produção.
 
 Colunas iniciais:
 
-- Idea
+- Source
+- Analysis
 - Script
 - Scenes
 - Assets
@@ -169,6 +291,38 @@ Colunas iniciais:
 - Ready
 - Scheduled
 - Published
+
+Leitura correta:
+
+- `Source` cobre ingestão, extração e preparação da matéria-prima;
+- `Analysis` cobre entendimento editorial e desenvolvimento até script;
+- `Script` indica que o conteúdo já está apto para adaptação por output;
+- as demais colunas representam a produção do entregável.
+
+## Templates e estratégia de seleção
+
+Projeto não deve carregar apenas um padrão fixo por formato. Ele deve poder usar mais de um template/preset por tipo de saída.
+
+Exemplos:
+
+- dois templates diferentes para vídeos curtos;
+- uma família de layouts para carrossel;
+- uma combinação de estilos para posts de imagem;
+- presets diferentes para CTA final.
+
+O projeto deve permitir definir:
+
+- quais templates estão habilitados;
+- para quais outputs cada template vale;
+- se a seleção será aleatória;
+- se a seleção será em fila;
+- se a seleção será rotativa;
+- se a seleção depende de contexto, canal ou estágio da campanha.
+
+Princípio:
+
+- a configuração do projeto não deve ser apenas "qual formato gerar";
+- ela também deve dizer "como escolher a forma de gerar".
 
 ### Agenda
 

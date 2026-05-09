@@ -84,6 +84,12 @@ A tela de criação/edição de conteúdo deve ser voltada para produção do co
 
 Ela não deve concentrar configuração de canais de entrega, aspect ratios ou formatos. Esses dados pertencem ao projeto e às variantes/entregáveis derivados do projeto.
 
+Princípio operacional:
+
+- `ContentItem` não deve ser entendido apenas como texto digitado pelo usuário;
+- ele representa o conteúdo em trânsito dentro de uma esteira editorial;
+- diferentes tipos de entrada apenas colocam o conteúdo em estágios diferentes dessa esteira.
+
 Tipos previstos:
 
 - `content`
@@ -112,6 +118,19 @@ Campos conceituais:
 
 Observação: conteúdo é uma entidade independente de projeto. A associação com projetos deve ser feita por uma tabela de vínculo, permitindo conteúdo sem projeto e conteúdo usado em muitos projetos.
 
+Estados editoriais sugeridos:
+
+- `source_ingested`
+- `source_processed`
+- `source_analyzed`
+- `script_developing`
+- `script_ready`
+- `output_adapting`
+- `output_structuring`
+- `production_ready`
+- `rendering`
+- `ready`
+
 Status de produção sugeridos:
 
 - `idea`
@@ -130,10 +149,15 @@ Fonte usada para criar ou enriquecer o conteúdo.
 Tipos:
 
 - `idea`
-- `script`
+- `provided_script`
+- `text`
+- `audio`
+- `video_file`
 - `video_url`
+- `video_url_batch`
 - `transcript`
-- `file`
+- `pdf`
+- `document`
 - `manual_notes`
 
 Campos conceituais:
@@ -143,9 +167,79 @@ Campos conceituais:
 - `contentItemId`
 - `type`
 - `url`
+- `localPath`
+- `mimeType`
 - `rawText`
+- `extractedText`
+- `transcriptText`
 - `analysisJson`
+- `artifactsJson`
 - `status`
+
+Estados sugeridos:
+
+- `ingested`
+- `downloading`
+- `downloaded`
+- `extracting_audio`
+- `transcribing`
+- `extracting_text`
+- `processed`
+- `analyzing`
+- `ready_for_script`
+- `failed`
+
+Regra de produto:
+
+- `ContentSource` não descreve uma pipeline paralela;
+- ele apenas registra de onde o conteúdo veio e quais etapas de preparação ainda faltam;
+- um link de vídeo entra mais atrás na esteira do que um texto;
+- um PDF entra antes do texto analisado, porque ainda precisa virar texto bruto;
+- vários formatos de entrada precisam convergir para o mesmo estado editorial antes da criação de script.
+
+### ContentScript
+
+Representa o estado em que o conteúdo já pode ser tratado como script.
+
+Leitura correta:
+
+- todo conteúdo que vai gerar entregável precisa, em algum momento, virar script;
+- alguns inputs passam por análise e desenvolvimento até chegar lá;
+- outros já entram praticamente nesse estado porque o usuário forneceu o script pronto.
+
+Tipos previstos:
+
+- `master_script`
+- `output_script`
+
+Campos conceituais:
+
+- `id`
+- `workspaceId`
+- `contentItemId`
+- `projectContentOutputId`
+- `kind`
+- `sourceMode`
+- `title`
+- `scriptText`
+- `language`
+- `status`
+- `approvalStatus`
+- `metadataJson`
+
+Estados sugeridos:
+
+- `draft`
+- `in_review`
+- `approved`
+- `rejected`
+
+Regras:
+
+- `master_script` e o script-base aprovado do conteúdo;
+- `output_script` e a adaptação do script para um output específico;
+- `provided script mode` não cria outro tipo de conteúdo; apenas coloca o conteúdo mais adiante na esteira;
+- o sistema deve permitir revisão humana antes de outputs seguirem para produção.
 
 ### ProjectOutputDefinition
 
@@ -177,6 +271,7 @@ Campos conceituais:
 - `pipelineJson`
 - `styleOverridesJson`
 - `publishPolicyJson`
+- `templateSelectionStrategyJson`
 - `status`
 
 Regras:
@@ -185,6 +280,12 @@ Regras:
 - nem todo projeto precisa gerar vídeo;
 - o projeto pode declarar saídas futuras mesmo que a execução inicial da V1 priorize vídeo;
 - canais, formatos e pipelines devem nascer aqui, não em `ContentItem`.
+- a definição de output também deve permitir parâmetros editoriais e operacionais por saída, como:
+  - duração mínima;
+  - duração máxima;
+  - limite de caracteres por bloco;
+  - template/preset elegível;
+  - estratégia de seleção de template.
 
 ### ProjectContentOutput
 
@@ -213,8 +314,15 @@ Campos conceituais:
 - `format`
 - `aspectRatio`
 - `durationTargetSec`
+- `durationMinSec`
+- `durationMaxSec`
+- `blockCharLimit`
 - `scriptStrategy`
+- `scriptSourceMode`
 - `ctaStrategyJson`
+- `templatePoolJson`
+- `selectedTemplateId`
+- `templateSelectionTraceJson`
 - `renderPlanJson`
 - `styleOverridesJson`
 - `publishCopy`
@@ -226,11 +334,67 @@ Na primeira implementação, `ProjectContentOutput` pode viver parcialmente em `
 Regras:
 
 - um `ProjectContentOutput` representa um entregável concreto de um conteúdo dentro de um projeto;
-- cenas e renders devem ser gerados a partir de um `ProjectContentOutput`, não do `ContentItem` isolado;
+- cenas, cards, páginas, seções e renders devem ser gerados a partir de um `ProjectContentOutput`, não do `ContentItem` isolado;
 - YouTube `16:9`, YouTube Shorts `9:16`, TikTok `9:16`, Instagram Reels e Facebook vídeo são variantes diferentes;
 - cada variante pode ter CTA específico de canal;
 - partes comuns devem ser reaproveitadas sempre que possível;
 - partes específicas de canal devem ser renderizadas separadamente quando isso reduzir custo e tempo.
+- um output pode usar script derivado do conteúdo-base ou script específico já fornecido pelo usuário;
+- o output precisa saber qual preset/template foi escolhido e por qual estratégia.
+
+Estados sugeridos para outputs:
+
+- `waiting_for_script`
+- `script_ready`
+- `adapting`
+- `structured`
+- `production_ready`
+- `rendering`
+- `ready`
+- `failed`
+
+### OutputTemplate e TemplateSelectionStrategy
+
+Projeto e output não devem depender de um único template fixo por formato.
+
+`OutputTemplate` representa uma receita de apresentação, estrutura e produção para determinado tipo de saída.
+
+Campos conceituais:
+
+- `id`
+- `workspaceId`
+- `name`
+- `outputType`
+- `destination`
+- `format`
+- `aspectRatio`
+- `structureRulesJson`
+- `visualRulesJson`
+- `promptRulesJson`
+- `status`
+
+`TemplateSelectionStrategy` representa a forma como um projeto escolhe templates elegíveis.
+
+Tipos previstos:
+
+- `fixed`
+- `random`
+- `round_robin`
+- `priority_queue`
+- `contextual`
+
+Campos conceituais:
+
+- `strategy`
+- `eligibleTemplateIds`
+- `rotationStateJson`
+- `contextRulesJson`
+
+Regras:
+
+- um projeto pode habilitar múltiplos templates por saída;
+- a estratégia de seleção deve ser rastreável;
+- o usuário precisa conseguir decidir se quer repetição fixa, variação controlada ou rotação automática.
 
 ### DeliveryChannel
 

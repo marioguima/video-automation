@@ -108,11 +108,16 @@ O FlowShopy deve ser tratado como uma fábrica de conteúdo promocional orientad
 Fluxo alvo:
 
 ```text
-ContentItem
-  -> Project association
-  -> Project context
+Input source
+  -> Source ingestion
+  -> Source processing
+  -> Source analysis
+  -> Script development
+  -> Script ready
+  -> Project association / project context
   -> ProjectContentOutput
-  -> NarrativeStructure
+  -> Output adaptation
+  -> Output structure
   -> Composition
   -> Preview
   -> Final render
@@ -121,14 +126,28 @@ ContentItem
 
 Leitura correta de cada etapa:
 
-- `ContentItem`: matéria-prima editorial; pode nascer de ideia, prompt, briefing, roteiro final, transcrição ou arquivo;
+- `Input source`: qualquer forma de entrada bruta fornecida pelo usuário;
+- `Source ingestion`: momento em que o sistema registra, baixa ou recebe o insumo;
+- `Source processing`: momento em que o sistema extrai áudio, texto, metadados ou transcrição;
+- `Source analysis`: momento em que o sistema entende editorialmente o insumo;
+- `Script development`: momento em que o sistema e/ou usuário desenvolvem o script;
+- `Script ready`: ponto de convergência obrigatório antes de outputs seguirem;
+- `ContentItem`: unidade editorial principal que representa o conteúdo dentro da esteira;
 - `Project association`: um mesmo conteúdo pode servir a um, vários ou nenhum projeto;
 - `Project context`: marca, produto promovido, CTA, destinos, formatos, estilo e intenção declarada do que deve ser produzido;
 - `ProjectContentOutput`: entregável concreto por canal, formato e objetivo;
-- `NarrativeStructure`: estrutura semântica do conteúdo para aquele output;
+- `Output adaptation`: adaptação do script-base para a linguagem final do output;
+- `Output structure`: quebra do output em cenas, cards, páginas, seções ou blocos;
 - `Composition`: timeline áudiovisual declarativa;
 - `Preview`: visualizacao antes do render final;
 - `Final render`: exportacao definitiva do entregável.
+
+Princípio central:
+
+- a pipeline e mais importante do que o formato de entrada;
+- link de vídeo, áudio, PDF e texto não exigem produtos diferentes;
+- eles apenas entram em posições diferentes da mesma esteira;
+- vários formatos de entrada precisam convergir para texto analisável e depois para script aprovado.
 
 Regra de UX derivada:
 
@@ -138,7 +157,7 @@ Regra de UX derivada:
 
 ### Estrutura semântica
 
-`ContentItem` não deve gerar "slides" diretamente. Primeiro ele deve gerar uma estrutura semântica reutilizável.
+`ContentItem` não deve gerar "slides" diretamente. Primeiro ele precisa chegar a script e, depois, gerar uma estrutura semântica reutilizável por output.
 
 Exemplos de papéis semanticos:
 
@@ -155,6 +174,14 @@ Exemplos de papéis semanticos:
 
 Esses papéis descrevem funcao editorial e narrativa. A composição visual vem depois.
 
+Regra:
+
+- a estrutura semântica não deve ser produzida diretamente da fonte bruta;
+- antes disso, o sistema precisa decidir qual script está sendo usado:
+  - script desenvolvido a partir da fonte;
+  - script pronto fornecido pelo usuário;
+  - script específico já definido para um output.
+
 ### Entidades alvo
 
 Entidades principais do domínio novo:
@@ -163,6 +190,7 @@ Entidades principais do domínio novo:
 - `WorkspaceMembership`: autorização por equipe;
 - `ContentItem`: conteúdo-base;
 - `ContentSource`: origem do conteúdo;
+- `ContentScript`: script-base ou script por output;
 - `Project`: contexto estratégico/comercial;
 - `ProjectContent`: vínculo reutilizável entre conteúdo e projeto;
 - `PromotionTarget`: produto, oferta, evento ou destino promovido;
@@ -174,6 +202,8 @@ Entidades principais do domínio novo:
 - `CompositionClip`: item concreto posicionado na timeline;
 - `Component`: primitive reutilizável de composição;
 - `CompositionPreset`: receita visual/motion que combina componentes;
+- `OutputTemplate`: receita estrutural/visual/editorial por tipo de saída;
+- `TemplateSelectionStrategy`: estratégia de rotação, fila, aleatoriedade ou escolha contextual;
 - `Asset`: entrada, intermediario ou saída de render.
 
 Papéis mínimos de equipe esperados:
@@ -196,6 +226,15 @@ Papéis mínimos de equipe esperados:
 - transições;
 - blocos comuns e blocos específicos por output.
 
+Antes da composição, o sistema precisa aceitar estruturas operacionais diferentes por tipo de saída:
+
+- vídeo longo: cenas e arcos maiores;
+- vídeo curto: hook, progressão curta, CTA;
+- imagem única: headline, supporting copy, CTA;
+- carousel: cards/páginas;
+- e-book/PDF: capítulos, seções e blocos de leitura;
+- áudio: segmentos de narração e marcações de ritmo.
+
 ### Componentes e presets
 
 O conceito atual de template deve evoluir para um sistema combinavel:
@@ -203,6 +242,7 @@ O conceito atual de template deve evoluir para um sistema combinavel:
 - `StyleDNA`: identidade da marca;
 - `Component Library`: pecas reutilizáveis;
 - `CompositionPreset`: regras de combinação;
+- `OutputTemplate`: regras de estrutura, copy, prompts e layout por formato;
 - `VariationRules`: variação controlada para evitar vídeos parecidos.
 
 Exemplos de `Component`:
@@ -233,6 +273,14 @@ Regras de variação esperadas:
 - escolher overlays por contexto semantico;
 - permitir múltiplos layouts de CTA final;
 - preservar identidade visual sem gerar clones.
+
+Regras de seleção esperadas:
+
+- permitir template fixo por output;
+- permitir seleção aleatória dentro de um pool elegível;
+- permitir rotação em fila;
+- permitir round-robin;
+- permitir escolha contextual baseada em canal, duração, campanha ou estágio.
 
 ## Motor de composição e render
 

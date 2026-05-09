@@ -401,6 +401,7 @@ Leitura correta:
 - o beta precisa esconder o legado do fluxo principal e fazer o caminho novo funcionar ponta a ponta;
 - toda decisao agora deve reduzir dependência visível do modelo antigo e aumentar confiança no fluxo `Content -> Project -> Output -> Studio -> Render`.
 - para output de vídeo, o `Studio`/editor precisa entrar cedo no fluxo e não apenas no fim da pipeline.
+- formatos de entrada diferentes não significam pipelines diferentes; eles apenas entram em estágios diferentes da mesma esteira até chegar a `script_ready`.
 
 ## Definição de beta funcional
 
@@ -411,16 +412,17 @@ O beta deve permitir:
 1. autenticar no app instalado;
 2. operar em um workspace;
 3. criar projeto sem `kind`;
-4. criar conteúdo na biblioteca;
-5. associar conteúdo a um projeto;
-6. configurar pipeline e outputs do projeto;
-7. materializar um `ProjectContentOutput` de vídeo;
-8. entrar no `Studio`/editor assim que esse output de vídeo existir;
-9. gerar narrativa/composition inicial no `Studio`;
-10. ajustar prompts, revisar previews e acompanhar as fases do output dentro do editor;
-11. seguir para segmentação/geração de assets/vídeo sem expor `course/module/lesson` ao usuário;
-12. baixar o resultado final;
-13. convidar pelo menos um membro/admin para o workspace.
+4. criar conteúdo na biblioteca a partir de texto;
+5. registrar claramente se o conteúdo ainda está em fonte bruta ou já está em script;
+6. associar conteúdo a um projeto;
+7. configurar pipeline, outputs e regras mínimas do projeto;
+8. materializar um `ProjectContentOutput` de vídeo;
+9. entrar no `Studio`/editor assim que esse output de vídeo existir;
+10. gerar adaptação/estrutura inicial do output no `Studio`;
+11. ajustar prompts, revisar previews e acompanhar as fases do output dentro do editor;
+12. seguir para segmentação/geração de assets/vídeo sem expor `course/module/lesson` ao usuário;
+13. baixar o resultado final;
+14. convidar pelo menos um membro/admin para o workspace.
 
 Coisas que não precisam bloquear o beta:
 
@@ -457,7 +459,9 @@ Objetivo: parar de deixar o domínio novo parcialmente implícito.
 Ações:
 
 - estabilizar o contrato de `ContentItem`, `ContentProject`, `ContentProjectItem`, `ProjectOutputDefinition` e `ProjectContentOutput`;
+- introduzir formalmente a esteira `source -> processed -> analyzed -> script_ready -> output`;
 - padronizar `ContentItem` como conteúdo genérico e não classificação de mídia;
+- introduzir distinção entre fonte, script-base e script por output;
 - mover o máximo possível de decisao de saída para `ProjectOutputDefinition` e `ProjectContentOutput`;
 - definir o status mínimo desses objetos para o beta;
 - deixar claro onde mora `pipeline` hoje e o que ainda permanece em `metadata` por conveniência.
@@ -473,9 +477,10 @@ Objetivo: fazer o caminho principal funcionar de ponta a ponta.
 Ações:
 
 - usar `ProjectContentOutput` como entidade central do `Studio`;
-- garantir: projeto -> conteúdo associado -> outputs -> studio/editor -> narrativa -> composition -> produção;
+- garantir: projeto -> conteúdo associado -> script_ready -> outputs -> studio/editor -> adaptação -> estrutura -> composition -> produção;
 - garantir que o editor fique acessível assim que existir um `ProjectContentOutput` de vídeo;
 - decidir se a segmentação beta continua usando o backing legado por baixo, mas sempre iniciada a partir de `ProjectContentOutput`;
+- parar de tratar `Build Narrative` como simples quebra de texto e redefinir essa etapa como preparação/adaptação do output;
 - criar ou ajustar a ponte para que `segment`, `blocks`, `assets` e `final video` sejam disparados do fluxo novo, mesmo que o worker ainda processe o legado por baixo;
 - expor no editor as fases do output, ajuste de prompts e previews de imagem/animação quando o template ou pipeline suportarem isso;
 - manter o usuário fora de `lessonVersionId`, `courseId` e afins;
@@ -485,6 +490,7 @@ Saída esperada:
 
 - existe um caminho único e demonstravel até MP4 final a partir do modelo novo;
 - o editor vira o hub operacional do output de vídeo desde cedo no fluxo.
+- a preparação do output fica conceitualmente separada da ingestão da fonte.
 
 ### Etapa 4 - Fechar equipe e autorização mínima
 
@@ -523,7 +529,7 @@ Saída esperada:
 Se a meta e chegar ao beta funcional o mais breve possível, a ordem deve ser esta:
 
 1. limpar a UX nova de referências herdadas;
-2. fechar o contrato do núcleo `Content/Project/Output`;
+2. fechar o contrato do núcleo `Source/Content/Script/Project/Output`;
 3. fazer `ProjectContentOutput` dirigir o `Studio`/editor e o disparo da produção;
 4. consolidar equipe/autorização mínima;
 5. fechar TTS/imagem/vídeo no pipeline do projeto;
@@ -548,6 +554,8 @@ O que não fazer agora:
 ### Bloco B - Fluxo novo como caminho oficial
 
 - criar/ajustar endpoints do fluxo novo para que `ProjectContentOutput` seja o ponto oficial de produção;
+- introduzir estados explícitos para `source`, `script` e `output`;
+- permitir que texto simples e script pronto entrem em pontos diferentes da mesma esteira;
 - manter ponte interna com legado apenas como infraestrutura, sem expor ids/termos;
 - decidir se `GET /content-items/:itemId/blocks` vira compatibilidade e o fluxo principal passa a depender de output.
 
@@ -555,9 +563,17 @@ O que não fazer agora:
 
 - garantir que `Studio` abra sempre por output;
 - garantir que um output de vídeo possa entrar no editor desde o início do fluxo;
-- garantir narrativa/composition inicial;
-- conectar operações de gerar narrativa, ajustar prompts, revisar previews e seguir para assets/render;
+- substituir o entendimento de `Build Narrative` por preparação e estruturação do output;
+- garantir narrativa/composition inicial para vídeo como primeira implementação;
+- conectar operações de gerar adaptação do output, ajustar prompts, revisar previews e seguir para assets/render;
 - garantir leitura clara de status por output.
+
+### Bloco F - Esteira de ingestão e script
+
+- formalizar que tipos de entrada chegam em pontos diferentes da mesma pipeline;
+- definir tratamento mínimo para texto, script pronto, áudio, vídeo por link e PDF;
+- garantir convergência obrigatória em `script_ready`;
+- introduzir gate de revisão/aprovação antes de produção automatizada.
 
 ### Bloco D - Team beta
 
@@ -578,14 +594,23 @@ O próximo ciclo de implementação deve ter um objetivo único:
 
 `fazer o beta rodar no fluxo novo sem linguagem herdada, com projeto + conteudo + output + studio + render`
 
+Leitura complementar obrigatória para o próximo ciclo:
+
+- o primeiro input a funcionar bem continua sendo texto;
+- mas a arquitetura implementada agora já deve assumir que inputs futuros, como PDF, áudio e link de vídeo, entrarão mais atrás na mesma esteira;
+- a pipeline deve ser desenhada pela transformação de estados, não pelo formato de entrada em si.
+
 Sequencia do próximo ciclo:
 
 1. limpar `ContentProjects.tsx` e shell principal do beta;
-2. ajustar API do fluxo novo onde ainda depende de `content-item` isolado em vez de `output`;
-3. fechar `Studio` como centro operacional do output;
-4. validar TTS/imagem/render no pipeline;
-5. revisar equipe/autorização mínima;
-6. executar validação manual completa.
+2. ajustar contrato de `content` para deixar explícito o estado `script_ready`;
+3. ajustar API do fluxo novo onde ainda depende de `content-item` isolado em vez de `output`;
+4. fechar `Studio` como centro operacional do output;
+5. redefinir `Build Narrative` como etapa de adaptação/estruturação do output;
+6. revisar base para presets/templates e estratégia de seleção no projeto;
+7. validar TTS/imagem/render no pipeline;
+8. revisar equipe/autorização mínima;
+9. executar validação manual completa.
 
 ## Checklist antes de finalizar proxima tarefa
 
