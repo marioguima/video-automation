@@ -477,11 +477,12 @@ async function loadRenderer() {
   ]);
   updateBootstrapStage("Aplicação pronta.", 100, { immediate: true });
   await new Promise((resolve) => setTimeout(resolve, 120));
-  mainWindow.show();
   if (splashWindow && !splashWindow.isDestroyed()) {
     splashWindow.close();
     splashWindow = null;
   }
+  mainWindow.maximize();
+  mainWindow.show();
 }
 
 async function startLocalRuntime() {
