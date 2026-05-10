@@ -115,7 +115,7 @@ Input source
   -> Script development
   -> Script ready
   -> Project association / project context
-  -> Start project flow
+  -> Start content in project
   -> ProjectContentOutput queue
   -> Output adaptation
   -> Output structure
@@ -136,7 +136,7 @@ Leitura correta de cada etapa:
 - `ContentItem`: unidade editorial principal que representa o conteúdo dentro da esteira;
 - `Project association`: um mesmo conteúdo pode servir a um, vários ou nenhum projeto;
 - `Project context`: marca, produto promovido, CTA, destinos, formatos, estilo e intenção declarada do que deve ser produzido;
-- `Start project flow`: comando principal de início do projeto ou do conteúdo associado;
+- `Start content in project`: comando principal de início do par projeto + conteúdo associado;
 - `ProjectContentOutput queue`: fila real de outputs respeitando limites de hardware e prioridade;
 - `ProjectContentOutput`: entregável concreto por canal, formato e objetivo;
 - `Output adaptation`: adaptação do script-base para a linguagem final do output;
@@ -157,12 +157,35 @@ Princípio central:
 Regra de UX derivada:
 
 - a tela `Content` e o lugar de criar e editar matéria-prima;
+- a tela `Content` também deve concentrar ingestão, análise e preparação de fontes;
 - a tela `Project` e o lugar de associar conteúdo, escolher output e orquestrar a fábrica;
 - `Studio` existe dentro do projeto para operar sobre conteúdo associado, não para substituir a área de escrita de conteúdo.
 - a visão principal do projeto não deve ser um pseudo-editor por output;
 - o editor de vídeo e o lugar real para blocos, prompts, ajustes e preview composicional.
 - se o modo escolhido for `final content`, a tela principal também precisa deixar claro quais outputs ainda estão sem conteúdo final.
 - se o modo escolhido for `source`, a tela principal também precisa deixar claro que cada output usará um prompt próprio de transformação.
+- a UI não deve oferecer um botão para “marcar como script pronto”; esse estado precisa ser derivado do que já foi resolvido e, quando necessário, acompanhado por saída.
+- a tela `Project` não deve se tornar o lugar para ingestão de links, PDFs, áudios ou outras fontes brutas.
+
+Fluxo técnico correto:
+
+```text
+sources -> extraction/transcription -> raw text -> output prompts -> final content per output
+```
+
+Leitura de responsabilidades:
+
+- `Content`: recebe uma ou muitas fontes e conduz ingestão/preparação;
+- `Project`: define canal, formato e parâmetros de geração;
+- `prompt por output`: transforma texto bruto em `final content`;
+- `Studio`: opera sobre o output de vídeo depois que o `final content` já existe.
+
+Diretriz operacional para V1:
+
+- ao confirmar uma fonte, o sistema já enfileira sua preparação;
+- a fila inicial deve ser sequencial para preservar estabilidade do runtime local;
+- se o conteúdo já estiver associado a um projeto, o projeto apenas reflete o estado atual da preparação;
+- o projeto não inicia a preparação da fonte; ele apenas observa o estado do conteúdo associado.
 
 ### Estrutura semântica
 
@@ -551,10 +574,12 @@ UX atual:
 - primeira tela é uma grade visual de projetos;
 - cadastro de projeto fica em tela separada;
 - detalhe do projeto contém Contents, Feed e Kanban; `Agenda` volta quando houver base real de distribuição;
+- `Review` não deve existir como coluna/fase macro separada no detalhe do projeto; revisões humanas pertencem ao ciclo interno de `Creation`;
 - a área Content lista conteúdos e abre uma tela separada de cadastro;
 - o cadastro de Content associa o conteúdo somente a um projeto existente;
 - a área Content não gera cenas nem abre editor de vídeo.
 - a listagem de Content deve destacar o conteúdo; projetos aparecem apenas como usos/associações secundarias.
+- ajuda textual de tela não deve ocupar a area principal; a direção é usar um painel lateral direito de ajuda contextual, aberto por ícone de interrogação na barra superior.
 
 Direção adicional:
 

@@ -57,13 +57,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
-    { id: 'course-dashboard', label: 'Course Dashboard', Icon: GraduationCap },
     { id: 'quick-content', label: 'Content', Icon: FileText },
     { id: 'content', label: 'Projects', Icon: PanelsTopLeft },
-    { id: 'courses', label: 'My Courses', Icon: LibraryIcon },
     { id: 'library', label: 'Library', Icon: FolderHeart },
     { id: 'team', label: 'Team', Icon: Users },
     { id: 'reports', label: 'Reports', Icon: BarChart3 },
+    { id: 'legacy-divider', type: 'divider' as const },
+    { id: 'course-dashboard', label: 'Course Dashboard', Icon: GraduationCap },
+    { id: 'courses', label: 'My Courses', Icon: LibraryIcon },
   ];
 
   useEffect(() => {
@@ -115,30 +116,44 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentUser, on
       </div>
 
       <nav className="flex-1 px-4 space-y-1 mt-4">
-        {navItems.map(({ id, label, Icon }) => (
-          <Button
-            key={id}
-            variant="ghost"
-            onClick={() => setView(id as ViewType)}
-            className={getButtonClass(
-              id === 'courses'
-                ? coursesSectionViews.has(currentView)
-                : id === 'content'
-                  ? currentView === 'content' || currentView === 'editor'
-                  : currentView === id
-            )}
-          >
-            <Icon 
-              size={22} 
-              strokeWidth={1.5} 
-              className="flex-shrink-0" 
-            />
-            
-            <span className={`transition-opacity duration-200 whitespace-nowrap ${isCollapsed ? 'opacity-0 w-0 hidden' : 'hidden lg:block truncate'}`}>
-              {label}
-            </span>
-          </Button>
-        ))}
+        {navItems.map((item) => {
+          if (item.type === 'divider') {
+            return (
+              <div
+                key={item.id}
+                className={`my-3 border-t border-border/70 ${isCollapsed ? 'mx-2' : 'mx-1 hidden lg:block'}`}
+                aria-hidden="true"
+              />
+            );
+          }
+
+          const { id, label, Icon } = item;
+
+          return (
+            <Button
+              key={id}
+              variant="ghost"
+              onClick={() => setView(id as ViewType)}
+              className={getButtonClass(
+                id === 'courses'
+                  ? coursesSectionViews.has(currentView)
+                  : id === 'content'
+                    ? currentView === 'content' || currentView === 'editor'
+                    : currentView === id
+              )}
+            >
+              <Icon 
+                size={22} 
+                strokeWidth={1.5} 
+                className="flex-shrink-0" 
+              />
+              
+              <span className={`transition-opacity duration-200 whitespace-nowrap ${isCollapsed ? 'opacity-0 w-0 hidden' : 'hidden lg:block truncate'}`}>
+                {label}
+              </span>
+            </Button>
+          );
+        })}
       </nav>
 
       <div className="px-4 pb-4 space-y-2">

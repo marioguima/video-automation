@@ -72,15 +72,15 @@ Conteúdo é a base para gerar entregáveis. Ele pode ser iniciado rapidamente f
 
 Um mesmo conteúdo pode ser usado em projetos diferentes. O sistema deve permitir ver onde cada conteúdo está sendo usado.
 
-A tela de criação/edição de conteúdo deve ser voltada para produção do conteúdo em si:
+A tela de criação/edição de conteúdo deve ser voltada para ingestão e preparação do conteúdo:
 
 - ideia;
 - pauta;
 - roteiro;
 - briefing;
 - texto base;
-- solicitações para IA;
-- iteracoes até chegar a um roteiro/conteúdo utilizável.
+- fontes diversas;
+- extração até texto bruto utilizável.
 
 Ela não deve concentrar configuração de canais de entrega, aspect ratios ou formatos. Esses dados pertencem ao projeto e às variantes/entregáveis derivados do projeto.
 
@@ -133,13 +133,15 @@ Estados editoriais sugeridos:
 - fase `creation`
   - `output_adapting`
   - `output_structuring`
+  - `prompt_review`
+  - `tts_review`
+  - `image_review`
+  - `video_review`
+  - `timeline_preview`
+  - `ready_for_render`
   - `production_ready`
   - `rendering`
   - `ready`
-- fase `review`
-  - `in_review`
-  - `changes_requested`
-  - `approved`
 - fase `publication`
   - `queued_for_publish`
   - `scheduled`
@@ -210,6 +212,27 @@ Regra de produto:
 - um link de vídeo entra mais atrás na esteira do que um texto;
 - um PDF entra antes do texto analisado, porque ainda precisa virar texto bruto;
 - vários formatos de entrada precisam convergir para o mesmo estado editorial antes da criação de script.
+- um conteúdo pode ter uma ou muitas fontes;
+- a UI não deve modelar ingestão como um único campo simples quando o objetivo for suportar múltiplas fontes de preparo.
+- ao confirmar uma nova fonte, o processamento dela deve começar imediatamente.
+
+Regra de produto para V1 evolutiva:
+
+- a ingestão e preparação de fontes pertence à área `Content`, não à área `Project`;
+- o sistema deve identificar a origem da fonte e escolher a pipeline adequada automaticamente;
+- não é necessário expor um Kanban para a fase de ingestão de fontes;
+- o objetivo dessa fase é sempre convergir para texto bruto utilizável.
+- a fila inicial de preparação deve ser sequencial, uma fonte por vez;
+- vídeo por link ou arquivo: download -> extração de áudio -> transcrição;
+- áudio: transcrição;
+- PDF/documento: extração de texto;
+- texto: persistência direta como texto bruto.
+
+Regra de associação com projeto:
+
+- um conteúdo pode ser associado a projeto antes do fim da preparação;
+- nesse caso, o detalhe do projeto deve exibir o conteúdo na fase `Preparation`;
+- o conteúdo só fica plenamente apto para `Creation` quando todas as fontes confirmadas tiverem convergido para texto bruto.
 
 ### ContentScript
 
@@ -259,6 +282,11 @@ Regras:
 - `source mode` e `final content mode` são decisão do usuário, não do formato de saída;
 - em `final content mode`, o sistema deve conseguir verificar se todos os outputs obrigatórios do projeto já receberam seus conteúdos finais;
 - quando um projeto exigir múltiplas saídas, `script_ready` do conteúdo não deve significar que todos os outputs já estão prontos para `Creation`;
+- a UI não deve expor um botão de “marcar como script pronto”;
+- `script_ready` precisa ser derivado do que realmente já foi produzido e validado;
+- quando houver controle por saída, cada combinação `canal + formato` pode avançar para `Creation` assim que seu script específico estiver pronto.
+- a cadeia correta é `conteudo -> projeto -> canal -> formato -> prompt -> final content`;
+- o resultado da preparação não é o vídeo final, mas um `final content` para cada entregável configurado.
 - para entrar em `Creation`, cada `ProjectContentOutput` precisa ter seu próprio script final resolvido.
 
 ### ProjectOutputDefinition
@@ -616,7 +644,7 @@ Aceite:
 3. Usuário aciona o botão de incluir novo conteúdo.
 4. Sistema abre a tela de cadastro de conteúdo.
 5. Usuário informa ideia, roteiro ou fonte.
-6. Usuário pode escrever livremente e/ou registrar uma instrucao para IA.
+6. Usuário pode adicionar uma ou muitas fontes e acompanhar sua preparação até texto bruto.
 7. Usuário pode associar o conteúdo a um ou mais projetos existentes.
 8. Sistema salva o conteúdo e registra seus usos no workspace.
 9. Canais de entrega, formatos, cenas e renders ficam para o fluxo do projeto/variante.
@@ -633,8 +661,8 @@ Aceite:
 - listagem permite filtrar por projeto associado;
 - listagem permite filtrar por destination, usando destinos do conteúdo quando existirem ou destinos padrão do projeto enquanto Variant/ProjectContent não existir;
 - conteúdo pode ser criado rapidamente;
-- tela prioriza escrita/produção de conteúdo;
-- existe um bloco claro de prompt/solicitacao para IA;
+- tela prioriza ingestão e preparação de fontes;
+- a etapa não expõe prompt de IA;
 - cadastro de conteúdo não cria projeto;
 - conteúdo pode existir sem projeto, mas precisa estar associado a um projeto para entrar em produção de entregável;
 - tela Content não gera cenas, blocos, assets ou vídeo;
@@ -740,6 +768,17 @@ Aceite inicial:
 - colunas aparecem;
 - conteúdos aparecem na coluna correta;
 - estado vazio e claro.
+- a tela evita blocos longos de texto explicativo;
+- contagens aparecem inline no título das colunas ou visões, no formato `Preparation (3)`;
+- ajuda textual da tela deve migrar para um painel lateral direito aberto por ícone de interrogação na barra superior;
+- o painel de ajuda deve ser sensível ao contexto da tela atual.
+
+Regra de domínio para o Kanban do projeto:
+
+- `Review` não aparece como fase macro separada;
+- aprovações humanas acontecem dentro de `Creation`;
+- exemplos: revisão de prompts por bloco, revisão de TTS, revisão de imagens, revisão de vídeos, aprovação do preview/timeline antes do render;
+- somente depois dessa aprovação o output pode ser marcado para render imediato ou fila de render.
 
 ### Fluxo 7: Agenda operacional
 

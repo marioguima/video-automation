@@ -37,6 +37,8 @@ import CompositionPreview, {
 
 type Screen = 'list' | 'create' | 'detail' | 'studio';
 type ProjectViewMode = 'grid' | 'list';
+type DetailViewMode = 'kanban' | 'list';
+type DetailContentFilter = 'all' | 'source' | 'final_content' | 'script_ready' | 'needs_preparation';
 type ProjectStatusFilter = 'all' | 'draft' | 'active' | 'archived';
 type ProjectSortKey = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'content-desc' | 'content-asc';
 type AspectRatio = CompositionAspectRatio;
@@ -54,6 +56,7 @@ type EditorialState =
   | 'production_ready'
   | 'rendering'
   | 'ready';
+type FlowPhase = 'preparation' | 'creation' | 'publication';
 type StudioChannelFilter = 'all' | string;
 type ProductionStage = 'idea' | 'script' | 'scenes' | 'assets' | 'editing' | 'ready' | 'scheduled' | 'published';
 type OutputStatus =
@@ -417,6 +420,20 @@ const EDITORIAL_STATE_TONE_CLASSES: Record<EditorialState, string> = {
   rendering: 'border-violet-500/20 bg-violet-500/10 text-violet-300',
   ready: 'border-green-500/20 bg-green-500/10 text-green-300'
 };
+
+const FLOW_PHASES: Array<{ value: FlowPhase; label: string; description: string }> = [
+  { value: 'preparation', label: 'Preparation', description: 'Ingestão, extração, análise e fechamento do conteúdo até script pronto.' },
+  { value: 'creation', label: 'Creation', description: 'Adaptação por saída, estruturação, assets e render.' },
+  { value: 'publication', label: 'Publication', description: 'Agendamento, publicação e operação de distribuição.' }
+];
+
+const DETAIL_CONTENT_FILTERS: Array<{ value: DetailContentFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'source', label: 'Source mode' },
+  { value: 'final_content', label: 'Final content' },
+  { value: 'script_ready', label: 'Script ready' },
+  { value: 'needs_preparation', label: 'Needs preparation' }
+];
 
 const OUTPUT_STATUS_COLUMNS: Array<{ value: OutputStatus; label: string }> = [
   { value: 'not_started', label: 'Not started' },
@@ -891,6 +908,58 @@ function isItemScriptReady(item: ContentItem): boolean {
   return getItemEditorialState(item) === 'script_ready';
 }
 
+function getOutputStatusSummary(outputs: ProjectContentOutput[]): string {
+  if (outputs.length === 0) return 'Ready to start outputs';
+  const normalized = outputs.map((output) => normalizeOutputStatus(output.status));
+  if (normalized.some((status) => status === 'published')) return 'Published';
+  if (normalized.some((status) => status === 'approved' || status === 'ready_for_review')) return 'Awaiting review';
+  if (normalized.some((status) => status === 'failed')) return 'Failed output';
+  if (normalized.some((status) => status === 'rendered')) return 'Rendered';
+  if (normalized.some((status) => status === 'in_progress')) return 'In progress';
+  if (normalized.some((status) => status === 'queued')) return 'Queued';
+  return 'Ready to start outputs';
+}
+
+function getFlowPhaseForItem(item: ContentItem, outputs: ProjectContentOutput[]): {
+  phase: FlowPhase;
+  stateLabel: string;
+  description: string;
+} {
+  const itemStage = getItemStage(item);
+  if (itemStage === 'scheduled' || itemStage === 'published') {
+    return {
+      phase: 'publication',
+      stateLabel: itemStage === 'published' ? 'Published' : 'Scheduled',
+      description: 'Conteúdo em operação de distribuição.'
+    };
+  }
+
+  const editorialState = getItemEditorialState(item);
+  if (editorialState !== 'script_ready') {
+    return {
+      phase: 'preparation',
+      stateLabel: EDITORIAL_STATE_LABELS[editorialState],
+      description: 'Conteúdo ainda está na fase compartilhada de preparação.'
+    };
+  }
+
+  const normalized = outputs.map((output) => normalizeOutputStatus(output.status));
+  if (normalized.some((status) => status === 'published')) {
+    return {
+      phase: 'publication',
+      stateLabel: 'Published',
+      description: 'Pelo menos um entregável já foi publicado.'
+    };
+  }
+  return {
+    phase: 'creation',
+    stateLabel: getOutputStatusSummary(outputs),
+    description: normalized.some((status) => status === 'approved' || status === 'ready_for_review')
+      ? 'Há entregáveis em aprovação humana dentro da fase de criação.'
+      : 'Outputs podem seguir ou já estão seguindo a fase de criação.'
+  };
+}
+
 function getItemAspectRatios(item: ContentItem): AspectRatio[] {
   const saved = asArray<AspectRatio>(item.metadata?.aspectRatios);
   if (saved.length > 0) return saved;
@@ -920,6 +989,8 @@ export default function ContentProjects({
 }: ContentProjectsProps) {
   const [screen, setScreen] = useState<Screen>('list');
   const [projectViewMode, setProjectViewMode] = useState<ProjectViewMode>('grid');
+  const [detailViewMode, setDetailViewMode] = useState<DetailViewMode>('kanban');
+  const [detailContentFilter, setDetailContentFilter] = useState<DetailContentFilter>('all');
   const [projectStatusFilter, setProjectStatusFilter] = useState<ProjectStatusFilter>('all');
   const [projectSort, setProjectSort] = useState<ProjectSortKey>('newest');
   const [isProjectFilterMenuOpen, setIsProjectFilterMenuOpen] = useState(false);
@@ -1073,6 +1144,43 @@ export default function ContentProjects({
     [selectedProjectOutputs]
   );
 
+  const filteredDetailItems = useMemo(() => {
+    if (detailContentFilter === 'all') return items;
+    return items.filter((item) => {
+      if (detailContentFilter === 'source') return getItemSourceMode(item) === 'source';
+      if (detailContentFilter === 'final_content') return getItemSourceMode(item) === 'final_content';
+      if (detailContentFilter === 'script_ready') return isItemScriptReady(item);
+      if (detailContentFilter === 'needs_preparation') return !isItemScriptReady(item);
+      return true;
+    });
+  }, [detailContentFilter, items]);
+
+  const phaseSections = useMemo(
+    () =>
+      FLOW_PHASES.map((phase) => ({
+        ...phase,
+        items: filteredDetailItems
+          .map((item) => {
+            const outputs = outputsByItem[item.id] ?? [];
+            const resolution = getFlowPhaseForItem(item, outputs);
+            if (resolution.phase !== phase.value) return null;
+            return {
+              item,
+              outputs,
+              stateLabel: resolution.stateLabel,
+              description: resolution.description
+            };
+          })
+          .filter((entry): entry is {
+            item: ContentItem;
+            outputs: ProjectContentOutput[];
+            stateLabel: string;
+            description: string;
+          } => Boolean(entry))
+      })),
+    [filteredDetailItems, outputsByItem]
+  );
+
   const projectRecencyTag = useMemo(() => {
     const now = Date.now();
     const seventyTwoHoursMs = 72 * 60 * 60 * 1000;
@@ -1194,14 +1302,14 @@ export default function ContentProjects({
     setPromotionTargets(data);
   };
 
-  const loadOutputsForItem = async (itemId: string) => {
+  const loadOutputsForItem = async (itemId: string, options?: { selectFirst?: boolean }) => {
     if (!selectedProjectId) return [];
     const data = await apiGet<ProjectContentOutput[]>(`/content-projects/${selectedProjectId}/items/${itemId}/outputs`, {
       cacheMs: 0,
       dedupe: false
     });
     setOutputsByItem((current) => ({ ...current, [itemId]: data }));
-    if (!selectedOutputId && data[0]?.id) {
+    if (options?.selectFirst !== false && !selectedOutputId && data[0]?.id) {
       setSelectedOutputId(data[0].id);
     }
     return data;
@@ -1506,16 +1614,6 @@ export default function ContentProjects({
     await updateItem(item, {
       status: stage,
       metadata: { productionStage: stage }
-    });
-  };
-
-  const markItemScriptReady = async (item: ContentItem) => {
-    await updateItem(item, {
-      status: 'script',
-      metadata: {
-        productionStage: 'script',
-        editorialState: 'script_ready'
-      }
     });
   };
 
@@ -1935,17 +2033,16 @@ export default function ContentProjects({
           </div>
           <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{item.sourceText}</p>
         </div>
-        {!isItemScriptReady(item) && item.sourceText?.trim() ? (
+        {item.sourceText?.trim() ? (
           <Button
             size="sm"
             variant="outline"
             onClick={(event) => {
               event.stopPropagation();
-              void markItemScriptReady(item);
+              void openStudio(item);
             }}
-            disabled={busy}
           >
-            Mark script ready
+            Iniciar
           </Button>
         ) : null}
       </div>
@@ -1990,11 +2087,6 @@ export default function ContentProjects({
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {selectedStudioItem && !selectedItemScriptReady && selectedStudioItem.sourceText?.trim() ? (
-                <Button variant="default" onClick={() => markItemScriptReady(selectedStudioItem)} disabled={busy}>
-                  Mark script ready
-                </Button>
-              ) : null}
               {selectedStudioItem && onOpenEditor ? (
                 <Button
                   variant="outline"
@@ -2090,7 +2182,7 @@ export default function ContentProjects({
                     <h3 className="font-bold">Selected Output</h3>
                     <p className="text-sm text-muted-foreground">
                       {!selectedItemScriptReady
-                        ? 'Este conteúdo ainda não chegou a script_ready. Finalize a etapa editorial antes de preparar o output.'
+                        ? 'Este conteúdo ainda não tem todos os scripts necessários para iniciar a criação deste output.'
                         : selectedProjectContentOutput
                         ? `${selectedProjectContentOutput.channel} • ${selectedProjectContentOutput.aspectRatio} • ${selectedProjectContentOutput.presetId}`
                         : 'Selecione um card do kanban para ver detalhes.'}
@@ -2137,7 +2229,7 @@ export default function ContentProjects({
                 ) : (
                   <div className="mt-4 rounded-[5px] border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
                     {!selectedItemScriptReady
-                      ? 'Conteúdo ainda em preparação editorial. Quando chegar a script_ready, o output poderá ser preparado aqui.'
+                      ? 'Conteúdo ainda em preparação editorial. Os outputs entram em criação quando seus scripts necessários estiverem prontos.'
                       : selectedStudioItem && selectedProjectContentOutput
                       ? 'Ainda nao existe narrativa para este entregável.'
                       : 'Selecione um output e gere a narrativa inicial para começar o fluxo deste conteúdo.'}
@@ -2777,22 +2869,80 @@ export default function ContentProjects({
                 </div>
               </div>
               <div className="space-y-5">
-                <section className="grid gap-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="font-bold">Associated Content</h3>
-                      <p className="text-sm text-muted-foreground">{items.length} associated content item{items.length === 1 ? '' : 's'}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="default" size="sm" onClick={() => setIsCreateContentOpen((current) => !current)}>
-                        <Plus size={14} /> Create content
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setIsLinkExistingOpen((current) => !current)}>
-                        <Plus size={14} /> Link existing
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => selectedProjectId && loadItems(selectedProjectId)} title="Refresh content">
-                        <RefreshCw size={16} />
-                      </Button>
+                <section className="space-y-4">
+                  <div className="flex justify-end">
+                    <div className="flex flex-wrap items-center gap-3 bg-card p-1.5 rounded-[5px] border border-border shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="default"
+                          className="h-8 gap-2 px-3 text-[11px] font-semibold tracking-wide"
+                          onClick={() => setIsCreateContentOpen((current) => !current)}
+                        >
+                          <Plus size={14} /> Create content
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-8 gap-2 px-3 text-[11px] font-semibold tracking-wide"
+                          onClick={() => setIsLinkExistingOpen((current) => !current)}
+                        >
+                          <Plus size={14} /> Link existing
+                        </Button>
+                      </div>
+                      <div className="h-7 w-px bg-border" />
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setDetailViewMode('kanban')}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-[5px] transition-colors ${
+                            detailViewMode === 'kanban'
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'text-slate-400 hover:text-primary'
+                          }`}
+                          title="Kanban view"
+                          aria-label="Kanban view"
+                        >
+                          <FolderKanban size={18} strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDetailViewMode('list')}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-[5px] transition-colors ${
+                            detailViewMode === 'list'
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'text-slate-400 hover:text-primary'
+                          }`}
+                          title="List view"
+                          aria-label="List view"
+                        >
+                          <List size={18} strokeWidth={2} />
+                        </button>
+                      </div>
+                      <div className="h-7 w-px bg-border" />
+                      <div className="flex items-center gap-2 px-1">
+                        <Filter size={16} className="text-slate-400" />
+                        <select
+                          value={detailContentFilter}
+                          onChange={(event) => setDetailContentFilter(event.target.value as DetailContentFilter)}
+                          className="h-8 rounded-[5px] border border-border bg-background px-2.5 text-xs font-semibold text-foreground"
+                          aria-label="Filter content"
+                        >
+                          {DETAIL_CONTENT_FILTERS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="h-7 w-px bg-border" />
+                      <button
+                        type="button"
+                        onClick={() => selectedProjectId && loadItems(selectedProjectId)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-[5px] text-slate-400 transition-colors hover:text-primary"
+                        title="Refresh content"
+                        aria-label="Refresh content"
+                      >
+                        <RefreshCw size={18} strokeWidth={2} />
+                      </button>
                     </div>
                   </div>
 
@@ -2904,11 +3054,73 @@ export default function ContentProjects({
                     </div>
                   )}
 
-                  {items.map(renderContentItem)}
-                  {items.length === 0 && (
-                    <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6">
-                      No associated content yet. Create a new content item here or link an existing one to start the Studio flow.
-                    </div>
+                  {detailViewMode === 'kanban' ? (
+                    <section className="space-y-4">
+                      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                        {phaseSections.map((phase) => (
+                          <section key={phase.value} className="space-y-3">
+                            <div className="border-b border-border/70 pb-3">
+                              <div className="text-sm font-bold">
+                                {phase.label} <span className="text-muted-foreground">({phase.items.length})</span>
+                              </div>
+                            </div>
+                            <div className="mt-3 space-y-3">
+                              {phase.items.length > 0 ? (
+                                phase.items.map(({ item, outputs, stateLabel }) => (
+                                  <article
+                                    key={item.id}
+                                    className="rounded-[6px] border border-border bg-background px-3 py-3 space-y-2"
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="font-semibold truncate">{item.title}</div>
+                                        <div className="mt-1 text-[11px] text-muted-foreground">
+                                          {getItemSourceMode(item) === 'final_content' ? 'Final content' : 'Source mode'}
+                                        </div>
+                                      </div>
+                                      <Badge variant="outline" className="shrink-0">
+                                        {outputs.length} output{outputs.length === 1 ? '' : 's'}
+                                      </Badge>
+                                    </div>
+                                    <div className="text-xs font-semibold text-foreground">{stateLabel}</div>
+                                    <div className="flex flex-wrap gap-2 pt-1">
+                                      {item.sourceText?.trim() ? (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => openStudio(item)}
+                                        >
+                                          Iniciar
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  </article>
+                                ))
+                              ) : (
+                                <div className="rounded-[5px] border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                                  No items in this phase.
+                                </div>
+                              )}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    </section>
+                  ) : (
+                    <section className="grid gap-3">
+                      <div>
+                        <h4 className="font-bold">
+                          Associated Content <span className="text-muted-foreground">({filteredDetailItems.length})</span>
+                        </h4>
+                      </div>
+
+                      {filteredDetailItems.map(renderContentItem)}
+                      {filteredDetailItems.length === 0 && (
+                        <div className="text-sm text-muted-foreground border border-dashed border-border rounded-md p-6">
+                          No content matches the current filter.
+                        </div>
+                      )}
+                    </section>
                   )}
                 </section>
               </div>

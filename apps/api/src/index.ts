@@ -7248,6 +7248,65 @@ fastify.get(
     }
   );
 
+  fastify.delete(
+    "/content-items/:itemId",
+    {
+      schema: {
+        tags: ["Content"],
+        summary: "Exclui conteúdo COPE",
+        description:
+          "Remove um conteúdo quando ele ainda não foi usado para iniciar a criação de entregáveis."
+      }
+    },
+    async (request, reply) => {
+      const auth = await getAuthenticatedScope(request, reply);
+      if (!auth) return;
+      const { itemId } = request.params as { itemId: string };
+      const item = await prisma.contentItem.findFirst({
+        where: { id: itemId, workspaceId: auth.scope.workspaceId }
+      });
+      if (!item) {
+        return reply.code(404).send({ error: "content item not found" });
+      }
+
+      const startedOutputs = await prisma.projectContentOutput.findMany({
+        where: {
+          workspaceId: auth.scope.workspaceId,
+          itemId,
+          OR: [
+            { status: { not: "not_started" } },
+            { currentStage: { notIn: ["queued"] } }
+          ]
+        },
+        include: {
+          project: { select: { name: true } }
+        }
+      });
+
+      if (startedOutputs.length > 0) {
+        const projectNames = Array.from(
+          new Set(
+            startedOutputs
+              .map((output) => output.project?.name?.trim() ?? "")
+              .filter(Boolean)
+          )
+        );
+        return reply.code(409).send({
+          error:
+            projectNames.length > 0
+              ? `This content cannot be deleted because it is already being used in deliverable creation. Open the content to see which projects are using it: ${projectNames.join(", ")}`
+              : "This content cannot be deleted because it is already being used in deliverable creation. Open the content to see which projects are using it."
+        });
+      }
+
+      await prisma.contentItem.delete({
+        where: { id: itemId }
+      });
+
+      return reply.code(200).send({ ok: true });
+    }
+  );
+
   fastify.get(
     "/content-projects/:projectId/promotion-targets",
     {

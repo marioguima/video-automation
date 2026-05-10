@@ -111,14 +111,12 @@ Leitura de produto sugerida:
 
 1. `preparation`
 2. `creation`
-3. `review`
-4. `publication`
+3. `publication`
 
 Leitura correta:
 
 - `preparation` é a fase compartilhada do conteúdo, antes de existir script final por entregável;
-- `creation` é a fase em que cada entregável já pode ser produzido;
-- `review` é a fase de validação humana e ajustes finais;
+- `creation` é a fase em que cada entregável já pode ser produzido e revisado;
 - `publication` é a fase operacional de distribuição.
 
 Os estados detalhados vivem dentro dessas fases.
@@ -138,13 +136,15 @@ Exemplos de estados:
 - `creation`
   - `output_adapting`
   - `output_structuring`
+  - `prompt_review`
+  - `tts_review`
+  - `image_review`
+  - `video_review`
+  - `timeline_preview`
+  - `ready_for_render`
   - `production_ready`
   - `rendering`
   - `ready`
-- `review`
-  - `in_review`
-  - `changes_requested`
-  - `approved`
 - `publication`
   - `queued_for_publish`
   - `scheduled`
@@ -153,8 +153,7 @@ Exemplos de estados:
 Definição de cada etapa:
 
 - `preparation`: fase em que diferentes entradas convergem para texto útil e, depois, para script;
-- `creation`: fase em que cada output já sabe o que precisa fazer com esse script;
-- `review`: fase em que o usuário aprova, corrige ou pede nova rodada;
+- `creation`: fase em que cada output já sabe o que precisa fazer com esse script e passa por ciclos de geração, revisão humana, ajustes e aprovação para seguir;
 - `publication`: fase em que o material pronto é distribuído, agendado ou publicado.
 
 Princípio obrigatório:
@@ -178,6 +177,8 @@ Regra de produto:
 - todo conteúdo que vai gerar output precisa chegar a `script_ready`;
 - se o usuário já trouxe o script pronto, isso só significa que etapas anteriores já vieram resolvidas;
 - o momento de ser tratado como script sempre existe.
+- `script_ready` não deve ser um estado alterado manualmente por botão;
+- esse estado deve ser derivado do que efetivamente já foi resolvido no fluxo.
 
 Regra importante:
 
@@ -214,6 +215,7 @@ Regra derivada:
 - `source mode` pode começar com uma única matéria-prima compartilhada;
 - `final content mode` já entra com versões finais por output esperado;
 - se faltar script para uma saída obrigatória do projeto, aquela saída não está pronta para entrar em `Creation`.
+- quando houver flexibilidade por saída, cada combinação `canal + formato` pode avançar para `Creation` assim que seu próprio script estiver pronto, sem depender artificialmente de um toggle manual no conteúdo.
 
 ### Prompts por saída
 
@@ -236,13 +238,14 @@ Regra:
 - a geração do conteúdo final por saída é o último passo da fase `Preparation`;
 - cada combinação `canal + formato` deve ter seu próprio prompt;
 - esses prompts podem nascer pré-cadastrados pela ferramenta, para reduzir carga operacional do usuário.
+- nesta fase do produto, a entrada em `Preparation` também pode ser manual; o usuário inicia o fluxo do conteúdo associado ao projeto e a esteira segue a partir dali.
 
 ## Escopo da V1
 
 V1 deve entregar o fluxo principal de vídeo:
 
 1. criar ou iniciar um conteúdo;
-2. produzir/refinar o conteúdo com escrita manual e/ou apoio de IA;
+2. produzir/preparar o conteúdo até texto bruto utilizável;
 3. associar o conteúdo a um projeto;
 4. usar configurações do projeto para parametrizar a fábrica de entregáveis;
 5. materializar outputs de vídeo 16:9 e 9:16 a partir da combinação projeto + conteúdo;
@@ -271,7 +274,7 @@ Deve guiar:
 - ideia/roteiro;
 - geração de cenas.
 
-Também deve existir um acesso rápido para iniciar pela criação de conteúdo. Essa tela deve ser voltada para a produção do conteúdo/roteiro, com área de escrita e um bloco de prompt/conversa para pedir ajuda da IA. Ela não deve ser a tela principal de configuração de canais e formatos; isso pertence ao projeto.
+Também deve existir um acesso rápido para iniciar pela criação de conteúdo. Essa tela deve ser voltada para ingestão e preparação de fontes até chegar em texto bruto utilizável. Ela não deve ser a tela principal de configuração de canais e formatos; isso pertence ao projeto.
 
 Também deve aceitar múltiplos tipos de entrada, sempre deixando claro em que etapa da esteira o conteúdo está:
 
@@ -293,9 +296,17 @@ Regra:
 Regra de UX:
 
 - `Content` cria e edita conteúdo;
+- `Content` também é a área de ingestão e preparação de fontes;
 - `Project` associa conteúdo existente e o transforma em entregável;
 - `Editor`/`Studio` entra quando já existe um output de vídeo e deve ficar acessível desde cedo nesse fluxo;
 - não deve haver duas telas principais diferentes para criar o mesmo conteúdo.
+
+Regra adicional:
+
+- a ingestão de fontes diversas não deve acontecer durante a criação do projeto;
+- ela deve acontecer na área `Content`, antes da associação ao projeto;
+- o projeto não é o lugar para baixar vídeo, extrair áudio, transcrever ou extrair texto de PDF;
+- o papel do projeto começa depois que o conteúdo já chegou ao estado de texto bruto utilizável.
 
 ### Editor / Studio
 
@@ -328,6 +339,63 @@ Princípio de interação:
 - a visão principal do projeto deve priorizar clareza de fase, estado e capacidade de disparo do fluxo;
 - a edição detalhada de blocos, prompts e pré-visualização pertence ao editor de vídeo.
 
+## Ingestão de fontes
+
+O conteúdo precisa ter uma área própria de ingestão e preparação de fontes, separada do projeto.
+
+Essa área deve permitir trabalhar com uma ou muitas fontes para o mesmo conteúdo, por exemplo:
+
+- texto;
+- links de vídeo;
+- áudio;
+- PDF;
+- vídeo local;
+- outras fontes futuras.
+
+Princípios:
+
+- a UI não deve prender o fluxo a um único `source type`;
+- o conteúdo pode nascer de uma ou várias fontes;
+- a preparação acontece nos bastidores, sem exigir um Kanban próprio nessa etapa;
+- o sistema identifica a origem e escolhe a pipeline correta automaticamente.
+- ao confirmar uma fonte, o processamento dela deve começar imediatamente;
+- na V1, esse processamento deve acontecer em fila, uma fonte por vez, para evitar sobrecarga da máquina do usuário.
+
+Exemplos:
+
+- link de vídeo: baixar vídeo -> extrair áudio -> transcrever -> obter texto bruto;
+- áudio: transcrever -> obter texto bruto;
+- PDF: extrair texto -> obter texto bruto;
+- texto: já entra como texto bruto.
+
+Regras adicionais:
+
+- se o usuário inserir 10 links de vídeo, os 10 entram imediatamente na fila de preparação;
+- cada fonte precisa manter vínculo com sua origem, mesmo que a UI não exponha todos os artefatos;
+- no caso de vídeo, o sistema deve conseguir identificar pelo menos a origem, o vídeo baixado, o áudio extraído e o texto transcrito;
+- o conteúdo só fica pronto para uso pleno no projeto quando todas as fontes inseridas tiverem convergido para texto bruto.
+
+Objetivo comum:
+
+```text
+fontes diversas -> texto bruto
+```
+
+Depois disso, o fluxo correto é:
+
+```text
+conteudo -> projeto -> canal -> formato -> prompt -> final content
+```
+
+Ou seja:
+
+- o conteúdo preparado fornece o texto bruto;
+- o projeto define os conjuntos `canal + formato`;
+- cada conjunto usa seu próprio prompt;
+- o resultado é um `final content` por entregável.
+- se o conteúdo já estiver associado a um projeto antes do fim da preparação, o projeto deve exibir esse conteúdo na fase `Preparation`;
+- quando todas as fontes virarem texto bruto, o conteúdo passa a estar apto para iniciar `Creation`.
+
 ### Feed
 
 Visão visual do acervo/publicações do projeto.
@@ -356,7 +424,6 @@ Colunas iniciais:
 
 - Preparation
 - Creation
-- Review
 - Publication
 
 Leitura correta:
@@ -398,8 +465,9 @@ Depois que o projeto estiver configurado, a interação principal não deve ser 
 
 Princípio:
 
-- o projeto deve ter um comando principal de início, como `Iniciar`;
-- esse comando dispara a esteira do conteúdo e dos entregáveis daquele projeto;
+- o projeto não possui começo e fim como unidade operacional;
+- quem entra em fluxo é o par `projeto + conteúdo`;
+- a ação de início deve acontecer no conteúdo associado ao projeto quando ele estiver pronto para seguir.
 - a execução real pode seguir em fila por limitações de hardware e prioridades locais;
 - a visão do projeto deve mostrar progresso, fase, estado e pontos de intervenção humana.
 

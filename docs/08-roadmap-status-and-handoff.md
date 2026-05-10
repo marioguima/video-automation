@@ -17,9 +17,13 @@ Nota importante de produto:
 - FlowShopy deve evoluir como máquina de atenção para promoção de produtos/ofertas/eventos, usando short links redirecionáveis;
 - o produto e instalado na máquina do usuário final; ele deve exigir autenticação e depois aplicar autorização por workspace/equipe;
 - a arquitetura deve assumir owner/admin gerenciando membros do time, papéis e permissões; a área de convites existe hoje, mas ainda está superficial e não pode ser confundida com RBAC completo;
-- a tela `Content` deve ser voltada para produção do conteúdo/roteiro com apoio de IA; canais e formatos pertencem ao projeto.
+- a tela `Content` deve ser voltada para ingestão e preparação de fontes até texto bruto; canais e formatos pertencem ao projeto.
 - a tela `Content` não deve pedir tipo de mídia na criação; o conteúdo e genérico e entregáveis são definidos no projeto e materializados como outputs.
 - a tela `Content` não deve gerar cenas, abrir editor de vídeo ou iniciar render; segmentação/render pertencem ao projeto/output.
+- a tela `Content` deve evoluir para uma área própria de ingestão e preparação de múltiplas fontes;
+- ingestão de links, PDFs, áudios e vídeos locais não deve acontecer no detalhe do projeto;
+- a preparação de fontes deve ocorrer nos bastidores até convergir para texto bruto.
+- ao confirmar cada fonte, o sistema já deve iniciar sua preparação em fila sequencial;
 - a tela `Project` não deve virar um segundo lugar para criar conteúdo; ela deve localizar, associar e orquestrar conteúdos existentes.
 - um mesmo conteúdo pode estar associado a um ou muitos projetos; o vínculo precisa ser reutilizável e visível.
 - CTAs e linguagem de interação devem poder variar por canal; blocos comuns devem ser reaproveitados quando possível.
@@ -114,6 +118,7 @@ Não implementado ainda:
 - biblioteca de conteúdos reutilizáveis independente de projeto;
 - associação muitos-para-muitos entre conteúdo e projetos;
 - simplificar a tela de projeto para manter uma única ação principal de associação, sem duplicar o fluxo de criação da área `Content`;
+- painel lateral de ajuda contextual acionado por ícone de interrogação na barra superior, com conteúdo sensível à tela atual;
 - DeliveryChannel/formatos permitidos por canal;
 - PromotionTarget;
 - ShortLink redirecionável;
@@ -410,6 +415,11 @@ Leitura correta:
 - em `final content mode`, o sistema precisa validar cobertura de conteúdo final por saída antes de entrar em `Creation`;
 - em `source mode`, o sistema precisa aplicar prompts próprios por combinação `canal + formato`.
 - a aplicação desses prompts por saída é o último passo da fase `Preparation`.
+- `script_ready` não deve existir como toggle manual na UI;
+- esse estado precisa ser derivado do que já foi resolvido no conjunto `conteúdo + projeto + saídas`;
+- quando houver granularidade por saída, cada combinação `canal + formato` pode avançar para `Creation` sem esperar artificialmente todas as demais.
+- o fluxo correto da geração é `conteudo -> projeto -> canal -> formato -> prompt -> final content`.
+- se o conteúdo for associado ao projeto antes do fim da preparação, o projeto deve mostrar esse conteúdo em `Preparation` até todas as fontes convergirem para texto bruto.
 
 ## Definição de beta funcional
 
@@ -424,7 +434,7 @@ O beta deve permitir:
 5. registrar claramente se o conteúdo ainda está em fonte bruta ou já está em script;
 6. associar conteúdo a um projeto;
 7. configurar pipeline, outputs e regras mínimas do projeto;
-8. disparar o fluxo do projeto por um comando principal de início;
+8. disparar manualmente o fluxo do conteúdo associado ao projeto;
 9. colocar conteúdos e outputs em fila respeitando fase e limitação de hardware;
 10. materializar um `ProjectContentOutput` de vídeo quando o conteúdo já estiver pronto para criação;
 11. entrar no `Studio`/editor assim que esse output de vídeo existir;
@@ -589,14 +599,20 @@ O que não fazer agora:
 - definir tratamento mínimo para texto, script pronto, áudio, vídeo por link e PDF;
 - garantir convergência obrigatória em `script_ready`;
 - introduzir gate de revisão/aprovação antes de produção automatizada.
+- mover a experiência de ingestão/preparação para a área `Content`, fora do detalhe do projeto;
+- permitir uma ou muitas fontes por conteúdo;
+- automatizar seleção da pipeline de extração/transcrição conforme a origem da fonte.
+- executar preparação inicial em fila sequencial, uma fonte por vez;
+- refletir no projeto apenas o estado agregado do conteúdo associado durante `Preparation`.
 
 ### Bloco G - Orquestração do projeto
 
-- substituir a interação principal de cliques por output por um comando de `Iniciar`;
-- refletir fases macro `Preparation`, `Creation`, `Review` e `Publication`;
+- substituir a interação principal de cliques por output por uma ação de início no nível do par `projeto + conteúdo`;
+- refletir fases macro `Preparation`, `Creation` e `Publication`;
 - mostrar estado detalhado dentro de cada fase, como `downloading_video`, `extracting_audio` e `transcribing`;
 - garantir que a preparação do conteúdo aconteça antes da criação dos outputs;
 - tratar fila e prioridade de outputs como parte explícita do runtime.
+- modelar revisão humana como subetapas dentro de `Creation`, incluindo prompts, TTS, imagens, vídeos, preview/timeline e autorização para render imediato ou em fila.
 
 ### Bloco D - Team beta
 
@@ -628,7 +644,7 @@ Sequencia do próximo ciclo:
 1. limpar `ContentProjects.tsx` e shell principal do beta;
 2. ajustar contrato de `content` para deixar explícito o estado `script_ready`;
 3. separar fase `Preparation` da fase `Creation` no contrato e na UI;
-4. introduzir comando principal de `Iniciar` no projeto;
+4. introduzir ação principal de início no conteúdo associado ao projeto;
 5. ajustar API do fluxo novo onde ainda depende de `content-item` isolado em vez de `output`;
 6. fechar `Studio` como centro operacional do output de vídeo;
 7. remover a ambiguidade da visão `Selected Output`;
@@ -637,6 +653,13 @@ Sequencia do próximo ciclo:
 10. validar TTS/imagem/render no pipeline;
 11. revisar equipe/autorização mínima;
 12. executar validação manual completa.
+
+Direcionamento registrado em 2026-05-09:
+
+- revisão humana não é fase após `Creation`;
+- revisão humana acontece durante `Creation`;
+- o usuário deve poder revisar prompts por bloco, TTS, imagens, vídeos e preview/timeline antes de autorizar render;
+- a autorização de render pode ser imediata ou colocada em fila.
 
 ## Checklist antes de finalizar proxima tarefa
 
