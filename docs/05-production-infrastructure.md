@@ -159,6 +159,62 @@ Recomendacao:
 - configurador de providers;
 - atualização do app.
 
+### Diretriz de empacotamento de dependências críticas
+
+Para o produto desktop local-first, dependências críticas de execução devem ser distribuídas junto com a aplicação.
+
+Isso vale especialmente para:
+
+- `ffmpeg` e `ffprobe`;
+- runtime Python;
+- bibliotecas Python necessárias para ingestão, transcrição e TTS;
+- modelos locais necessários para o caminho crítico.
+
+Regra operacional:
+
+- nenhuma feature central do beta pode depender de ferramenta pré-instalada no sistema operacional do usuário final;
+- `PATH` do sistema deve ser tratado apenas como fallback de desenvolvimento, não como requisito de produto.
+
+### Fase aceita para o beta
+
+A fase aceita para o beta é usar runtimes e binários `standalone` ou embarcados.
+
+Isso significa:
+
+- Electron distribui o shell;
+- `vendor/node` sobe API e worker;
+- `vendor/ffmpeg` executa tarefas de mídia;
+- `vendor/python` executa scripts auxiliares;
+- modelos e assets de suporte ficam sob controle do app.
+
+Preparação operacional atual do `vendor`:
+
+- `pnpm prepare:desktop-node`
+- `pnpm prepare:desktop-ffmpeg`
+- `pnpm prepare:desktop-python`
+- `pnpm prepare:desktop-runtime`
+- `pnpm clean:desktop-runtime`
+
+Na fase imediata aceita hoje:
+
+- `prepare:desktop-ffmpeg` baixa automaticamente o pacote `standalone` de `ffmpeg`/`ffprobe`;
+- `prepare:desktop-python` baixa automaticamente o Python embeddable oficial, instala `yt-dlp` e `faster-whisper`, e pré-baixa o modelo inicial de transcrição;
+- `build:desktop` executa `prepare:desktop-runtime` antes do empacotamento.
+- `dev:desktop` verifica e prepara o runtime faltante durante a splash screen do Electron.
+- no app instalado, `resources/vendor` funciona como seed do instalador e `userData/vendor` funciona como runtime ativo mutável.
+
+Essa decisão foi aceita para reduzir risco de instalação e aumentar previsibilidade do suporte.
+
+### Pendências controladas
+
+Pontos que ficam explicitamente registrados para revisão futura:
+
+- estudar quando vale trocar dependências Python por binários dedicados;
+- decidir entre embarcar modelos no instalador ou baixar no primeiro uso;
+- medir impacto do tamanho final do instalador;
+- ampliar a rotina já existente de verificação e reparo automático de runtimes embarcados para o cenário de aplicação instalada com atualização do próprio app;
+- adicionar documentação e diagnóstico de versão das dependências empacotadas.
+
 ## Deploy container/lab
 
 Docker pode ser usado em dev/lab, mas não deve ser dependência obrigatoria para usuário final.

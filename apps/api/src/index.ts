@@ -368,6 +368,7 @@ type AgentControlMessage =
         command:
           | "comfy_workflows_list"
           | "comfy_workflow_import"
+          | "content_sources_prepare_enqueue"
           | "tts_voices_list"
           | "worker_queue_wake"
           | "system_hard_cleanup"
@@ -408,6 +409,7 @@ type AgentControlRequestMessage =
         command:
           | "comfy_workflows_list"
           | "comfy_workflow_import"
+          | "content_sources_prepare_enqueue"
           | "tts_voices_list"
           | "worker_queue_wake"
           | "system_hard_cleanup"
@@ -458,6 +460,7 @@ const pendingAgentReplies = new Map<
       command?:
         | "comfy_workflows_list"
         | "comfy_workflow_import"
+        | "content_sources_prepare_enqueue"
         | "tts_voices_list"
         | "worker_queue_wake"
         | "system_hard_cleanup"
@@ -1105,6 +1108,7 @@ async function requestAgentWorkerCommand(
   command:
     | "comfy_workflows_list"
     | "comfy_workflow_import"
+    | "content_sources_prepare_enqueue"
     | "tts_voices_list"
     | "worker_queue_wake"
     | "system_hard_cleanup"
@@ -6036,6 +6040,38 @@ function normalizeContentProjectAssociationInput(payload: Record<string, unknown
   return { projectIds: normalized.projectIds, provided: true };
 }
 
+function extractPendingContentSourceCount(metadata: Record<string, unknown> | null | undefined): number {
+  const sources = metadata?.contentSources;
+  if (!Array.isArray(sources)) return 0;
+  return sources.filter((source) => {
+    if (!source || typeof source !== "object") return false;
+    const statusValue = (source as Record<string, unknown>).status;
+    const status = typeof statusValue === "string" ? statusValue : "";
+    return status.length > 0 && status !== "raw_text_ready" && status !== "failed";
+  }).length;
+}
+
+async function requestContentSourcePreparationIfNeeded(params: {
+  workspaceId: string;
+  itemId: string;
+  metadata: Record<string, unknown> | null | undefined;
+}): Promise<void> {
+  if (extractPendingContentSourceCount(params.metadata) === 0) return;
+  const agentSession = getConnectedAgentForWorkspace(params.workspaceId);
+  if (!agentSession) return;
+  try {
+    await requestAgentWorkerCommand(agentSession, "content_sources_prepare_enqueue", {
+      workspaceId: params.workspaceId,
+      itemId: params.itemId
+    });
+  } catch (err) {
+    fastify.log.warn(
+      { err, workspaceId: params.workspaceId, itemId: params.itemId },
+      "content_source_prepare_enqueue_failed"
+    );
+  }
+}
+
 async function validateContentProjectIds(projectIds: string[], workspaceId: string): Promise<{ ok: true } | { error: string }> {
   if (projectIds.length === 0) return { ok: true };
   const projects = await prisma.contentProject.findMany({
@@ -7102,6 +7138,11 @@ fastify.get(
           }
         }
       });
+      await requestContentSourcePreparationIfNeeded({
+        workspaceId: auth.scope.workspaceId,
+        itemId: item.id,
+        metadata: parseJsonRecord((refreshed ?? item).metadataJson)
+      });
       return reply.code(201).send({
         ...serializeContentItem(refreshed ?? item)
       });
@@ -7244,6 +7285,11 @@ fastify.get(
         }
       }
       if (!updated) return reply.code(404).send({ error: "content item not found" });
+      await requestContentSourcePreparationIfNeeded({
+        workspaceId: auth.scope.workspaceId,
+        itemId: item.id,
+        metadata: parseJsonRecord(updated.metadataJson)
+      });
       return reply.code(200).send(serializeContentItem(updated));
     }
   );

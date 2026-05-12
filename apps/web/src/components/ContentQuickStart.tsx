@@ -66,7 +66,13 @@ type ContentQuickStartProps = {
 };
 
 type ContentSourceKind = 'text' | 'youtube_url' | 'pdf';
-type ContentSourceDraftStatus = 'raw_text_ready' | 'queued';
+type ContentSourceDraftStatus =
+  | 'raw_text_ready'
+  | 'queued'
+  | 'downloading'
+  | 'extracting_audio'
+  | 'transcribing'
+  | 'failed';
 
 type ContentSourceDraft = {
   id: string;
@@ -75,6 +81,16 @@ type ContentSourceDraft = {
   value?: string;
   fileNames?: string[];
   status: ContentSourceDraftStatus;
+  rawText?: string;
+  error?: string;
+  artifacts?: {
+    videoPath?: string;
+    audioPath?: string;
+    transcriptPath?: string;
+    videoId?: string;
+    title?: string;
+    durationS?: number | null;
+  };
 };
 
 const TEXT_SOURCE_PLACEHOLDER =
@@ -125,6 +141,18 @@ function getItemProjectIds(item: ContentItem): string[] {
 
 function getSavedContentSources(item: ContentItem): ContentSourceDraft[] {
   return Array.isArray(item.metadata?.contentSources) ? item.metadata?.contentSources : [];
+}
+
+function getSourceStatusUi(source: ContentSourceDraft): {
+  label: string;
+  tone: 'ready' | 'progress' | 'error';
+} {
+  if (source.status === 'raw_text_ready') return { label: 'Ready', tone: 'ready' };
+  if (source.status === 'downloading') return { label: 'Downloading video', tone: 'progress' };
+  if (source.status === 'extracting_audio') return { label: 'Extracting audio', tone: 'progress' };
+  if (source.status === 'transcribing') return { label: 'Transcribing audio', tone: 'progress' };
+  if (source.status === 'failed') return { label: 'Failed', tone: 'error' };
+  return { label: 'Queued', tone: 'progress' };
 }
 
 function getContentPreparationStatus(item: ContentItem): 'Processando' | 'Pronto' {
@@ -212,7 +240,10 @@ function deriveSourcesFromItem(item: ContentItem): ContentSourceDraft[] {
       label: source.label,
       value: source.value,
       fileNames: source.fileNames,
-      status: source.status
+      status: source.status,
+      rawText: source.rawText,
+      error: source.error,
+      artifacts: source.artifacts
     }));
   }
   if ((item.sourceText ?? '').trim()) {
@@ -231,8 +262,8 @@ function deriveSourcesFromItem(item: ContentItem): ContentSourceDraft[] {
 
 function buildRawTextFromSources(sources: ContentSourceDraft[]): string {
   return sources
-    .filter((source) => source.type === 'text' && source.status === 'raw_text_ready')
-    .map((source) => source.value?.trim() ?? '')
+    .filter((source) => source.status === 'raw_text_ready')
+    .map((source) => source.rawText?.trim() || source.value?.trim() || '')
     .filter(Boolean)
     .join('\n\n---\n\n');
 }
@@ -312,6 +343,31 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
   useEffect(() => {
     loadContentList().catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
+
+  useEffect(() => {
+    const hasProcessingContent = contents.some((item) => getContentPreparationStatus(item) === 'Processando');
+    if (!hasProcessingContent) return;
+    const timer = window.setInterval(() => {
+      void loadContentList().catch(() => null);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [contents]);
+
+  useEffect(() => {
+    const hasPendingSources = draftSources.some((source) => source.status !== 'raw_text_ready' && source.status !== 'failed');
+    if (screen !== 'form' || !editingContent || !hasPendingSources) return;
+    const timer = window.setInterval(() => {
+      void apiGet<ContentItem[]>('/content-items', { cacheMs: 0, dedupe: false })
+        .then((items) => {
+          const found = items.find((item) => item.id === editingContent.id);
+          if (!found) return;
+          setEditingContent(found);
+          setDraftSources(deriveSourcesFromItem(found));
+        })
+        .catch(() => null);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [screen, editingContent?.id, draftSources]);
 
   useEffect(() => {
     const handleClickOutside = () => setOpenMenuId(null);
@@ -1100,18 +1156,24 @@ export default function ContentQuickStart({ initialDraft, onInitialDraftConsumed
                         </button>
                       </div>
                       <div className="mt-3 flex items-center gap-2 text-xs font-semibold">
-                        {source.status === 'raw_text_ready' ? (
+                        {getSourceStatusUi(source).tone === 'ready' ? (
                           <>
                             <CheckCircle2 size={14} className="text-emerald-400" />
-                            <span className="text-emerald-300">Ready</span>
+                            <span className="text-emerald-300">{getSourceStatusUi(source).label}</span>
+                          </>
+                        ) : getSourceStatusUi(source).tone === 'error' ? (
+                          <>
+                            <Clock3 size={14} className="text-red-400" />
+                            <span className="text-red-300">{getSourceStatusUi(source).label}</span>
                           </>
                         ) : (
                           <>
                             <Clock3 size={14} className="text-amber-400" />
-                            <span className="text-amber-300">Preparing</span>
+                            <span className="text-amber-300">{getSourceStatusUi(source).label}</span>
                           </>
                         )}
                       </div>
+                      {source.error ? <div className="mt-2 text-xs text-red-300 line-clamp-3">{source.error}</div> : null}
                     </article>
                   ))}
                 </div>

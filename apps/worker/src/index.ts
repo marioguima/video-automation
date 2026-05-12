@@ -476,6 +476,8 @@ function loadTtsSettings(): TtsSettings {
 const WORKER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const QWEN_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "qwen_tts_generate.py");
 const CHATTERBOX_TTS_SCRIPT = path.join(WORKER_ROOT, "scripts", "chatterbox_tts_generate.py");
+const YOUTUBE_SOURCE_DOWNLOAD_SCRIPT = path.join(WORKER_ROOT, "scripts", "youtube_source_download.py");
+const FASTER_WHISPER_TRANSCRIBE_SCRIPT = path.join(WORKER_ROOT, "scripts", "transcribe_audio_faster_whisper.py");
 const COMFY_WORKFLOWS_DIR = path.join(WORKER_ROOT, "workflows");
 const DEFAULT_COMFY_WORKFLOW_FILE = "vantage-z-image-turbo-api.json";
 const comfyWorkflowTemplateCache = new Map<string, { workflow: ComfyWorkflow; mtimeMs: number }>();
@@ -484,6 +486,8 @@ let nvidiaSmiAvailability: "unknown" | "available" | "unavailable" = "unknown";
 let didWarnNoNvidiaSmi = false;
 let lastAssetGenerationAt = Date.now();
 let didIdleUnloadAfterLastAsset = false;
+const contentSourcePreparationQueue: Array<{ workspaceId: string; itemId: string }> = [];
+const contentSourcePreparationInFlight = new Set<string>();
 
 async function runProcess(
   command: string,
@@ -671,6 +675,167 @@ function deriveWsUrlFromHttpBase(baseUrl: string): string {
   parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
   parsed.pathname = parsed.pathname.replace(/\/+$/, "") + "/ws/agent-control";
   return parsed.toString();
+}
+
+type ContentSourceDraftStatus =
+  | "queued"
+  | "downloading"
+  | "extracting_audio"
+  | "transcribing"
+  | "raw_text_ready"
+  | "failed";
+
+type ContentSourceDraft = {
+  id: string;
+  type: "text" | "youtube_url" | "pdf";
+  label: string;
+  value?: string;
+  fileNames?: string[];
+  status: ContentSourceDraftStatus;
+  rawText?: string;
+  error?: string;
+  artifacts?: {
+    videoPath?: string;
+    audioPath?: string;
+    transcriptPath?: string;
+    videoId?: string;
+    title?: string;
+    durationS?: number | null;
+  };
+};
+
+function parseJsonRecord(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function getContentSourcesFromMetadata(raw: string | null | undefined): ContentSourceDraft[] {
+  const metadata = parseJsonRecord(raw);
+  const sources = metadata.contentSources;
+  if (!Array.isArray(sources)) return [];
+  return sources
+    .filter((source): source is Record<string, unknown> => Boolean(source) && typeof source === "object")
+    .map((source) => ({
+      id: typeof source.id === "string" ? source.id : randomUUID(),
+      type:
+        source.type === "youtube_url" || source.type === "pdf" || source.type === "text"
+          ? source.type
+          : "text",
+      label: typeof source.label === "string" ? source.label : "Source",
+      value: typeof source.value === "string" ? source.value : undefined,
+      fileNames: Array.isArray(source.fileNames)
+        ? source.fileNames.filter((item): item is string => typeof item === "string")
+        : undefined,
+      status:
+        source.status === "downloading" ||
+        source.status === "extracting_audio" ||
+        source.status === "transcribing" ||
+        source.status === "raw_text_ready" ||
+        source.status === "failed"
+          ? source.status
+          : "queued",
+      rawText: typeof source.rawText === "string" ? source.rawText : undefined,
+      error: typeof source.error === "string" ? source.error : undefined,
+      artifacts:
+        source.artifacts && typeof source.artifacts === "object" && !Array.isArray(source.artifacts)
+          ? {
+              videoPath:
+                typeof (source.artifacts as Record<string, unknown>).videoPath === "string"
+                  ? ((source.artifacts as Record<string, unknown>).videoPath as string)
+                  : undefined,
+              audioPath:
+                typeof (source.artifacts as Record<string, unknown>).audioPath === "string"
+                  ? ((source.artifacts as Record<string, unknown>).audioPath as string)
+                  : undefined,
+              transcriptPath:
+                typeof (source.artifacts as Record<string, unknown>).transcriptPath === "string"
+                  ? ((source.artifacts as Record<string, unknown>).transcriptPath as string)
+                  : undefined,
+              videoId:
+                typeof (source.artifacts as Record<string, unknown>).videoId === "string"
+                  ? ((source.artifacts as Record<string, unknown>).videoId as string)
+                  : undefined,
+              title:
+                typeof (source.artifacts as Record<string, unknown>).title === "string"
+                  ? ((source.artifacts as Record<string, unknown>).title as string)
+                  : undefined,
+              durationS:
+                typeof (source.artifacts as Record<string, unknown>).durationS === "number"
+                  ? ((source.artifacts as Record<string, unknown>).durationS as number)
+                  : null
+            }
+          : undefined
+    }));
+}
+
+function buildRawTextFromSources(sources: ContentSourceDraft[]): string {
+  return sources
+    .filter((source) => source.status === "raw_text_ready")
+    .map((source) => {
+      if (source.rawText?.trim()) return source.rawText.trim();
+      if (source.type === "text" && source.value?.trim()) return source.value.trim();
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
+function computeContentPreparationState(sources: ContentSourceDraft[]): {
+  editorialState: string;
+  productionStage: string;
+  status: string;
+} {
+  const total = sources.length;
+  const allReady =
+    total > 0 &&
+    sources.every((source) => source.status === "raw_text_ready");
+  return {
+    editorialState: allReady ? "script_ready" : "source_ingested",
+    productionStage: allReady ? "script" : "idea",
+    status: allReady ? "script" : "idea"
+  };
+}
+
+async function persistContentSources(params: {
+  workspaceId: string;
+  itemId: string;
+  sources: ContentSourceDraft[];
+}): Promise<void> {
+  const item = await prisma.contentItem.findFirst({
+    where: { id: params.itemId, workspaceId: params.workspaceId },
+    select: { metadataJson: true }
+  });
+  if (!item) return;
+  const metadata = parseJsonRecord(item.metadataJson);
+  metadata.contentSources = params.sources;
+  const state = computeContentPreparationState(params.sources);
+  metadata.editorialState = state.editorialState;
+  metadata.productionStage = state.productionStage;
+  const sourceText = buildRawTextFromSources(params.sources);
+  await prisma.contentItem.update({
+    where: { id: params.itemId },
+    data: {
+      sourceText: sourceText || null,
+      status: state.status,
+      metadataJson: JSON.stringify(metadata)
+    }
+  });
+}
+
+function resolveContentSourceDir(workspaceId: string, itemId: string, sourceId: string): string {
+  return path.join(config.dataDir, "content-sources", workspaceId, itemId, sourceId);
+}
+
+function resolveWorkerPythonExecutable(): string {
+  return process.env.PYTHON?.trim() || config.pythonPath || config.xttsApiPython || config.qwenTtsPython || "python";
 }
 
 let agentControlToken =
@@ -1198,6 +1363,7 @@ type AgentControlRequest =
         command:
           | "comfy_workflows_list"
           | "comfy_workflow_import"
+          | "content_sources_prepare_enqueue"
           | "tts_voices_list"
           | "worker_queue_wake"
           | "system_hard_cleanup"
@@ -1260,6 +1426,7 @@ function createWorkerCommandResponseMessage(params: {
   command:
     | "comfy_workflows_list"
     | "comfy_workflow_import"
+    | "content_sources_prepare_enqueue"
     | "tts_voices_list"
     | "worker_queue_wake"
     | "system_hard_cleanup"
@@ -1584,6 +1751,7 @@ async function handleWorkerCommandRequest(
   command:
     | "comfy_workflows_list"
     | "comfy_workflow_import"
+    | "content_sources_prepare_enqueue"
     | "tts_voices_list"
     | "worker_queue_wake"
     | "system_hard_cleanup"
@@ -1671,6 +1839,30 @@ async function handleWorkerCommandRequest(
         workflowFile: fileName,
         availableWorkflows: listComfyWorkflowFiles()
       }
+    };
+  }
+
+  if (request.payload.command === "content_sources_prepare_enqueue") {
+    const workspaceId =
+      typeof request.payload.params?.workspaceId === "string"
+        ? request.payload.params.workspaceId.trim()
+        : "";
+    const itemId =
+      typeof request.payload.params?.itemId === "string"
+        ? request.payload.params.itemId.trim()
+        : "";
+    if (!workspaceId || !itemId) {
+      return {
+        command: "content_sources_prepare_enqueue",
+        statusCode: 400,
+        data: { error: "workspaceId and itemId are required" }
+      };
+    }
+    const result = enqueueContentSourcePreparation({ workspaceId, itemId });
+    return {
+      command: "content_sources_prepare_enqueue",
+      statusCode: 202,
+      data: { ok: true, queued: result.queued, queueLength: result.queueLength }
     };
   }
 
@@ -3721,6 +3913,239 @@ function readAppSettings(): AppSettings {
   return readAppSettingsFile(config.appSettingsPath, config.appSettingsTemplatePath);
 }
 
+function enqueueContentSourcePreparation(task: { workspaceId: string; itemId: string }): {
+  queued: boolean;
+  queueLength: number;
+} {
+  const key = `${task.workspaceId}:${task.itemId}`;
+  const exists =
+    contentSourcePreparationInFlight.has(key) ||
+    contentSourcePreparationQueue.some((entry) => `${entry.workspaceId}:${entry.itemId}` === key);
+  if (!exists) {
+    contentSourcePreparationQueue.push(task);
+  }
+  requestWorkerWake("content_source_prepare_enqueue");
+  return {
+    queued: !exists,
+    queueLength: contentSourcePreparationQueue.length
+  };
+}
+
+function dequeueNextContentSourcePreparation(): { workspaceId: string; itemId: string } | null {
+  const next = contentSourcePreparationQueue.shift() ?? null;
+  if (!next) return null;
+  const key = `${next.workspaceId}:${next.itemId}`;
+  contentSourcePreparationInFlight.add(key);
+  return next;
+}
+
+function finalizeContentSourcePreparation(task: { workspaceId: string; itemId: string }): void {
+  contentSourcePreparationInFlight.delete(`${task.workspaceId}:${task.itemId}`);
+}
+
+async function runPythonJsonScript(scriptPath: string, payload: Record<string, unknown>, prefix: string): Promise<Record<string, unknown>> {
+  const tempDir = path.join(config.dataDir, "tmp", "content-source-scripts");
+  ensureDir(tempDir);
+  const token = randomUUID();
+  const inputPath = path.join(tempDir, `${token}.input.json`);
+  const outputPath = path.join(tempDir, `${token}.output.json`);
+  await fs.promises.writeFile(inputPath, JSON.stringify(payload, null, 2), "utf8");
+  try {
+    await runProcess(resolveWorkerPythonExecutable(), [scriptPath, "--input", inputPath, "--output", outputPath], {
+      logPrefix: prefix
+    });
+    const raw = await fs.promises.readFile(outputPath, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("script returned invalid json object");
+    }
+    return parsed as Record<string, unknown>;
+  } finally {
+    await fs.promises.unlink(inputPath).catch(() => null);
+    await fs.promises.unlink(outputPath).catch(() => null);
+  }
+}
+
+async function processYouTubeContentSource(params: {
+  workspaceId: string;
+  itemId: string;
+  source: ContentSourceDraft;
+  sources: ContentSourceDraft[];
+}): Promise<ContentSourceDraft> {
+  const sourceDir = resolveContentSourceDir(params.workspaceId, params.itemId, params.source.id);
+  ensureDir(sourceDir);
+
+  const downloading: ContentSourceDraft = { ...params.source, status: "downloading", error: undefined };
+  {
+    const nextSources = params.sources.map((entry) => (entry.id === downloading.id ? downloading : entry));
+    await persistContentSources({
+      workspaceId: params.workspaceId,
+      itemId: params.itemId,
+      sources: nextSources
+    });
+  }
+
+  const downloadResult = await runPythonJsonScript(
+    YOUTUBE_SOURCE_DOWNLOAD_SCRIPT,
+    {
+      url: params.source.value,
+      output_dir: sourceDir
+    },
+    `content:youtube:download:${params.source.id}`
+  );
+
+  const videoPath =
+    typeof downloadResult.video_path === "string" ? downloadResult.video_path : "";
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    throw new Error("downloaded video file not found");
+  }
+
+  const extracting: ContentSourceDraft = {
+    ...downloading,
+    status: "extracting_audio",
+    artifacts: {
+      ...(downloading.artifacts ?? {}),
+      videoPath,
+      videoId: typeof downloadResult.video_id === "string" ? downloadResult.video_id : undefined,
+      title: typeof downloadResult.title === "string" ? downloadResult.title : undefined,
+      durationS: typeof downloadResult.duration_s === "number" ? downloadResult.duration_s : null
+    }
+  };
+  {
+    const nextSources = params.sources.map((entry) => (entry.id === extracting.id ? extracting : entry));
+    await persistContentSources({
+      workspaceId: params.workspaceId,
+      itemId: params.itemId,
+      sources: nextSources
+    });
+  }
+
+  const audioPath = path.join(sourceDir, "audio.wav");
+  await runProcess(
+    config.ffmpegPath,
+    ["-y", "-i", videoPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", audioPath],
+    { logPrefix: `content:youtube:audio:${params.source.id}` }
+  );
+
+  const transcribing: ContentSourceDraft = {
+    ...extracting,
+    status: "transcribing",
+    artifacts: {
+      ...(extracting.artifacts ?? {}),
+      audioPath
+    }
+  };
+  {
+    const nextSources = params.sources.map((entry) => (entry.id === transcribing.id ? transcribing : entry));
+    await persistContentSources({
+      workspaceId: params.workspaceId,
+      itemId: params.itemId,
+      sources: nextSources
+    });
+  }
+
+  const transcriptResult = await runPythonJsonScript(
+    FASTER_WHISPER_TRANSCRIBE_SCRIPT,
+    {
+      audio_path: audioPath,
+      model: config.fasterWhisperModelName,
+      download_root: config.fasterWhisperModelDir,
+      device: "auto",
+      compute_type: "int8",
+      language: "pt",
+      beam_size: 1
+    },
+    `content:youtube:transcribe:${params.source.id}`
+  );
+  const transcriptText =
+    typeof transcriptResult.text === "string" ? transcriptResult.text.trim() : "";
+  if (!transcriptText) {
+    throw new Error("transcription returned empty text");
+  }
+  const transcriptPath = path.join(sourceDir, "transcript.json");
+  await fs.promises.writeFile(transcriptPath, JSON.stringify(transcriptResult, null, 2), "utf8");
+
+  return {
+    ...transcribing,
+    status: "raw_text_ready",
+    rawText: transcriptText,
+    error: undefined,
+    artifacts: {
+      ...(transcribing.artifacts ?? {}),
+      transcriptPath
+    }
+  };
+}
+
+async function processPendingContentSourcesForItem(task: {
+  workspaceId: string;
+  itemId: string;
+}): Promise<void> {
+  const item = await prisma.contentItem.findFirst({
+    where: { id: task.itemId, workspaceId: task.workspaceId },
+    select: { id: true, metadataJson: true }
+  });
+  if (!item) return;
+
+  let sources = getContentSourcesFromMetadata(item.metadataJson);
+  let updatedAny = false;
+
+  for (const source of sources) {
+    if (source.status === "raw_text_ready") continue;
+    if (source.type === "text") {
+      const nextSource: ContentSourceDraft = {
+        ...source,
+        status: "raw_text_ready",
+        rawText: source.rawText?.trim() || source.value?.trim() || "",
+        error: undefined
+      };
+      sources = sources.map((entry) => (entry.id === nextSource.id ? nextSource : entry));
+      await persistContentSources({ workspaceId: task.workspaceId, itemId: task.itemId, sources });
+      updatedAny = true;
+      continue;
+    }
+    if (source.type === "youtube_url") {
+      try {
+        const nextSource = await processYouTubeContentSource({
+          workspaceId: task.workspaceId,
+          itemId: task.itemId,
+          source,
+          sources
+        });
+        sources = sources.map((entry) => (entry.id === nextSource.id ? nextSource : entry));
+        await persistContentSources({ workspaceId: task.workspaceId, itemId: task.itemId, sources });
+        updatedAny = true;
+      } catch (err) {
+        const failedSource: ContentSourceDraft = {
+          ...source,
+          status: "failed",
+          error: serializeError(err)
+        };
+        sources = sources.map((entry) => (entry.id === failedSource.id ? failedSource : entry));
+        await persistContentSources({ workspaceId: task.workspaceId, itemId: task.itemId, sources });
+        updatedAny = true;
+      }
+      continue;
+    }
+  }
+
+  if (!updatedAny) {
+    await persistContentSources({ workspaceId: task.workspaceId, itemId: task.itemId, sources });
+  }
+}
+
+async function bootstrapPendingContentSourcePreparations(): Promise<void> {
+  const items = await prisma.contentItem.findMany({
+    select: { id: true, workspaceId: true, metadataJson: true }
+  });
+  for (const item of items) {
+    const sources = getContentSourcesFromMetadata(item.metadataJson);
+    if (sources.some((source) => source.status !== "raw_text_ready" && source.status !== "failed")) {
+      enqueueContentSourcePreparation({ workspaceId: item.workspaceId, itemId: item.id });
+    }
+  }
+}
+
 function mapLifecycleFromLogEvent(event: string): JobEventLifecycle | null {
   if (event === "job_started") return "started";
   if (event === "job_succeeded" || event === "job_failed" || event === "job_canceled") return "finished";
@@ -4214,7 +4639,7 @@ async function startXttsApiServer(): Promise<void> {
   }
 
   const cwd = config.xttsApiServerDir?.trim().length ? config.xttsApiServerDir : undefined;
-  const child = spawn(config.xttsApiPython, args, {
+  const child = spawn(resolveWorkerPythonExecutable(), args, {
     cwd,
     stdio: config.xttsApiDetach ? "ignore" : "pipe",
     detached: config.xttsApiDetach
@@ -4391,7 +4816,7 @@ async function releaseXttsResources(options: {
 
 async function probeAudioDuration(filePath: string): Promise<number | null> {
   try {
-    const output = await execFileText("ffprobe", [
+    const output = await execFileText(config.ffprobePath, [
       "-v",
       "error",
       "-show_entries",
@@ -4597,7 +5022,7 @@ async function runQwenTtsBatch(items: { id: string; text: string; outputPath: st
   await fs.promises.writeFile(inputPath, JSON.stringify(payload), "utf8");
   try {
     await runProcess(
-      config.qwenTtsPython,
+      resolveWorkerPythonExecutable(),
       [QWEN_TTS_SCRIPT, "--input", inputPath, "--output", outputPath],
       { logPrefix: "tts:qwen" }
     );
@@ -4649,7 +5074,7 @@ async function runChatterboxTtsBatch(options: {
   try {
     const resultPrefix = "__FLOWSHOPY_RESULT__";
     await runProcess(
-      config.chatterboxPython,
+      resolveWorkerPythonExecutable(),
       [CHATTERBOX_TTS_SCRIPT, "--input", inputPath, "--output", outputPath],
       {
         logPrefix: "tts:chatterbox",
@@ -5360,7 +5785,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
     const clipPath = path.join(clipDir, templateId ? `clip_${templateId}.mp4` : "clip.mp4");
 
     await runProcess(
-      "ffmpeg",
+      config.ffmpegPath,
       [
         "-y",
         "-loop",
@@ -5439,7 +5864,7 @@ async function renderFinalVideoForVersion(options: { job: JobRecord }): Promise<
 
   try {
     await runProcess(
-      "ffmpeg",
+      config.ffmpegPath,
       [
         "-y",
         "-f",
@@ -8017,30 +8442,53 @@ function scheduleIdleUnloadCheck(): void {
 async function drainQueue(): Promise<void> {
   while (true) {
     const job = await claimNextJob();
-    if (!job) {
-      const [pendingJobs, runningJobs] = await Promise.all([
-        prisma.job.count({ where: { status: "pending" } }),
-        prisma.job.count({ where: { status: "running" } })
-      ]);
-      if (pendingJobs > 0 || runningJobs > 0) {
-        logWorkerAction("worker_queue_idle_with_jobs", {
-          pending_jobs: pendingJobs,
-          running_jobs: runningJobs
-        });
+    if (job) {
+      if (idleUnloadTimer) {
+        clearTimeout(idleUnloadTimer);
+        idleUnloadTimer = null;
       }
-      await maybeUnloadIdleModels();
-      scheduleIdleUnloadCheck();
-      return;
+      await processJob(job);
+      continue;
     }
-    if (idleUnloadTimer) {
-      clearTimeout(idleUnloadTimer);
-      idleUnloadTimer = null;
+
+    const sourceTask = dequeueNextContentSourcePreparation();
+    if (sourceTask) {
+      if (idleUnloadTimer) {
+        clearTimeout(idleUnloadTimer);
+        idleUnloadTimer = null;
+      }
+      try {
+        await processPendingContentSourcesForItem(sourceTask);
+      } catch (err) {
+        logWorkerAction("content_source_prepare_failed", {
+          workspace_id: sourceTask.workspaceId,
+          item_id: sourceTask.itemId,
+          error: serializeError(err)
+        });
+      } finally {
+        finalizeContentSourcePreparation(sourceTask);
+      }
+      continue;
     }
-    await processJob(job);
+
+    const [pendingJobs, runningJobs] = await Promise.all([
+      prisma.job.count({ where: { status: "pending" } }),
+      prisma.job.count({ where: { status: "running" } })
+    ]);
+    if (pendingJobs > 0 || runningJobs > 0) {
+      logWorkerAction("worker_queue_idle_with_jobs", {
+        pending_jobs: pendingJobs,
+        running_jobs: runningJobs
+      });
+    }
+    await maybeUnloadIdleModels();
+    scheduleIdleUnloadCheck();
+    return;
   }
 }
 
 async function workerEventLoop(): Promise<void> {
+  await bootstrapPendingContentSourcePreparations();
   requestWorkerWake("startup");
   while (true) {
     try {

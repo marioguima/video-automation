@@ -10,7 +10,10 @@ const sourceExecutable =
   process.execPath;
 
 const executableName = process.platform === "win32" ? "node.exe" : "node";
-const targetDir = path.join(repoRoot, "apps", "desktop", "vendor", "node");
+const vendorRoot =
+  process.env.FLOWSHOPY_DESKTOP_VENDOR_DIR?.trim() ||
+  path.join(repoRoot, "apps", "desktop", "vendor");
+const targetDir = path.join(vendorRoot, "node");
 const targetExecutable = path.join(targetDir, executableName);
 const metadataPath = path.join(targetDir, "runtime.json");
 

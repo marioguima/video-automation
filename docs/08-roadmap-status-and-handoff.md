@@ -49,6 +49,8 @@ Implementado:
 - detalhe de `Projects` não deve criar conteúdo; ele lista conteúdos associados, permite vincular conteúdos existentes e acompanhar os outputs gerados para cada combinação projeto + conteúdo;
 - área `Content` deve listar todos os conteúdos já criados, com filtros por nome/data/projeto/destination, modos grade/lista e acesso ao formulário de edição;
 - área `Content` deve ter foco visual no conteúdo; projeto aparece apenas como uso/associação secundária;
+- preparação inicial de fontes YouTube já está conectada ao worker local em fila sequencial: download do vídeo, extração de áudio e transcrição até texto bruto;
+- a solução imediata aceita para o beta usa dependências críticas embarcadas ou standalone, não dependências pré-instaladas no sistema do usuário;
 - V1 bloqueia edição de conteúdo apenas quando algum projeto já iniciou criação/geração de entregável com base nele; simples associação a projeto não bloqueia edição; versionamento de conteúdo usado fica para fase futura;
 - metadados operacionais por ContentItem: destinos, aspect ratios, stage, owner e data planejada;
 - endpoint `PATCH /content-items/:itemId` para atualizar status/metadados preservando backing técnico;
@@ -86,6 +88,7 @@ Implementado:
 - decisao aceita em 2026-05-09: `Course/Module/Lesson` não faz parte do produto novo nem do vocabulário permitido do fluxo principal; qualquer permanencia desses termos deve ser tratada como migração técnica a remover.
 - decisao aceita em 2026-05-05: `template` deixa de significar slide com ou sem texto e passa a significar sistema de composição baseado em `Component`, `CompositionPreset`, `StyleDNA` e `VariationRules`.
 - decisao aceita em 2026-05-05: `Remotion` entra como direção principal para composição, preview e timeline; `ffmpeg` permanece como infraestrutura de mídia e export.
+- decisao aceita em 2026-05-10: o uso atual de `Playwright` para rasterização de slides HTML/CSS fica mapeado como solução transitória; após a entrada de `Remotion`, deve ser reavaliado se esses layouts podem ser gerados pelo mesmo motor para reduzir dependências.
 - segmentação estrutural por LLM conectada ao worker usando `buildSegmentationPrompt`, com fallback para segundo modelo Gemini quando disponível e fallback final por heurística deterministica; aguardando validação manual.
 - `buildSegmentationPrompt` não pede mais `on_screen`; `on_screen` permanece temporariamente na etapa de metadados por bloco para compatibilidade com editor/render atual; aguardando validação manual.
 - regeneracao manual de bloco (`segment_block`) usa o `sourceText` já salvo no bloco, evitando voltar para os cortes heuristicos antigos; aguardando validação manual.
@@ -113,8 +116,13 @@ Não implementado ainda:
 - Component Library / CompositionPreset;
 - viewer/timeline em Remotion;
 - plano de render por output, CTA por canal e render por blocos/cache;
+- revisão do uso de `Playwright` para geração de slides após estabilizar `Remotion`, para avaliar substituição e redução de dependências;
 - versionamento de ContentItem usado em entregáveis;
 - ContentSource;
+- empacotamento oficial de `ffmpeg` e `ffprobe` no desktop runtime;
+- empacotamento oficial de runtime Python e bibliotecas Python no desktop runtime;
+- estratégia final de distribuição de `yt-dlp` e `faster-whisper`;
+- estratégia final de distribuição de modelos de transcrição;
 - biblioteca de conteúdos reutilizáveis independente de projeto;
 - associação muitos-para-muitos entre conteúdo e projetos;
 - simplificar a tela de projeto para manter uma única ação principal de associação, sem duplicar o fluxo de criação da área `Content`;
@@ -136,6 +144,38 @@ Prioridade de arquitetura a partir desta decisao:
 5. usar `Remotion` para preview/timeline;
 6. migrar renderer final para `Composition` quando o preview estiver estável;
 7. remover nomenclatura, endpoints e estruturas herdadas conforme cada parte do fluxo novo estabilizar.
+
+## Decisão operacional de empacotamento para o beta
+
+Foi aceita a seguinte estratégia imediata para o beta local-first:
+
+- dependências críticas do caminho principal devem ser distribuídas junto com o app;
+- isso inclui `Node`, `ffmpeg`, runtime Python e bibliotecas Python necessárias;
+- o desktop deve resolver caminhos internos desses runtimes, sem depender do ambiente global do usuário.
+
+Aplicação prática inicial:
+
+- pipeline de YouTube usa `yt-dlp` no runtime Python embarcado;
+- extração de áudio usa `ffmpeg` embarcado;
+- transcrição usa `faster-whisper` no runtime Python embarcado.
+- a preparação de desktop já baixa automaticamente `ffmpeg`, Python embeddable, bibliotecas Python e o modelo inicial de transcrição;
+- `build:desktop` agora executa `prepare:desktop-runtime` para empacotar o runtime completo no instalador.
+- `dev:desktop` agora consegue reconstruir o runtime local a partir de ambiente limpo e mostra etapas na splash enquanto prepara dependências ausentes.
+- o runtime desktop não mantém cache persistente de staging; em desenvolvimento o estado persistente fica em `apps/desktop/vendor`, e no app instalado o runtime mutável fica em `%LOCALAPPDATA%/FlowShopy Desktop/vendor`.
+- no boot, o desktop já verifica se o `vendor` corresponde à versão/configuração esperada e reprovisiona automaticamente o que divergir.
+- no app instalado, `resources/vendor` passa a ser apenas cópia inicial do instalador; o runtime ativo mutável fica em `%LOCALAPPDATA%/FlowShopy Desktop/vendor`.
+- existe script de limpeza do runtime instalado para teste limpo sem VM obrigatória: `pnpm clean:installed-desktop-runtime`.
+- `DATA_DIR` só é respeitado no desktop quando `isDev()` é verdadeiro; no app instalado o runtime ignora essa env e força `%LOCALAPPDATA%/FlowShopy Desktop/data`.
+- o empacotamento local do instalador está com `signAndEditExecutable: false` para evitar falha de `winCodeSign` no Windows de desenvolvimento; assinatura real continua como etapa futura de release.
+
+Essa decisão não encerra a arquitetura definitiva.
+
+Pendências de revisão futura já registradas:
+
+- transformar dependências hoje baseadas em Python em componentes ainda mais previsíveis quando fizer sentido;
+- revisar se modelos devem ir no instalador ou baixar no primeiro uso;
+- adicionar diagnóstico e reparo de runtimes embarcados;
+- medir custo de manutenção e tamanho do instalador antes de congelar a estratégia final.
 
 ## Credencial local de dev
 
@@ -275,6 +315,9 @@ Itens:
 - links -> transcrição/análise;
 - pesquisa Gemini vídeo;
 - estratégia download/transcrição/VLM.
+- fase inicial aceita com fila local sequencial no worker;
+- fase inicial aceita com `yt-dlp`, `ffmpeg` e `faster-whisper` embarcados ou standalone;
+- revisão futura do empacotamento definitivo dessas dependências.
 
 ### Fase 5 - Animação e efeitos
 

@@ -10,6 +10,12 @@ import {
 export type AppConfig = {
   dataDir: string;
   databaseUrl: string;
+  desktopVendorDir: string;
+  ffmpegPath: string;
+  ffprobePath: string;
+  pythonPath: string;
+  fasterWhisperModelDir: string;
+  fasterWhisperModelName: string;
   apiHost: string;
   apiPort: number;
   workerPort: number;
@@ -141,6 +147,39 @@ function normalizeFilePath(filePath: string): string {
   return filePath;
 }
 
+function resolveDesktopVendorDir(dataDir: string): string {
+  const explicit = process.env.FLOWSHOPY_DESKTOP_VENDOR_DIR?.trim();
+  if (explicit) {
+    return path.resolve(explicit);
+  }
+  const desktopDataDir = resolveDesktopDataDirFromConfigPath();
+  if (desktopDataDir) {
+    return path.join(desktopDataDir, "..", "vendor");
+  }
+  return path.join(resolveProjectRoot(process.cwd()), "apps", "desktop", "vendor");
+}
+
+function resolveBundledBinary(params: {
+  envName: string;
+  fallbackName: string;
+  vendorDir: string;
+  vendorSubdir: string;
+  executableName?: string;
+}): string {
+  const explicit = process.env[params.envName]?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const executableName =
+    params.executableName ??
+    (process.platform === "win32" ? `${params.fallbackName}.exe` : params.fallbackName);
+  const vendored = path.join(params.vendorDir, params.vendorSubdir, executableName);
+  if (fs.existsSync(vendored)) {
+    return vendored;
+  }
+  return params.fallbackName;
+}
+
 export function resolveDatabaseUrl(dataDir?: string): string {
   const resolvedDataDir = dataDir?.trim() || process.env.DATA_DIR?.trim();
   if (resolvedDataDir && resolvedDataDir.length > 0) {
@@ -162,7 +201,13 @@ function resolveDesktopRuntimeConfigForApp(dataDir: string): Required<DesktopRun
 export function getConfig(): AppConfig {
   const dataDir = resolveDataDir();
   const databaseUrl = resolveDatabaseUrl(dataDir);
+  const desktopVendorDir = resolveDesktopVendorDir(dataDir);
   const desktopRuntime = resolveDesktopRuntimeConfigForApp(dataDir);
+  const fasterWhisperModelName =
+    process.env.FLOWSHOPY_FASTER_WHISPER_MODEL?.trim() || "small";
+  const fasterWhisperModelDir =
+    process.env.FLOWSHOPY_FASTER_WHISPER_MODEL_DIR?.trim() ||
+    path.join(desktopVendorDir, "models", "faster-whisper");
   const ttsVoicesDir = process.env.TTS_VOICES_DIR ?? path.join(dataDir, "voices");
   const ttsVoicesIndex = process.env.TTS_VOICES_INDEX ?? path.join(dataDir, "voices.json");
   const ttsSettingsPath =
@@ -183,6 +228,27 @@ export function getConfig(): AppConfig {
   return {
     dataDir,
     databaseUrl,
+    desktopVendorDir,
+    ffmpegPath: resolveBundledBinary({
+      envName: "FFMPEG_PATH",
+      fallbackName: "ffmpeg",
+      vendorDir: desktopVendorDir,
+      vendorSubdir: "ffmpeg"
+    }),
+    ffprobePath: resolveBundledBinary({
+      envName: "FFPROBE_PATH",
+      fallbackName: "ffprobe",
+      vendorDir: desktopVendorDir,
+      vendorSubdir: "ffmpeg"
+    }),
+    pythonPath: resolveBundledBinary({
+      envName: "FLOWSHOPY_PYTHON_PATH",
+      fallbackName: "python",
+      vendorDir: desktopVendorDir,
+      vendorSubdir: "python"
+    }),
+    fasterWhisperModelDir,
+    fasterWhisperModelName,
     apiHost: desktopRuntime?.apiHost ?? process.env.API_HOST ?? "127.0.0.1",
     apiPort: desktopRuntime?.apiPort ?? Number(process.env.API_PORT ?? 4010),
     workerPort: desktopRuntime?.workerPort ?? Number(process.env.WORKER_PORT ?? 4011),

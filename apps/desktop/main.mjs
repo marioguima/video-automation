@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -7,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import http from "node:http";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { DESKTOP_RUNTIME_DEFAULTS } from "../../scripts/desktop-runtime-versions.mjs";
 
 import {
   DEFAULT_DESKTOP_RUNTIME_CONFIG,
@@ -60,11 +62,11 @@ function resolveRepoRoot() {
 
 function resolveDataDir() {
   const explicit = process.env.DATA_DIR?.trim();
-  if (explicit) {
+  if (explicit && isDev()) {
     fs.mkdirSync(explicit, { recursive: true });
     return explicit;
   }
-  const localDataDir = path.join(app.getPath("userData"), "data");
+  const localDataDir = path.join(app.getPath("appData"), "..", "Local", app.getName(), "data");
   fs.mkdirSync(localDataDir, { recursive: true });
   return localDataDir;
 }
@@ -101,7 +103,7 @@ function resolveTsxCliPath(repoRoot) {
   throw new Error("Unable to resolve tsx CLI for desktop runtime bootstrap.");
 }
 
-function resolveRuntimeNodeExecutable() {
+function resolveBootstrapNodeExecutable() {
   const executableName = process.platform === "win32" ? "node.exe" : "node";
   const repoRoot = resolveRepoRoot();
   const vendoredDevNodePath = path.join(repoRoot, "apps", "desktop", "vendor", "node", executableName);
@@ -128,6 +130,160 @@ function resolveRuntimeNodeExecutable() {
   return "node";
 }
 
+function resolveRuntimeNodeExecutable(dataDir) {
+  const executableName = process.platform === "win32" ? "node.exe" : "node";
+  const activeNodePath = path.join(resolveRuntimeActiveVendorDir(dataDir), "node", executableName);
+  if (fs.existsSync(activeNodePath)) {
+    return activeNodePath;
+  }
+  return resolveBootstrapNodeExecutable();
+}
+
+function resolveRuntimeSeedVendorDir() {
+  const repoRoot = resolveRepoRoot();
+  if (isDev()) {
+    return path.join(repoRoot, "apps", "desktop", "vendor");
+  }
+  return path.join(process.resourcesPath, "vendor");
+}
+
+function resolveRuntimeActiveVendorDir(dataDir) {
+  const explicit = process.env.FLOWSHOPY_DESKTOP_VENDOR_DIR?.trim();
+  if (explicit) {
+    return path.resolve(explicit);
+  }
+  if (isDev()) {
+    return resolveRuntimeSeedVendorDir();
+  }
+  return path.join(path.dirname(dataDir), "vendor");
+}
+
+function resolveVendoredRuntimeBinary(dataDir, relativeParts, fallback = "") {
+  const relativePath = path.join(...relativeParts);
+  const activePath = path.join(resolveRuntimeActiveVendorDir(dataDir), relativePath);
+  if (fs.existsSync(activePath)) {
+    return activePath;
+  }
+  const seedPath = path.join(resolveRuntimeSeedVendorDir(), relativePath);
+  if (fs.existsSync(seedPath)) {
+    return seedPath;
+  }
+  return fallback;
+}
+
+function readJsonFileSafe(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function hashFileSafe(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const buffer = fs.readFileSync(filePath);
+    return crypto.createHash("sha256").update(buffer).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+function copyDirectoryIfMissing(fromDir, toDir) {
+  if (!fs.existsSync(fromDir) || fs.existsSync(toDir)) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(toDir), { recursive: true });
+  fs.cpSync(fromDir, toDir, { recursive: true, force: true });
+}
+
+function ensureSeedRuntimeCopiedToActiveVendor(dataDir) {
+  if (isDev()) {
+    return;
+  }
+  const seedDir = resolveRuntimeSeedVendorDir();
+  const activeDir = resolveRuntimeActiveVendorDir(dataDir);
+  fs.mkdirSync(activeDir, { recursive: true });
+  for (const segment of ["node", "ffmpeg", "python", "models"]) {
+    copyDirectoryIfMissing(path.join(seedDir, segment), path.join(activeDir, segment));
+  }
+}
+
+function readRuntimeMetadata(dataDir, segment) {
+  return readJsonFileSafe(path.join(resolveRuntimeActiveVendorDir(dataDir), segment, "runtime.json"));
+}
+
+function readSeedRuntimeMetadata(segment) {
+  return readJsonFileSafe(path.join(resolveRuntimeSeedVendorDir(), segment, "runtime.json"));
+}
+
+function shouldPrepareNodeRuntime(dataDir) {
+  const executableName = process.platform === "win32" ? "node.exe" : "node";
+  const vendorDir = resolveRuntimeActiveVendorDir(dataDir);
+  const executablePath = path.join(vendorDir, "node", executableName);
+  if (!fs.existsSync(executablePath)) return true;
+  const metadata = readRuntimeMetadata(dataDir, "node");
+  if (!metadata) return true;
+  if (isDev()) {
+    return metadata.nodeVersion !== process.version || metadata.arch !== process.arch;
+  }
+  const seedMetadata = readSeedRuntimeMetadata("node");
+  if (!seedMetadata) return false;
+  return metadata.nodeVersion !== seedMetadata.nodeVersion || metadata.arch !== seedMetadata.arch;
+}
+
+function shouldPrepareFfmpegRuntime(dataDir) {
+  const executableName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const probeName = process.platform === "win32" ? "ffprobe.exe" : "ffprobe";
+  const vendorDir = resolveRuntimeActiveVendorDir(dataDir);
+  if (!fs.existsSync(path.join(vendorDir, "ffmpeg", executableName))) return true;
+  if (!fs.existsSync(path.join(vendorDir, "ffmpeg", probeName))) return true;
+  const metadata = readRuntimeMetadata(dataDir, "ffmpeg");
+  return (
+    !metadata ||
+    metadata.sourceUrl !== DESKTOP_RUNTIME_DEFAULTS.ffmpegUrl ||
+    metadata.archiveName !== DESKTOP_RUNTIME_DEFAULTS.ffmpegArchiveName ||
+    metadata.arch !== process.arch
+  );
+}
+
+function shouldPreparePythonRuntime(dataDir) {
+  const executableName = process.platform === "win32" ? "python.exe" : "python";
+  const vendorDir = resolveRuntimeActiveVendorDir(dataDir);
+  const repoRoot = resolveRepoRoot();
+  const requirementsPath = path.join(repoRoot, "apps", "worker", "python-requirements.txt");
+  const expectedRequirementsHash = hashFileSafe(requirementsPath);
+  if (!fs.existsSync(path.join(vendorDir, "python", executableName))) return true;
+  const metadata = readRuntimeMetadata(dataDir, "python");
+  if (!metadata) return true;
+  if (metadata.pythonVersion !== DESKTOP_RUNTIME_DEFAULTS.pythonVersion) return true;
+  if (metadata.sourceUrl !== DESKTOP_RUNTIME_DEFAULTS.pythonUrl) return true;
+  if (metadata.getPipUrl !== DESKTOP_RUNTIME_DEFAULTS.getPipUrl) return true;
+  if (metadata.fasterWhisperModel !== DESKTOP_RUNTIME_DEFAULTS.fasterWhisperModel) return true;
+  if (metadata.requirementsHash !== expectedRequirementsHash) return true;
+  if (metadata.arch !== process.arch) return true;
+  return false;
+}
+
+function shouldPrepareWhisperModel(dataDir) {
+  const vendorDir = resolveRuntimeActiveVendorDir(dataDir);
+  const modelRoot = path.join(vendorDir, "models", "faster-whisper");
+  const expectedCacheDir = `models--Systran--faster-whisper-${DESKTOP_RUNTIME_DEFAULTS.fasterWhisperModel}`;
+  if (!fs.existsSync(path.join(modelRoot, expectedCacheDir))) return true;
+  const metadata = readRuntimeMetadata(dataDir, "python");
+  return !metadata || metadata.fasterWhisperModel !== DESKTOP_RUNTIME_DEFAULTS.fasterWhisperModel;
+}
+
+function collectRuntimePreparationReasons(dataDir) {
+  return {
+    node: shouldPrepareNodeRuntime(dataDir),
+    ffmpeg: shouldPrepareFfmpegRuntime(dataDir),
+    python: shouldPreparePythonRuntime(dataDir),
+    whisperModel: shouldPrepareWhisperModel(dataDir)
+  };
+}
+
 function buildRuntimeEnv(dataDir) {
   const repoRoot = resolveRepoRoot();
   const runtimeConfig = resolveDesktopRuntimeConfig(dataDir);
@@ -135,6 +291,20 @@ function buildRuntimeEnv(dataDir) {
   const runtimeConfigPath = getDesktopRuntimeConfigPath(dataDir);
   const appSettingsTemplatePath = path.join(repoRoot, "config", "app_settings.template.json");
   const workerLogDir = getDesktopRuntimePaths(dataDir).workerLogDir;
+  const activeVendorDir = resolveRuntimeActiveVendorDir(dataDir);
+  const pythonExecutableName = process.platform === "win32" ? "python.exe" : "python";
+  const ffmpegExecutableName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const ffprobeExecutableName = process.platform === "win32" ? "ffprobe.exe" : "ffprobe";
+  const fasterWhisperModelName =
+    process.env.FLOWSHOPY_FASTER_WHISPER_MODEL?.trim() || "small";
+  const pythonPath = resolveVendoredRuntimeBinary(dataDir, ["python", pythonExecutableName], process.env.FLOWSHOPY_PYTHON_PATH?.trim() || "");
+  const ffmpegPath = resolveVendoredRuntimeBinary(dataDir, ["ffmpeg", ffmpegExecutableName], process.env.FFMPEG_PATH?.trim() || "");
+  const ffprobePath = resolveVendoredRuntimeBinary(dataDir, ["ffmpeg", ffprobeExecutableName], process.env.FFPROBE_PATH?.trim() || "");
+  const fasterWhisperModelDir = path.join(
+    activeVendorDir,
+    "models",
+    "faster-whisper"
+  );
   return {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
@@ -142,6 +312,16 @@ function buildRuntimeEnv(dataDir) {
     FLOWSHOPY_DESKTOP_MODE: "true",
     FLOWSHOPY_DESKTOP_CONFIG_PATH: runtimeConfigPath,
     APP_SETTINGS_TEMPLATE_PATH: appSettingsTemplatePath,
+    FLOWSHOPY_DESKTOP_VENDOR_DIR: activeVendorDir,
+    FLOWSHOPY_PYTHON_REQUIREMENTS_PATH: path.join(repoRoot, "apps", "worker", "python-requirements.txt"),
+    FLOWSHOPY_PYTHON_PATH: pythonPath || process.env.FLOWSHOPY_PYTHON_PATH || "",
+    XTTS_API_PYTHON: pythonPath || process.env.XTTS_API_PYTHON || "",
+    QWEN_TTS_PYTHON: pythonPath || process.env.QWEN_TTS_PYTHON || "",
+    CHATTERBOX_PYTHON: pythonPath || process.env.CHATTERBOX_PYTHON || "",
+    FFMPEG_PATH: ffmpegPath || process.env.FFMPEG_PATH || "",
+    FFPROBE_PATH: ffprobePath || process.env.FFPROBE_PATH || "",
+    FLOWSHOPY_FASTER_WHISPER_MODEL: fasterWhisperModelName,
+    FLOWSHOPY_FASTER_WHISPER_MODEL_DIR: fasterWhisperModelDir,
     WORKER_LOG_DIR: workerLogDir,
     INTERNAL_JOBS_EVENT_TOKEN: runtimeSecrets.internalJobsEventToken,
     AUTH_JWT_SECRET: runtimeSecrets.authJwtSecret,
@@ -356,7 +536,7 @@ async function waitForHttp(url, timeoutMs = 45_000, options = {}) {
 
 async function runDetachedNodeTask(taskRelativePath, args, dataDir) {
   const repoRoot = resolveRepoRoot();
-  const runtimeNodeExecutable = resolveRuntimeNodeExecutable();
+  const runtimeNodeExecutable = resolveBootstrapNodeExecutable();
   const taskFile = path.join(repoRoot, taskRelativePath);
   await new Promise((resolve, reject) => {
     const child = spawn(runtimeNodeExecutable, [taskFile, ...args], {
@@ -385,11 +565,70 @@ async function runDetachedNodeTask(taskRelativePath, args, dataDir) {
   });
 }
 
+async function runBootstrapTaskWithProgress(options) {
+  const {
+    dataDir,
+    taskRelativePath,
+    args = [],
+    startProgress,
+    maxProgress,
+    message
+  } = options;
+  updateBootstrapStage(message, startProgress, { immediate: true });
+  const timer = setInterval(() => {
+    const next = Math.min(maxProgress, bootstrapProgressTarget + 0.7);
+    setBootstrapProgress(next);
+  }, 300);
+  try {
+    await runDetachedNodeTask(taskRelativePath, args, dataDir);
+  } finally {
+    clearInterval(timer);
+  }
+  updateBootstrapStage(message, maxProgress, { immediate: true });
+}
+
+async function ensureDesktopRuntimeDependencies(dataDir) {
+  ensureSeedRuntimeCopiedToActiveVendor(dataDir);
+  const required = collectRuntimePreparationReasons(dataDir);
+
+  updateBootstrapStage("Verificando runtimes locais...", 5, { immediate: true });
+
+  if (required.node) {
+    await runBootstrapTaskWithProgress({
+      dataDir,
+      taskRelativePath: path.join("scripts", "prepare-desktop-node.mjs"),
+      startProgress: 6,
+      maxProgress: 11,
+      message: "Preparando runtime Node local..."
+    });
+  }
+
+  if (required.ffmpeg) {
+    await runBootstrapTaskWithProgress({
+      dataDir,
+      taskRelativePath: path.join("scripts", "prepare-desktop-ffmpeg.mjs"),
+      startProgress: 11,
+      maxProgress: 22,
+      message: "Baixando runtime de mídia..."
+    });
+  }
+
+  if (required.python || required.whisperModel) {
+    await runBootstrapTaskWithProgress({
+      dataDir,
+      taskRelativePath: path.join("scripts", "prepare-desktop-python.mjs"),
+      startProgress: 22,
+      maxProgress: 38,
+      message: "Preparando runtime Python e transcrição..."
+    });
+  }
+}
+
 function spawnRuntimeProcess(name, entryRelativePath, dataDir) {
   const repoRoot = resolveRepoRoot();
   const tsxCliPath = resolveTsxCliPath(repoRoot);
   const entryFile = path.join(repoRoot, entryRelativePath);
-  const runtimeNodeExecutable = resolveRuntimeNodeExecutable();
+  const runtimeNodeExecutable = resolveRuntimeNodeExecutable(dataDir);
   const child = spawn(runtimeNodeExecutable, [tsxCliPath, entryFile], {
     cwd: repoRoot,
     env: buildRuntimeEnv(dataDir),
@@ -489,6 +728,7 @@ async function startLocalRuntime() {
   const dataDir = resolveDataDir();
   runtimeState.dataDir = dataDir;
   readDesktopRuntimeSecrets(dataDir);
+  await ensureDesktopRuntimeDependencies(dataDir);
   updateBootstrapStage("Validando portas e runtime local...", 6, { immediate: true });
   const runtimeConfig = await resolveRuntimePortConflicts(dataDir);
   updateBootstrapStage("Preparando banco e arquivos locais...", 8, { immediate: true });

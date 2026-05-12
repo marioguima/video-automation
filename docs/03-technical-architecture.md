@@ -338,6 +338,7 @@ Direção aceita:
 
 - `Remotion` deve ser a camada principal de composição e preview;
 - `ffmpeg` deve permanecer como infraestrutura de mídia, não como modelo mental principal do produto.
+- o uso atual de `Playwright` para rasterizar slides HTML/CSS deve ser tratado como solução transitória até a consolidação do pipeline em `Remotion`.
 
 Papéis do Remotion:
 
@@ -356,6 +357,19 @@ Papéis do ffmpeg:
 - proxies;
 - operações auxiliares de export;
 - otimizações de pipeline.
+
+Uso atual de `Playwright`:
+
+- hoje o worker usa `Playwright` em `apps/worker/src/slideRenderer.ts`;
+- esse uso serve para abrir templates HTML/CSS em `chromium` headless e gerar PNGs;
+- isso cobre casos como `renderTextSlidePng`, `renderImageSlidePng`, `renderImageCleanSlidePng` e `renderImageFocusSlidePng`;
+- esse uso é técnico e intermediário; ele não define a direção final de composição do produto.
+
+Débito técnico explícito:
+
+- depois de implementar e estabilizar `Remotion` como preview/composição principal, revisar se ele também pode assumir a geração desses slides e layouts estáticos;
+- se isso for viável, reduzir ou remover a dependência de `Playwright` no caminho principal;
+- o objetivo dessa revisão é diminuir a quantidade de frameworks/browsers embarcados e simplificar distribuição, manutenção e diagnóstico do runtime local.
 
 Implicacao:
 
