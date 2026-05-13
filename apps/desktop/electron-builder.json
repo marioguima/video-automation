@@ -7,28 +7,59 @@
   "asar": false,
   "files": [
     "apps/desktop/**/*",
+    "!apps/desktop/node_modules/**/*",
     "!apps/desktop/vendor/**/*",
     "apps/api/src/**/*",
+    "!apps/api/node_modules/**/*",
     "apps/api/package.json",
     "apps/worker/src/**/*",
+    "!apps/worker/node_modules/**/*",
     "apps/worker/python-requirements.txt",
     "apps/worker/package.json",
     "apps/web/dist/**/*",
     "packages/shared/src/**/*",
     "packages/shared/package.json",
     "packages/db/src/**/*",
+    "!packages/db/node_modules/**/*",
     "packages/db/prisma/**/*",
     "packages/db/package.json",
     "scripts/*.mjs",
     "config/**/*",
-    "node_modules/**/*",
     "package.json",
     "pnpm-lock.yaml"
   ],
   "extraResources": [
     {
-      "from": "apps/desktop/vendor",
-      "to": "vendor"
+      "from": "apps/desktop/vendor/node",
+      "to": "vendor/node"
+    },
+    {
+      "from": "apps/desktop/vendor/ffmpeg",
+      "to": "vendor/ffmpeg"
+    },
+    {
+      "from": "apps/desktop/vendor/esbuild",
+      "to": "vendor/esbuild"
+    },
+    {
+      "from": "apps/desktop/vendor/python",
+      "to": "vendor/python"
+    },
+    {
+      "from": "apps/desktop/vendor/models",
+      "to": "vendor/models"
+    },
+    {
+      "from": "apps/desktop/vendor/db",
+      "to": "vendor/db"
+    },
+    {
+      "from": "apps/desktop/vendor/workspace-node-modules",
+      "to": "vendor/workspace-node-modules"
+    },
+    {
+      "from": "apps/desktop/vendor/workspace-node-modules/node_modules",
+      "to": "vendor/workspace-node-modules/node_modules"
     }
   ],
   "extraMetadata": {

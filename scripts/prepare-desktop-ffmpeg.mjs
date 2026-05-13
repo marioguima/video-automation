@@ -29,6 +29,32 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function readJsonIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function isPreparedRuntimeCurrent() {
+  const metadata = readJsonIfExists(metadataPath);
+  if (!metadata) return false;
+
+  const ffmpegPath = path.join(targetDir, executableName);
+  const ffprobePath = path.join(targetDir, probeName);
+
+  return (
+    fs.existsSync(ffmpegPath) &&
+    fs.existsSync(ffprobePath) &&
+    metadata.sourceUrl === defaultArchiveUrl &&
+    metadata.archiveName === defaultArchiveName &&
+    metadata.platform === process.platform &&
+    metadata.arch === process.arch
+  );
+}
+
 async function downloadFile(url, destinationPath) {
   const response = await fetch(url);
   if (!response.ok || !response.body) {
@@ -91,6 +117,10 @@ function removeDirectoryQuietly(dirPath) {
 
 async function main() {
   ensureWindows();
+  if (isPreparedRuntimeCurrent()) {
+    console.log(`Desktop ffmpeg runtime already prepared: ${targetDir}`);
+    return;
+  }
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowshopy-ffmpeg-"));
 
   try {

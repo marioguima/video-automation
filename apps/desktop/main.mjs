@@ -4,7 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import http from "node:http";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
@@ -25,6 +25,7 @@ const __dirname = path.dirname(__filename);
 const execFile = promisify(execFileCallback);
 const require = createRequire(import.meta.url);
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
+const DESKTOP_PRODUCT_NAME = "FlowShopy Desktop";
 const desktopSessionDir = path.join(process.env.LOCALAPPDATA || __dirname, "FlowShopy", "electron-session");
 fs.mkdirSync(desktopSessionDir, { recursive: true });
 app.commandLine.appendSwitch("disk-cache-dir", desktopSessionDir);
@@ -45,12 +46,31 @@ let bootstrapState = {
   status: "booting"
 };
 let childProcesses = [];
+let rendererHttpServer = null;
 let isShuttingDown = false;
 let bootstrapProgressInterval = null;
 let bootstrapProgressTarget = bootstrapState.progress;
 
 function isDev() {
   return !app.isPackaged;
+}
+
+function resolveDesktopBootstrapLogPath() {
+  const rootDir = isDev()
+    ? path.join(resolveRepoRoot(), "logs", "desktop")
+    : path.join(process.env.LOCALAPPDATA || __dirname, DESKTOP_PRODUCT_NAME, "logs");
+  fs.mkdirSync(rootDir, { recursive: true });
+  return path.join(rootDir, "desktop-bootstrap.log");
+}
+
+function writeDesktopBootstrapLog(message) {
+  try {
+    const logPath = resolveDesktopBootstrapLogPath();
+    const line = `[${new Date().toISOString()}] ${message}\n`;
+    fs.appendFileSync(logPath, line, "utf8");
+  } catch {
+    // Keep bootstrap resilient even if logging fails.
+  }
 }
 
 function resolveRepoRoot() {
@@ -66,7 +86,7 @@ function resolveDataDir() {
     fs.mkdirSync(explicit, { recursive: true });
     return explicit;
   }
-  const localDataDir = path.join(app.getPath("appData"), "..", "Local", app.getName(), "data");
+  const localDataDir = path.join(app.getPath("appData"), "..", "Local", DESKTOP_PRODUCT_NAME, "data");
   fs.mkdirSync(localDataDir, { recursive: true });
   return localDataDir;
 }
@@ -82,9 +102,9 @@ function resolveDesktopRuntimeConfig(dataDir) {
 
 function resolveTsxCliPath(repoRoot) {
   const candidateBases = [
-    __dirname,
     path.join(repoRoot, "apps", "desktop"),
-    repoRoot
+    repoRoot,
+    __dirname
   ];
   for (const base of candidateBases) {
     try {
@@ -198,6 +218,48 @@ function copyDirectoryIfMissing(fromDir, toDir) {
   fs.cpSync(fromDir, toDir, { recursive: true, force: true });
 }
 
+function copyDirectoryContents(fromDir, toDir) {
+  if (!fs.existsSync(fromDir)) {
+    return;
+  }
+  fs.mkdirSync(toDir, { recursive: true });
+  for (const entry of fs.readdirSync(fromDir)) {
+    fs.cpSync(path.join(fromDir, entry), path.join(toDir, entry), {
+      recursive: true,
+      force: true
+    });
+  }
+}
+
+function copyFileIfPresent(fromPath, toPath) {
+  if (!fs.existsSync(fromPath)) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(toPath), { recursive: true });
+  fs.cpSync(fromPath, toPath, { force: true });
+}
+
+function copyDirectoryFiltered(fromDir, toDir, filter) {
+  if (!fs.existsSync(fromDir)) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(toDir), { recursive: true });
+  fs.cpSync(fromDir, toDir, {
+    recursive: true,
+    force: true,
+    filter
+  });
+}
+
+function ensureDirectoryJunction(linkPath, targetPath) {
+  if (!fs.existsSync(targetPath)) {
+    return;
+  }
+  fs.rmSync(linkPath, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.symlinkSync(targetPath, linkPath, "junction");
+}
+
 function ensureSeedRuntimeCopiedToActiveVendor(dataDir) {
   if (isDev()) {
     return;
@@ -205,9 +267,61 @@ function ensureSeedRuntimeCopiedToActiveVendor(dataDir) {
   const seedDir = resolveRuntimeSeedVendorDir();
   const activeDir = resolveRuntimeActiveVendorDir(dataDir);
   fs.mkdirSync(activeDir, { recursive: true });
-  for (const segment of ["node", "ffmpeg", "python", "models"]) {
+  for (const segment of ["node", "esbuild", "ffmpeg", "python", "models", "db"]) {
     copyDirectoryIfMissing(path.join(seedDir, segment), path.join(activeDir, segment));
   }
+}
+
+function resolveRuntimeActiveAppDir(dataDir) {
+  if (isDev()) {
+    return resolveRepoRoot();
+  }
+  return path.join(resolveRuntimeActiveVendorDir(dataDir), "workspace-app");
+}
+
+function prepareInstalledRuntimeWorkspace(dataDir) {
+  if (isDev()) {
+    return resolveRepoRoot();
+  }
+  const seedAppDir = resolveRepoRoot();
+  const seedWorkspaceModulesDir = path.join(resolveRuntimeSeedVendorDir(), "workspace-node-modules");
+  const activeAppDir = resolveRuntimeActiveAppDir(dataDir);
+  fs.rmSync(activeAppDir, { recursive: true, force: true });
+  fs.mkdirSync(activeAppDir, { recursive: true });
+  copyDirectoryIfMissing(path.join(seedAppDir, "apps", "api"), path.join(activeAppDir, "apps", "api"));
+  copyDirectoryIfMissing(path.join(seedAppDir, "apps", "worker"), path.join(activeAppDir, "apps", "worker"));
+  copyDirectoryFiltered(
+    path.join(seedAppDir, "apps", "desktop"),
+    path.join(activeAppDir, "apps", "desktop"),
+    (source) => !source.replace(/\\/g, "/").includes("/apps/desktop/node_modules/")
+  );
+  for (const segment of ["packages", "scripts", "config"]) {
+    copyDirectoryIfMissing(path.join(seedAppDir, segment), path.join(activeAppDir, segment));
+  }
+  for (const fileName of ["package.json", "pnpm-lock.yaml"]) {
+    copyFileIfPresent(path.join(seedAppDir, fileName), path.join(activeAppDir, fileName));
+  }
+  ensureDirectoryJunction(
+    path.join(activeAppDir, "node_modules"),
+    path.join(seedWorkspaceModulesDir, "node_modules")
+  );
+  ensureDirectoryJunction(
+    path.join(activeAppDir, "apps", "desktop", "node_modules"),
+    path.join(seedWorkspaceModulesDir, "apps", "desktop", "node_modules")
+  );
+  ensureDirectoryJunction(
+    path.join(activeAppDir, "apps", "api", "node_modules"),
+    path.join(seedWorkspaceModulesDir, "apps", "api", "node_modules")
+  );
+  ensureDirectoryJunction(
+    path.join(activeAppDir, "apps", "worker", "node_modules"),
+    path.join(seedWorkspaceModulesDir, "apps", "worker", "node_modules")
+  );
+  ensureDirectoryJunction(
+    path.join(activeAppDir, "packages", "db", "node_modules"),
+    path.join(seedWorkspaceModulesDir, "packages", "db", "node_modules")
+  );
+  return activeAppDir;
 }
 
 function readRuntimeMetadata(dataDir, segment) {
@@ -266,6 +380,15 @@ function shouldPreparePythonRuntime(dataDir) {
   return false;
 }
 
+function shouldPrepareEsbuildRuntime(dataDir) {
+  const executableName = process.platform === "win32" ? "esbuild.exe" : "esbuild";
+  const vendorDir = resolveRuntimeActiveVendorDir(dataDir);
+  if (!fs.existsSync(path.join(vendorDir, "esbuild", executableName))) return true;
+  const metadata = readRuntimeMetadata(dataDir, "esbuild");
+  if (!metadata) return true;
+  return metadata.platform !== process.platform || metadata.arch !== process.arch;
+}
+
 function shouldPrepareWhisperModel(dataDir) {
   const vendorDir = resolveRuntimeActiveVendorDir(dataDir);
   const modelRoot = path.join(vendorDir, "models", "faster-whisper");
@@ -278,6 +401,7 @@ function shouldPrepareWhisperModel(dataDir) {
 function collectRuntimePreparationReasons(dataDir) {
   return {
     node: shouldPrepareNodeRuntime(dataDir),
+    esbuild: shouldPrepareEsbuildRuntime(dataDir),
     ffmpeg: shouldPrepareFfmpegRuntime(dataDir),
     python: shouldPreparePythonRuntime(dataDir),
     whisperModel: shouldPrepareWhisperModel(dataDir)
@@ -285,7 +409,7 @@ function collectRuntimePreparationReasons(dataDir) {
 }
 
 function buildRuntimeEnv(dataDir) {
-  const repoRoot = resolveRepoRoot();
+  const repoRoot = isDev() ? resolveRepoRoot() : resolveRuntimeActiveAppDir(dataDir);
   const runtimeConfig = resolveDesktopRuntimeConfig(dataDir);
   const runtimeSecrets = readDesktopRuntimeSecrets(dataDir);
   const runtimeConfigPath = getDesktopRuntimeConfigPath(dataDir);
@@ -293,11 +417,13 @@ function buildRuntimeEnv(dataDir) {
   const workerLogDir = getDesktopRuntimePaths(dataDir).workerLogDir;
   const activeVendorDir = resolveRuntimeActiveVendorDir(dataDir);
   const pythonExecutableName = process.platform === "win32" ? "python.exe" : "python";
+  const esbuildExecutableName = process.platform === "win32" ? "esbuild.exe" : "esbuild";
   const ffmpegExecutableName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
   const ffprobeExecutableName = process.platform === "win32" ? "ffprobe.exe" : "ffprobe";
   const fasterWhisperModelName =
     process.env.FLOWSHOPY_FASTER_WHISPER_MODEL?.trim() || "small";
   const pythonPath = resolveVendoredRuntimeBinary(dataDir, ["python", pythonExecutableName], process.env.FLOWSHOPY_PYTHON_PATH?.trim() || "");
+  const esbuildPath = resolveVendoredRuntimeBinary(dataDir, ["esbuild", esbuildExecutableName], process.env.ESBUILD_BINARY_PATH?.trim() || "");
   const ffmpegPath = resolveVendoredRuntimeBinary(dataDir, ["ffmpeg", ffmpegExecutableName], process.env.FFMPEG_PATH?.trim() || "");
   const ffprobePath = resolveVendoredRuntimeBinary(dataDir, ["ffmpeg", ffprobeExecutableName], process.env.FFPROBE_PATH?.trim() || "");
   const fasterWhisperModelDir = path.join(
@@ -315,6 +441,7 @@ function buildRuntimeEnv(dataDir) {
     FLOWSHOPY_DESKTOP_VENDOR_DIR: activeVendorDir,
     FLOWSHOPY_PYTHON_REQUIREMENTS_PATH: path.join(repoRoot, "apps", "worker", "python-requirements.txt"),
     FLOWSHOPY_PYTHON_PATH: pythonPath || process.env.FLOWSHOPY_PYTHON_PATH || "",
+    ESBUILD_BINARY_PATH: esbuildPath || process.env.ESBUILD_BINARY_PATH || "",
     XTTS_API_PYTHON: pythonPath || process.env.XTTS_API_PYTHON || "",
     QWEN_TTS_PYTHON: pythonPath || process.env.QWEN_TTS_PYTHON || "",
     CHATTERBOX_PYTHON: pythonPath || process.env.CHATTERBOX_PYTHON || "",
@@ -420,27 +547,30 @@ async function resolveRuntimePortConflicts(dataDir) {
   const current = ensureDesktopRuntimeConfigFile(configPath, DEFAULT_DESKTOP_RUNTIME_CONFIG);
   const next = { ...current };
   let changed = false;
-  for (const [key, healthPath] of [
-    ["apiPort", "/health"],
-    ["workerPort", "/health"]
+  for (const [portKey, hostKey, healthPath] of [
+    ["apiPort", "apiHost", "/health"],
+    ["workerPort", "apiHost", "/health"],
+    ["webPort", "webHost", null]
   ]) {
-    const port = next[key];
-    const host = next.apiHost;
+    const port = next[portKey];
+    const host = next[hostKey];
     if (await isPortFree(host, port)) {
       continue;
     }
-    const payload = await readHealthPayload(`http://${host}:${port}${healthPath}`);
-    const looksLikeOurRuntime = payload && payload.ok === true && payload.dataDir === dataDir;
-    if (looksLikeOurRuntime) {
-      const pid = await findListeningPid(port);
-      if (pid) {
-        await killProcessByPid(pid);
-        if (await waitForPortToFree(host, port)) {
-          continue;
+    if (healthPath) {
+      const payload = await readHealthPayload(`http://${host}:${port}${healthPath}`);
+      const looksLikeOurRuntime = payload && payload.ok === true && payload.dataDir === dataDir;
+      if (looksLikeOurRuntime) {
+        const pid = await findListeningPid(port);
+        if (pid) {
+          await killProcessByPid(pid);
+          if (await waitForPortToFree(host, port)) {
+            continue;
+          }
         }
       }
     }
-    next[key] = await findNextFreePort(host, port);
+    next[portKey] = await findNextFreePort(host, port);
     changed = true;
   }
   if (changed) {
@@ -457,6 +587,9 @@ function emitBootstrapState(nextState) {
     ...bootstrapState,
     ...nextState
   };
+  writeDesktopBootstrapLog(
+    `state title="${bootstrapState.title}" message="${bootstrapState.message}" status=${bootstrapState.status} progress=${Math.round(bootstrapState.progress)}`
+  );
   const targets = [splashWindow, mainWindow];
   for (const target of targets) {
     if (target && !target.isDestroyed()) {
@@ -509,6 +642,100 @@ function getSplashHtmlPath() {
   return path.join(__dirname, "splash.html");
 }
 
+function getRendererContentType(filePath) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+      return "application/javascript; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    case ".ico":
+      return "image/x-icon";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function ensurePackagedRendererServer(dataDir) {
+  if (isDev() || rendererHttpServer) {
+    return;
+  }
+  const runtimeConfig = readDesktopRuntimeConfig(
+    getDesktopRuntimeConfigPath(dataDir),
+    DEFAULT_DESKTOP_RUNTIME_CONFIG
+  );
+  const distDir = path.join(resolveRepoRoot(), "apps", "web", "dist");
+  const indexPath = path.join(distDir, "index.html");
+  if (!fs.existsSync(indexPath)) {
+    throw new Error(`Built web UI not found at ${indexPath}`);
+  }
+
+  rendererHttpServer = http.createServer((req, res) => {
+    try {
+      const requestUrl = new URL(req.url || "/", `http://${runtimeConfig.webHost}:${runtimeConfig.webPort}`);
+      let pathname = decodeURIComponent(requestUrl.pathname);
+      if (pathname === "/") {
+        pathname = "/index.html";
+      }
+      const candidatePath = path.normalize(path.join(distDir, pathname));
+      const isWithinDist =
+        candidatePath === distDir ||
+        candidatePath.startsWith(`${distDir}${path.sep}`);
+      if (!isWithinDist) {
+        res.statusCode = 403;
+        res.end("Forbidden");
+        return;
+      }
+
+      let filePath = candidatePath;
+      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        filePath = indexPath;
+      }
+
+      res.statusCode = 200;
+      res.setHeader("Content-Type", getRendererContentType(filePath));
+      fs.createReadStream(filePath)
+        .on("error", () => {
+          if (!res.headersSent) {
+            res.statusCode = 500;
+          }
+          res.end("Failed to read renderer asset");
+        })
+        .pipe(res);
+    } catch {
+      res.statusCode = 500;
+      res.end("Failed to serve renderer");
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    const onError = (error) => {
+      rendererHttpServer?.off("error", onError);
+      reject(error);
+    };
+    rendererHttpServer.once("error", onError);
+    rendererHttpServer.listen(runtimeConfig.webPort, runtimeConfig.webHost, () => {
+      rendererHttpServer?.off("error", onError);
+      writeDesktopBootstrapLog(
+        `renderer server listening at http://${runtimeConfig.webHost}:${runtimeConfig.webPort}`
+      );
+      resolve();
+    });
+  });
+}
+
 async function waitForHttp(url, timeoutMs = 45_000, options = {}) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -539,6 +766,7 @@ async function runDetachedNodeTask(taskRelativePath, args, dataDir) {
   const runtimeNodeExecutable = resolveBootstrapNodeExecutable();
   const taskFile = path.join(repoRoot, taskRelativePath);
   await new Promise((resolve, reject) => {
+    writeDesktopBootstrapLog(`bootstrap task start ${taskRelativePath}`);
     const child = spawn(runtimeNodeExecutable, [taskFile, ...args], {
       cwd: repoRoot,
       env: {
@@ -549,13 +777,16 @@ async function runDetachedNodeTask(taskRelativePath, args, dataDir) {
     });
 
     child.stdout.on("data", (chunk) => {
+      writeDesktopBootstrapLog(`[task:${path.basename(taskRelativePath)}][stdout] ${String(chunk).trimEnd()}`);
       process.stdout.write(`[desktop-bootstrap] ${chunk}`);
     });
     child.stderr.on("data", (chunk) => {
+      writeDesktopBootstrapLog(`[task:${path.basename(taskRelativePath)}][stderr] ${String(chunk).trimEnd()}`);
       process.stderr.write(`[desktop-bootstrap] ${chunk}`);
     });
     child.on("error", reject);
     child.on("exit", (code) => {
+      writeDesktopBootstrapLog(`bootstrap task exit ${taskRelativePath} code=${code}`);
       if (code === 0) {
         resolve();
         return;
@@ -603,11 +834,21 @@ async function ensureDesktopRuntimeDependencies(dataDir) {
     });
   }
 
+  if (required.esbuild) {
+    await runBootstrapTaskWithProgress({
+      dataDir,
+      taskRelativePath: path.join("scripts", "prepare-desktop-esbuild.mjs"),
+      startProgress: 11,
+      maxProgress: 16,
+      message: "Preparando runtime esbuild local..."
+    });
+  }
+
   if (required.ffmpeg) {
     await runBootstrapTaskWithProgress({
       dataDir,
       taskRelativePath: path.join("scripts", "prepare-desktop-ffmpeg.mjs"),
-      startProgress: 11,
+      startProgress: 16,
       maxProgress: 22,
       message: "Baixando runtime de mídia..."
     });
@@ -625,10 +866,18 @@ async function ensureDesktopRuntimeDependencies(dataDir) {
 }
 
 function spawnRuntimeProcess(name, entryRelativePath, dataDir) {
-  const repoRoot = resolveRepoRoot();
+  const repoRoot = isDev() ? resolveRepoRoot() : resolveRuntimeActiveAppDir(dataDir);
   const tsxCliPath = resolveTsxCliPath(repoRoot);
   const entryFile = path.join(repoRoot, entryRelativePath);
   const runtimeNodeExecutable = resolveRuntimeNodeExecutable(dataDir);
+  writeDesktopBootstrapLog(
+    `spawning ${name}: ${JSON.stringify({
+      node: runtimeNodeExecutable,
+      tsx: tsxCliPath,
+      entry: entryFile,
+      cwd: repoRoot
+    })}`
+  );
   const child = spawn(runtimeNodeExecutable, [tsxCliPath, entryFile], {
     cwd: repoRoot,
     env: buildRuntimeEnv(dataDir),
@@ -636,12 +885,24 @@ function spawnRuntimeProcess(name, entryRelativePath, dataDir) {
   });
 
   child.stdout.on("data", (chunk) => {
+    const text = chunk.toString("utf8").trimEnd();
+    if (text) {
+      writeDesktopBootstrapLog(`[${name}:stdout] ${text}`);
+    }
     process.stdout.write(`[${name}] ${chunk}`);
   });
   child.stderr.on("data", (chunk) => {
+    const text = chunk.toString("utf8").trimEnd();
+    if (text) {
+      writeDesktopBootstrapLog(`[${name}:stderr] ${text}`);
+    }
     process.stderr.write(`[${name}] ${chunk}`);
   });
+  child.on("error", (error) => {
+    writeDesktopBootstrapLog(`[${name}:error] ${error.stack || error.message}`);
+  });
   child.on("exit", (code, signal) => {
+    writeDesktopBootstrapLog(`[${name}:exit] code=${code ?? "null"} signal=${signal ?? "null"}`);
     runtimeState[name] = {
       status: code === 0 || signal === "SIGTERM" ? "stopped" : "crashed",
       pid: null
@@ -665,11 +926,11 @@ async function stopRuntimeProcesses() {
   childProcesses = [];
   await Promise.all(
     processes.map(
-      (child) =>
-        new Promise((resolve) => {
-          if (child.killed) {
-            resolve();
-            return;
+        (child) =>
+          new Promise((resolve) => {
+            if (child.killed) {
+              resolve();
+              return;
           }
           child.once("exit", () => resolve());
           child.kill("SIGTERM");
@@ -677,37 +938,41 @@ async function stopRuntimeProcesses() {
             if (!child.killed) {
               child.kill("SIGKILL");
             }
-          }, 4_000).unref();
-        })
-    )
+            }, 4_000).unref();
+          })
+      )
   );
+  await new Promise((resolve) => {
+    if (!rendererHttpServer) {
+      resolve();
+      return;
+    }
+    const server = rendererHttpServer;
+    rendererHttpServer = null;
+    server.close(() => resolve());
+  });
   runtimeState.api = { status: "stopped", pid: null };
   runtimeState.worker = { status: "stopped", pid: null };
 }
 
 function resolveRendererTarget(repoRoot) {
-  if (isDev()) {
-    const dataDir = runtimeState.dataDir || resolveDataDir();
-    const runtimeConfig = readDesktopRuntimeConfig(
-      getDesktopRuntimeConfigPath(dataDir),
-      DEFAULT_DESKTOP_RUNTIME_CONFIG
-    );
-    return `http://${runtimeConfig.webHost}:${runtimeConfig.webPort}`;
-  }
-  return pathToFileURL(path.join(repoRoot, "apps", "web", "dist", "index.html")).href;
+  const dataDir = runtimeState.dataDir || resolveDataDir();
+  const runtimeConfig = readDesktopRuntimeConfig(
+    getDesktopRuntimeConfigPath(dataDir),
+    DEFAULT_DESKTOP_RUNTIME_CONFIG
+  );
+  return `http://${runtimeConfig.webHost}:${runtimeConfig.webPort}`;
 }
 
 async function loadRenderer() {
   const repoRoot = resolveRepoRoot();
   const target = resolveRendererTarget(repoRoot);
   runtimeState.rendererTarget = target;
-  if (isDev()) {
-    await waitForHttp(target, 60_000, {
-      onTick: (ratio) => {
-        updateBootstrapStage("Carregando interface instalada...", 92 + ratio * 5);
-      }
-    });
-  }
+  await waitForHttp(target, 60_000, {
+    onTick: (ratio) => {
+      updateBootstrapStage("Carregando interface instalada...", 92 + ratio * 5);
+    }
+  });
   await Promise.all([
     new Promise((resolve) => {
       mainWindow.once("ready-to-show", resolve);
@@ -729,8 +994,10 @@ async function startLocalRuntime() {
   runtimeState.dataDir = dataDir;
   readDesktopRuntimeSecrets(dataDir);
   await ensureDesktopRuntimeDependencies(dataDir);
+  prepareInstalledRuntimeWorkspace(dataDir);
   updateBootstrapStage("Validando portas e runtime local...", 6, { immediate: true });
   const runtimeConfig = await resolveRuntimePortConflicts(dataDir);
+  await ensurePackagedRendererServer(dataDir);
   updateBootstrapStage("Preparando banco e arquivos locais...", 8, { immediate: true });
   const dbProgressTimer = setInterval(() => {
     const next = Math.min(18, bootstrapProgressTarget + 0.8);
@@ -867,11 +1134,15 @@ async function createMainWindow() {
 }
 
 async function bootstrapDesktop() {
+  writeDesktopBootstrapLog(`bootstrap start pid=${process.pid} packaged=${app.isPackaged}`);
   await app.whenReady();
+  writeDesktopBootstrapLog("app ready");
   Menu.setApplicationMenu(null);
   registerDesktopIpc();
   await createSplashWindow();
+  writeDesktopBootstrapLog("splash window created");
   await createMainWindow();
+  writeDesktopBootstrapLog("main window created");
   emitBootstrapState({
     title: "FlowShopy Desktop",
     message: "A aplicação está preparando o runtime local.",
@@ -879,11 +1150,14 @@ async function bootstrapDesktop() {
     status: "booting"
   });
   try {
+    writeDesktopBootstrapLog("starting local runtime");
     await startLocalRuntime();
     updateBootstrapStage("Abrindo aplicação...", 97, { status: "booting" });
     await loadRenderer();
+    writeDesktopBootstrapLog("renderer loaded");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    writeDesktopBootstrapLog(`bootstrap error ${message}`);
     emitBootstrapState({
       title: "Falha ao iniciar",
       message: "A inicialização falhou. Verifique logs, providers locais e tente novamente.",
@@ -914,6 +1188,7 @@ async function bootstrapDesktop() {
 }
 
 app.on("window-all-closed", async () => {
+  writeDesktopBootstrapLog("window-all-closed");
   if (process.platform !== "darwin") {
     await stopRuntimeProcesses();
     app.quit();
@@ -921,11 +1196,13 @@ app.on("window-all-closed", async () => {
 });
 
 app.on("before-quit", async () => {
+  writeDesktopBootstrapLog("before-quit");
   await stopRuntimeProcesses();
 });
 
 bootstrapDesktop().catch((error) => {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  writeDesktopBootstrapLog(`bootstrap fatal ${message}`);
   console.error(message);
   app.exit(1);
 });

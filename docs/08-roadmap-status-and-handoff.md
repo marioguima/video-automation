@@ -147,35 +147,27 @@ Prioridade de arquitetura a partir desta decisao:
 
 ## Decisão operacional de empacotamento para o beta
 
-Foi aceita a seguinte estratégia imediata para o beta local-first:
+Resumo executivo:
 
-- dependências críticas do caminho principal devem ser distribuídas junto com o app;
-- isso inclui `Node`, `ffmpeg`, runtime Python e bibliotecas Python necessárias;
-- o desktop deve resolver caminhos internos desses runtimes, sem depender do ambiente global do usuário.
+- dependências críticas do caminho principal são distribuídas junto com o app;
+- isso inclui `Node`, `ffmpeg`, runtime Python, bibliotecas Python e modelo inicial de transcrição;
+- a pipeline inicial de YouTube roda localmente com `yt-dlp -> ffmpeg -> faster-whisper`;
+- o desktop prepara e valida esse runtime automaticamente no boot;
+- no app instalado, `DATA_DIR` é ignorado e o runtime usa `%LOCALAPPDATA%/FlowShopy Desktop`.
 
-Aplicação prática inicial:
+Este arquivo não deve detalhar mais do que isso.
 
-- pipeline de YouTube usa `yt-dlp` no runtime Python embarcado;
-- extração de áudio usa `ffmpeg` embarcado;
-- transcrição usa `faster-whisper` no runtime Python embarcado.
-- a preparação de desktop já baixa automaticamente `ffmpeg`, Python embeddable, bibliotecas Python e o modelo inicial de transcrição;
-- `build:desktop` agora executa `prepare:desktop-runtime` para empacotar o runtime completo no instalador.
-- `dev:desktop` agora consegue reconstruir o runtime local a partir de ambiente limpo e mostra etapas na splash enquanto prepara dependências ausentes.
-- o runtime desktop não mantém cache persistente de staging; em desenvolvimento o estado persistente fica em `apps/desktop/vendor`, e no app instalado o runtime mutável fica em `%LOCALAPPDATA%/FlowShopy Desktop/vendor`.
-- no boot, o desktop já verifica se o `vendor` corresponde à versão/configuração esperada e reprovisiona automaticamente o que divergir.
-- no app instalado, `resources/vendor` passa a ser apenas cópia inicial do instalador; o runtime ativo mutável fica em `%LOCALAPPDATA%/FlowShopy Desktop/vendor`.
-- existe script de limpeza do runtime instalado para teste limpo sem VM obrigatória: `pnpm clean:installed-desktop-runtime`.
-- `DATA_DIR` só é respeitado no desktop quando `isDev()` é verdadeiro; no app instalado o runtime ignora essa env e força `%LOCALAPPDATA%/FlowShopy Desktop/data`.
-- o empacotamento local do instalador está com `signAndEditExecutable: false` para evitar falha de `winCodeSign` no Windows de desenvolvimento; assinatura real continua como etapa futura de release.
+Documento fonte desta trilha:
 
-Essa decisão não encerra a arquitetura definitiva.
+- `docs/12-desktop-local-runtime.md`
 
-Pendências de revisão futura já registradas:
+Lá ficam:
 
-- transformar dependências hoje baseadas em Python em componentes ainda mais previsíveis quando fizer sentido;
-- revisar se modelos devem ir no instalador ou baixar no primeiro uso;
-- adicionar diagnóstico e reparo de runtimes embarcados;
-- medir custo de manutenção e tamanho do instalador antes de congelar a estratégia final.
+- estrutura exata de pastas em desenvolvimento e instalado;
+- comandos de build, limpeza e reteste;
+- comportamento da splash;
+- regras de reprovisionamento;
+- pendências futuras da estratégia de runtime.
 
 ## Credencial local de dev
 

@@ -34,6 +34,15 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function readJsonIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 async function downloadFile(url, destinationPath) {
   const response = await fetch(url);
   if (!response.ok || !response.body) {
@@ -78,6 +87,31 @@ function removeDirectoryQuietly(dirPath) {
 function hashFile(filePath) {
   const buffer = fs.readFileSync(filePath);
   return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function isPreparedRuntimeCurrent() {
+  const metadata = readJsonIfExists(metadataPath);
+  if (!metadata) return false;
+  if (!fs.existsSync(requirementsPath)) return false;
+
+  const pythonExe = path.join(targetDir, process.platform === "win32" ? "python.exe" : "python");
+  const requirementsHash = hashFile(requirementsPath);
+  const modelDirExists =
+    fs.existsSync(vendorModelsDir) &&
+    fs.statSync(vendorModelsDir).isDirectory() &&
+    fs.readdirSync(vendorModelsDir).length > 0;
+
+  return (
+    fs.existsSync(pythonExe) &&
+    modelDirExists &&
+    metadata.pythonVersion === defaultPythonVersion &&
+    metadata.sourceUrl === defaultPythonUrl &&
+    metadata.getPipUrl === defaultGetPipUrl &&
+    metadata.requirementsHash === requirementsHash &&
+    metadata.fasterWhisperModel === defaultWhisperModel &&
+    metadata.platform === process.platform &&
+    metadata.arch === process.arch
+  );
 }
 
 function findFileRecursive(rootDir, matcher) {
@@ -216,6 +250,10 @@ function predownloadWhisperModel(pythonExe, modelName, modelsDir) {
 
 async function main() {
   ensureWindows();
+  if (isPreparedRuntimeCurrent()) {
+    console.log(`Desktop python runtime already prepared: ${targetDir}`);
+    return;
+  }
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "flowshopy-python-"));
 
   try {

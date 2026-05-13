@@ -240,6 +240,7 @@ Comandos principais para teste do app instalado:
 
 - `pnpm dist:desktop`
 - `pnpm clean:installed-desktop-runtime`
+- `pnpm run:desktop-unpacked`
 
 Regra prática:
 
@@ -517,6 +518,12 @@ Depois disso:
 2. observar a splash;
 3. confirmar a recriação do runtime ativo em `%LOCALAPPDATA%/FlowShopy Desktop/vendor`.
 
+Observação importante para testes via terminal:
+
+- algumas sessões de desenvolvimento podem herdar `ELECTRON_RUN_AS_NODE=1`;
+- nessa condição, `electron` e o `win-unpacked` não sobem a aplicação corretamente;
+- `pnpm run:desktop-unpacked` já remove essa env antes de abrir o executável.
+
 ## O que observar na UI
 
 ### Splash
@@ -556,6 +563,12 @@ Portanto, os sinais práticos de sucesso são:
 - a API local responde;
 - o worker local responde;
 - ao iniciar um fluxo de fonte YouTube, a fonte sai de espera e avança de estado.
+
+Sinal adicional de diagnóstico:
+
+- o shell desktop agora grava `desktop-bootstrap.log`;
+- em desenvolvimento ele fica em `logs/desktop/desktop-bootstrap.log`;
+- no app empacotado ou `win-unpacked`, ele fica em `%LOCALAPPDATA%/FlowShopy Desktop/logs/desktop-bootstrap.log`.
 
 ## O que observar no filesystem
 
@@ -741,6 +754,13 @@ Resultado esperado:
 - o teste acontece sem depender de máquina virtual;
 - o runtime ativo do app instalado é recriado do zero;
 - o app continua sem depender de Python ou ffmpeg do sistema.
+
+Teste rápido do artefato `win-unpacked`:
+
+1. executar `pnpm dist:desktop`;
+2. executar `pnpm clean:installed-desktop-runtime`;
+3. executar `pnpm run:desktop-unpacked`;
+4. observar a splash e, se necessário, acompanhar `%LOCALAPPDATA%/FlowShopy Desktop/logs/desktop-bootstrap.log`.
 
 Quando usar VM:
 

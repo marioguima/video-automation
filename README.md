@@ -1,70 +1,167 @@
 # FlowShopy
 
-FlowShopy e uma plataforma content-first para transformar ideias, roteiros e fontes de conteudo em videos publicaveis para multiplas plataformas.
+FlowShopy e um produto local-first para transformar fontes de conteudo em entregaveis publicaveis, com foco inicial em video.
 
-O produto segue COPE: Create Once, Publish Everywhere.
-
-Na V1, a saida prioritaria e video. O core e:
+O produto segue a ideia de COPE:
 
 ```text
-conteudo -> roteiro -> cenas -> assets -> variantes -> video final
+Create Once, Publish Everywhere
 ```
 
-## Documentacao ativa
+Na pratica:
 
-A documentacao canonica fica em [docs/README.md](docs/README.md).
+- o usuario cria ou importa um `Content`;
+- esse conteudo pode ter uma ou varias fontes;
+- as fontes sao preparadas ate virarem texto bruto;
+- o conteudo e associado a um `Project`;
+- o projeto define canais, formatos e prompts por entregavel;
+- cada combinacao `canal + formato` gera um `final content`;
+- a partir desse `final content`, o produto entra na fase de criacao do entregavel.
 
-Leia nessa ordem:
+Hoje a V1 esta focada em:
 
-1. [Product Vision](docs/01-product-vision.md)
-2. [Product Specification](docs/02-product-specification.md)
-3. [Technical Architecture](docs/03-technical-architecture.md)
-4. [Development and Operations](docs/04-development-and-operations.md)
-5. [Production Infrastructure](docs/05-production-infrastructure.md)
-6. [Integrations and External Services](docs/06-integrations-and-external-services.md)
-7. [Sales and Distribution Plan](docs/07-sales-and-distribution-plan.md)
-8. [Roadmap, Status and Handoff](docs/08-roadmap-status-and-handoff.md)
-9. [Decision Log](docs/09-decision-log.md)
-10. [Desktop Local Runtime](docs/12-desktop-local-runtime.md)
+- conteudo reutilizavel;
+- projetos como parametrizadores;
+- video como entregavel principal;
+- runtime local com Electron, API local, worker local e SQLite local.
 
-## Monorepo
+## Para quem este README existe
+
+Este README e para quem tem acesso ao codigo e vai:
+
+- desenvolver;
+- depurar;
+- empacotar;
+- validar;
+- manter o projeto.
+
+Ele nao e um guia de cliente final.
+
+O guia para simular a experiencia de "app instalado" durante desenvolvimento fica em:
+
+- [docs/13-desktop-installed-mode-validation.md](docs/13-desktop-installed-mode-validation.md)
+
+O documento canonico do runtime desktop continua sendo:
+
+- [docs/12-desktop-local-runtime.md](docs/12-desktop-local-runtime.md)
+
+## O que o projeto entrega
+
+O dominio principal atual e este:
 
 ```text
-apps/desktop  Electron shell, bootstrap local e runtime instalado
-apps/api      Fastify API
-apps/web      React/Vite frontend
-apps/worker   local job worker
+Content -> Project -> Channel -> Format -> Prompt -> Final Content -> Output
+```
+
+Regras importantes do produto neste estado:
+
+- `Content` existe fora de `Project`;
+- `Content` pode ter varias fontes;
+- cada fonte e preparada ate texto bruto;
+- `Project` nao e o conteudo; ele orquestra a criacao dos entregaveis;
+- a IA nao atua na fase de preparacao do conteudo;
+- a IA entra depois, no contexto do projeto, por combinacao `canal + formato`.
+
+Fontes suportadas agora:
+
+- texto;
+- links do YouTube;
+- PDF.
+
+Fluxo atual de preparacao:
+
+- texto: ja entra como fonte pronta;
+- YouTube: download -> extracao de audio -> transcricao;
+- PDF: extracao de texto.
+
+Quando todas as fontes de um conteudo tiverem convergido para texto bruto, esse conteudo passa a estar pronto para uso nos projetos.
+
+## Arquitetura em uma tela
+
+```text
+Electron Desktop Shell
+  -> React UI local
+  -> Fastify API local
+  -> Worker local
+  -> SQLite local
+  -> runtime vendorizado
+     - Node
+     - ffmpeg
+     - Python
+     - modelos locais
+```
+
+Diretorios principais:
+
+```text
+apps/desktop  shell Electron e bootstrap do runtime local
+apps/web      frontend React/Vite
+apps/api      API Fastify
+apps/worker   jobs locais, ingestao, providers e render
 packages/db   Prisma + SQLite
-packages/shared shared runtime helpers
+packages/shared utilitarios de runtime e config
+scripts/      preparacao, limpeza, empacotamento e suporte
+docs/         documentacao canonica
 ```
+
+## Ordem de leitura recomendada
+
+Se voce vai mexer no produto, leia nesta ordem:
+
+1. [docs/01-product-vision.md](docs/01-product-vision.md)
+2. [docs/02-product-specification.md](docs/02-product-specification.md)
+3. [docs/03-technical-architecture.md](docs/03-technical-architecture.md)
+4. [docs/04-development-and-operations.md](docs/04-development-and-operations.md)
+5. [docs/12-desktop-local-runtime.md](docs/12-desktop-local-runtime.md)
+6. [docs/08-roadmap-status-and-handoff.md](docs/08-roadmap-status-and-handoff.md)
 
 ## Requisitos de desenvolvimento
 
-- Node.js 20+
-- pnpm 9+
-- PowerShell 7 no Windows
-- SQLite local via Prisma
-- ffmpeg/ffprobe
-- Playwright browsers
-- providers conforme uso:
-  - Ollama ou Gemini para LLM
-  - ComfyUI para imagem
-  - XTTS/Chatterbox/Qwen para TTS
+Ambiente principal atual:
 
-## Setup rapido
+- Windows
+- PowerShell
+
+Versoes exigidas pelo repositorio:
+
+- Node.js `22.17.1`
+- pnpm `9.12.3`
+
+Outros pontos:
+
+- internet na primeira preparacao do runtime desktop;
+- Playwright browsers instalados localmente para a parte que ainda usa render headless;
+- providers locais ou externos conforme a feature testada.
+
+Providers e servicos que podem entrar no fluxo, dependendo do que voce for validar:
+
+- Ollama ou Gemini para LLM;
+- ComfyUI para imagem;
+- XTTS, Chatterbox ou Qwen TTS;
+- Playwright para a trilha atual de slides PNG;
+- ffmpeg, Python e modelos locais sao tratados pelo proprio runtime do app.
+
+## Setup completo do ambiente de desenvolvimento
+
+### 1. Instalar dependencias do monorepo
 
 ```powershell
 pnpm install
+```
+
+### 2. Instalar browsers do Playwright
+
+```powershell
 pnpm --filter @flowshopy/worker exec playwright install
 ```
 
-Criar o `.env` raiz a partir do exemplo e ajustar os segredos locais:
+### 3. Criar `.env`
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Valores minimos para dev local:
+Valores minimos de referencia para desenvolvimento:
 
 ```env
 DATA_DIR=G:\tool\video-automation\data
@@ -76,73 +173,75 @@ INTERNAL_JOBS_EVENT_TOKEN=flowshopy-local-dev-internal-token
 AGENT_CONTROL_TOKEN_SECRET=flowshopy-local-dev-agent-token
 ```
 
-Configurar frontend dev:
+### 4. Configurar o frontend
 
-```text
-apps/web/.env.local
+Crie `apps/web/.env.local` com:
+
+```env
 VITE_API_BASE=http://127.0.0.1:4110
 ```
 
-Use o mesmo host no navegador e no `VITE_API_BASE`. Por exemplo, se
-`VITE_API_BASE` usa `127.0.0.1`, abra a web em `http://127.0.0.1:4273`.
-Misturar `localhost` na web com `127.0.0.1` na API pode impedir o cookie de
-sessao de ser enviado em algumas chamadas.
+Regra importante:
 
-## Runtime alvo
+- use o mesmo host na web e na API;
+- se usar `127.0.0.1` em `VITE_API_BASE`, abra a UI em `127.0.0.1`, nao em `localhost`.
 
-O runtime principal agora e `desktop local-first`.
+### 5. Entender o que sera baixado automaticamente
 
-Modelo:
+Voce nao precisa instalar manualmente no Windows para o runtime desktop:
 
-```text
-Electron shell
-  -> UI local
-  -> API local
-  -> worker local
-  -> SQLite/assets/providers locais
-  -> cloud opcional para licenca, sync e updates
-```
+- Node do backend local;
+- ffmpeg;
+- ffprobe;
+- Python;
+- libs Python do worker;
+- modelo inicial de transcricao.
 
-## Rodar localmente
+Esses itens sao preparados pelo proprio projeto.
 
-Suba os processos em terminais separados.
+## Como rodar em desenvolvimento
 
-### Modo desktop recomendado
+### Modo recomendado
+
+Use:
 
 ```powershell
 pnpm dev:desktop
 ```
 
-Esse comando sobe:
+Esse e o modo principal de desenvolvimento hoje.
 
-- Vite para `apps/web`
-- Electron em `apps/desktop`
-- API local
-- worker local
+Ele faz o seguinte:
 
-### Modo backend/web separado
+1. verifica e prepara o runtime desktop se necessario;
+2. sobe a UI;
+3. sobe a API local;
+4. sobe o worker local;
+5. abre o shell Electron.
 
-Se precisar depurar os processos individualmente:
+### Modo separado por processo
+
+Use isso apenas quando quiser depurar uma camada isoladamente.
 
 API:
 
 ```powershell
-npm run dev:api
-```
-
-Web:
-
-```powershell
-npm run dev:web
+pnpm dev:api
 ```
 
 Worker:
 
 ```powershell
-npm run dev:worker
+pnpm dev:worker
 ```
 
-URLs usadas no desenvolvimento atual:
+Web:
+
+```powershell
+pnpm dev:web
+```
+
+### URLs de desenvolvimento
 
 ```text
 web:    http://127.0.0.1:4273/
@@ -150,216 +249,337 @@ api:    http://127.0.0.1:4110
 worker: http://127.0.0.1:4111
 ```
 
-## Build desktop
+## O que o projeto cria em desenvolvimento
 
-Build da interface usada pelo shell:
+### Runtime desktop de desenvolvimento
+
+Em desenvolvimento, o runtime ativo fica no repositorio:
+
+```text
+apps/desktop/vendor/
+  node/
+  ffmpeg/
+  python/
+  models/
+  db/
+  workspace-node-modules/
+```
+
+### Dados de desenvolvimento
+
+Em desenvolvimento, os dados ficam em:
+
+- `DATA_DIR`, se ele estiver definido;
+- senao, no fallback de desenvolvimento do projeto.
+
+Hoje a configuracao recomendada e:
+
+```text
+G:\tool\video-automation\data
+```
+
+### Logs
+
+Logs importantes:
+
+```text
+tmp/api-4110.log
+tmp/worker-4111.log
+tmp/web-4273.log
+logs/worker-actions.log
+logs/worker-job-events.log
+logs/desktop/desktop-bootstrap.log
+```
+
+## Como saber se o modo de desenvolvimento esta funcionando
+
+### Healthchecks
+
+API:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4110/health
+```
+
+Worker:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4111/health
+```
+
+Web:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4273/
+```
+
+### Sinais visuais
+
+No bootstrap do desktop, a splash deve passar por mensagens como:
+
+- `Verificando runtimes locais...`
+- `Preparando banco e arquivos locais...`
+- `Iniciando API local...`
+- `Conectando worker local...`
+- `Aguardando API responder...`
+- `Aplicacao pronta.`
+
+Se travar, o primeiro lugar para olhar e:
+
+- `logs/desktop/desktop-bootstrap.log`
+
+## Como limpar e retestar em desenvolvimento
+
+Quando quiser simular o primeiro boot do runtime de desenvolvimento:
+
+```powershell
+pnpm clean:desktop-runtime
+pnpm dev:desktop
+```
+
+Esse fluxo limpa o runtime vendorizado de desenvolvimento e deixa o bootstrap reconstruir tudo.
+
+Use isso para validar:
+
+- downloads;
+- preparacao do runtime;
+- regressao no bootstrap;
+- mudanca de versao de vendor;
+- mudanca de dependencias Python.
+
+## Como compilar a aplicacao desktop
+
+### Build interno do desktop
 
 ```powershell
 pnpm build:desktop
 ```
 
-Empacotamento instalavel:
+Isso faz:
+
+1. prepara o runtime desktop;
+2. builda o frontend;
+3. deixa o projeto pronto para empacotamento.
+
+### Gerar o instalador
 
 ```powershell
 pnpm dist:desktop
 ```
 
-## App settings
-
-As configuracoes runtime do aplicativo ficam em `APP_SETTINGS_PATH`, por padrao
-`data/app_settings.json`. Esse arquivo e gerado automaticamente quando a API ou
-o worker iniciam e nao deve ser versionado, porque pode conter chaves de API.
-
-O template versionado fica fora de `data`:
+Saida esperada:
 
 ```text
-config/app_settings.template.json
+dist/desktop/
 ```
 
-Ele contem apenas valores nao criticos: URLs locais, modelos padrao, timeouts,
-tema, TTS, ComfyUI e memoria. As chaves de provedores externos ficam vazias no
-template e devem ser preenchidas pela tela Settings ou diretamente no arquivo
-local de desenvolvimento.
+Ali voce encontra:
 
-Formato atual do bloco LLM:
+- instalador;
+- `win-unpacked`;
+- arquivos auxiliares do empacotamento.
 
-```json
-{
-  "llm": {
-    "provider": "gemini",
-    "providers": {
-      "ollama": {
-        "baseUrl": "http://127.0.0.1:11434",
-        "model": "llama3.2:3b",
-        "timeoutMs": 600000
-      },
-      "gemini": {
-        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
-        "model": "gemma-4-26b-a4b-it",
-        "apiKey": "",
-        "timeoutMs": 600000
-      }
-    }
-  }
-}
+## Como testar o modo instalado
+
+Existe uma diferenca importante entre:
+
+- rodar o desktop em desenvolvimento;
+- validar a experiencia do app instalado.
+
+Para simular o app instalado, use:
+
+```powershell
+pnpm clean:installed-desktop-runtime
+pnpm run:desktop-unpacked
 ```
 
-Na inicializacao, a aplicacao:
+Esse fluxo testa o comportamento do app empacotado sem precisar instalar manualmente a cada iteracao.
 
-- cria `data/` se a pasta nao existir;
-- cria `data/app_settings.json` a partir do template se o arquivo nao existir;
-- normaliza formatos antigos para `llm.providers.<provider>`;
-- preserva chaves ja preenchidas no arquivo local;
-- registra `app_settings_secret_missing` se o provedor ativo exigir chave e ela
-  ainda estiver vazia.
+Guia completo:
 
-Para recriar o arquivo local a partir do template, apague apenas
-`data/app_settings.json` e reinicie a API ou o worker. O arquivo sera gerado de
-novo sem segredos.
+- [docs/13-desktop-installed-mode-validation.md](docs/13-desktop-installed-mode-validation.md)
 
-## Worker, agent e pareamento
+## O que o projeto cria no modo instalado
 
-O `apps/worker` e o processo local que executa as tarefas pesadas e/ou
-dependentes da maquina: geracao de blocos, audio/TTS, imagens, slides, video
-final, leitura de arquivos gerados e chamadas a providers locais como Ollama,
-ComfyUI e XTTS.
+Quando o app esta rodando como app instalado ou `win-unpacked`, a regra muda.
 
-No desenho novo, isso nao e mais a narrativa principal do produto. O fluxo
-padrao deve ser `desktop -> API local -> worker local`. O pareamento remoto
-permanece como infraestrutura herdada/futura para cenarios distribuidos, nao
-como prerequisito do modo instalado local-first.
-
-Para a API conseguir enviar comandos para esse processo, o worker precisa estar
-pareado com um workspace. Esse worker pareado e chamado de `agent`.
-
-O pareamento gera tres credenciais que devem ficar no `.env` raiz:
-
-```env
-AGENT_CONTROL_TOKEN=
-WORKSPACE_ID=
-AGENT_ID=
-```
-
-Sem `WORKSPACE_ID` e `AGENT_ID`, o worker ainda sobe o endpoint de health em
-`http://127.0.0.1:4111/health`, mas ele nao entra no canal de controle da API.
-Nesse caso a API retorna `agent_offline` quando a web tenta gerar audio, imagem,
-slides, video ou consultar arquivos do worker.
-
-Log tipico de worker nao pareado:
+### Runtime inicial entregue com o app
 
 ```text
-agent_control_connection_failed
-reason: missing_agent_identity_or_token
-has_api_base_url: true
-has_agent_control_token: true
-has_workspace_id: false
-has_agent_id: false
+resources/vendor
 ```
 
-### Como parear o worker local
+Essa e a copia inicial entregue pelo build.
 
-1. Suba a API:
-
-```powershell
-npm run dev:api
-```
-
-2. Em outro terminal, gere as credenciais. Ajuste email/senha conforme o usuario
-local:
-
-```powershell
-$api = "http://127.0.0.1:4110"
-$email = "seu-email@exemplo.com"
-$password = "sua-senha-local"
-$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "$api/auth/login" `
-  -WebSession $session `
-  -ContentType "application/json" `
-  -Body (@{
-    email = $email
-    password = $password
-  } | ConvertTo-Json)
-
-$pairing = Invoke-RestMethod `
-  -Method Post `
-  -Uri "$api/agent-control/pairing-token" `
-  -WebSession $session
-
-$creds = Invoke-RestMethod `
-  -Method Post `
-  -Uri "$api/agent-control/validate-worker" `
-  -ContentType "application/json" `
-  -Body (@{
-    pairingToken = $pairing.pairingToken
-    label = "local-worker"
-    machineFingerprint = "$env:COMPUTERNAME-local-worker"
-  } | ConvertTo-Json)
-
-$creds
-```
-
-3. Copie os valores retornados para o `.env`:
-
-```env
-AGENT_CONTROL_TOKEN=<valor retornado em AGENT_CONTROL_TOKEN>
-WORKSPACE_ID=<valor retornado em WORKSPACE_ID>
-AGENT_ID=<valor retornado em AGENT_ID>
-AGENT_LABEL=local-worker
-MACHINE_FINGERPRINT=<mesmo valor usado em machineFingerprint>
-```
-
-4. Reinicie o worker:
-
-```powershell
-npm run dev:worker
-```
-
-Log esperado quando o pareamento esta correto:
+### Runtime ativo usado pela aplicacao
 
 ```text
-agent_control_connected
-agent_hello_ack
+%LOCALAPPDATA%/FlowShopy Desktop/vendor
 ```
 
-### Observacoes sobre pareamento
+### Dados do usuario
 
-- O token de pareamento (`pairingToken`) e de uso unico e expira rapido.
-- `AGENT_CONTROL_TOKEN_SECRET` e o segredo da API usado para assinar tokens de
-  agent. Ele nao e o token do worker.
-- Se `AGENT_CONTROL_TOKEN_SECRET` mudar, refaca o pareamento, porque os tokens
-  antigos deixam de ser validos.
-- `INTERNAL_JOBS_EVENT_TOKEN` precisa existir na API e no worker, mas ele nao
-  substitui `WORKSPACE_ID` e `AGENT_ID`.
-- Se o erro `agent_offline` aparecer, confira primeiro se o log do worker mostra
-  `agent_control_connected`. Se mostrar `agent_control_skipped`, ainda falta
-  credencial no `.env`.
+```text
+%LOCALAPPDATA%/FlowShopy Desktop/data
+```
 
-## Validar
+### Logs do bootstrap desktop
+
+```text
+%LOCALAPPDATA%/FlowShopy Desktop/logs/desktop-bootstrap.log
+```
+
+## Regra importante sobre `DATA_DIR`
+
+Esse ponto e critico e deliberado:
+
+- em desenvolvimento, `DATA_DIR` pode redirecionar o diretorio de dados;
+- no app empacotado, `DATA_DIR` e ignorado;
+- o app empacotado sempre usa `%LOCALAPPDATA%/FlowShopy Desktop/data`.
+
+O motivo real no codigo e:
+
+- a checagem de `isDev()` em `apps/desktop/main.mjs`;
+- nao e o valor de `DATA_DIR` estar vazio ou preenchido que decide isso;
+- o que decide e se o app esta em desenvolvimento ou empacotado.
+
+## Como validar o modo instalado
+
+Checklist curto:
+
+1. rodar `pnpm dist:desktop`
+2. rodar `pnpm clean:installed-desktop-runtime`
+3. rodar `pnpm run:desktop-unpacked`
+4. verificar a splash
+5. verificar:
+   - `%LOCALAPPDATA%/FlowShopy Desktop/data`
+   - `%LOCALAPPDATA%/FlowShopy Desktop/vendor`
+   - `%LOCALAPPDATA%/FlowShopy Desktop/logs/desktop-bootstrap.log`
+6. confirmar que a API sobe em `4110`
+7. confirmar que o worker sobe em `4111`
+
+## Pipeline local de YouTube
+
+Hoje a fase de preparacao de fonte do YouTube e:
+
+```text
+link do YouTube
+  -> download do video
+  -> extracao de audio
+  -> transcricao
+  -> texto bruto salvo no Content
+```
+
+Runtime usado nessa trilha:
+
+- `yt-dlp` dentro do Python vendorizado;
+- `ffmpeg` vendorizado;
+- `faster-whisper` vendorizado;
+- modelo local inicial de transcricao.
+
+## Comandos mais importantes
+
+Setup:
+
+```powershell
+pnpm install
+pnpm --filter @flowshopy/worker exec playwright install
+```
+
+Preparacao de runtime:
+
+```powershell
+pnpm prepare:desktop-runtime
+```
+
+Desenvolvimento:
+
+```powershell
+pnpm dev:desktop
+pnpm dev:api
+pnpm dev:worker
+pnpm dev:web
+```
+
+Limpeza:
+
+```powershell
+pnpm clean:desktop-runtime
+pnpm clean:installed-desktop-runtime
+```
+
+Empacotamento e validacao:
+
+```powershell
+pnpm build:desktop
+pnpm dist:desktop
+pnpm run:desktop-unpacked
+```
+
+Validacao tecnica:
 
 ```powershell
 pnpm --filter @flowshopy/api typecheck
 pnpm --filter @flowshopy/web typecheck
 pnpm --filter @flowshopy/worker typecheck
 pnpm verify:critical
-pnpm --filter @flowshopy/api run test:one -- test/content-cope-flow.test.ts
 ```
 
-## Pendencias tecnicas
+## Arquivos que mais importam para manutencao
 
-- Mover chaves de providers externos, como Gemini e OpenAI, do arquivo
-  `data/app_settings.json` para armazenamento persistido na base com criptografia
-  ou envelope encryption. Enquanto isso, tratar `data/app_settings.json` como
-  segredo local de desenvolvimento. Esse arquivo e ignorado pelo git.
+Bootstrap desktop:
 
-## Regra importante
+- [apps/desktop/main.mjs](apps/desktop/main.mjs)
 
-`G:\tool\flowshopy` foi usado como referencia tecnica historica. Nao editar esse projeto.
+Empacotamento:
 
-Toda implementacao ativa deve acontecer neste repositorio:
+- [apps/desktop/electron-builder.json](apps/desktop/electron-builder.json)
 
-```text
-G:\tool\video-automation
-```
+Preparacao de runtime:
+
+- [scripts/prepare-desktop-node.mjs](scripts/prepare-desktop-node.mjs)
+- [scripts/prepare-desktop-workspace-node-modules.mjs](scripts/prepare-desktop-workspace-node-modules.mjs)
+- [scripts/prepare-desktop-ffmpeg.mjs](scripts/prepare-desktop-ffmpeg.mjs)
+- [scripts/prepare-desktop-python.mjs](scripts/prepare-desktop-python.mjs)
+- [scripts/prepare-desktop-db-seed.mjs](scripts/prepare-desktop-db-seed.mjs)
+
+Limpeza:
+
+- [scripts/clean-desktop-runtime.mjs](scripts/clean-desktop-runtime.mjs)
+- [scripts/clean-installed-desktop-runtime.mjs](scripts/clean-installed-desktop-runtime.mjs)
+
+Frontend de conteudo:
+
+- [apps/web/src/components/ContentQuickStart.tsx](apps/web/src/components/ContentQuickStart.tsx)
+
+Worker:
+
+- [apps/worker/src/index.ts](apps/worker/src/index.ts)
+
+Banco:
+
+- [packages/db/src/index.ts](packages/db/src/index.ts)
+
+## Regras de manutencao
+
+- nao editar `G:\\tool\\flowshopy`;
+- toda implementacao ativa acontece em `G:\\tool\\video-automation`;
+- se mudar contrato de produto, atualizar `docs/01`, `docs/02` e `docs/03`;
+- se mudar runtime desktop, atualizar `docs/12`;
+- se mudar fluxo de validacao do app instalado, atualizar `docs/13`;
+- se mudar o estado real do trabalho, atualizar `docs/08`.
+
+## O que ainda nao e guia de cliente final
+
+Ainda falta produzir um material separado para:
+
+- cliente que recebe um instalador;
+- suporte que precisa orientar reinstalacao;
+- QA fora do repositorio;
+- troubleshooting para usuario final sem acesso ao codigo.
+
+Esse material nao deve virar README do repositiorio.
+
+Enquanto isso, a referencia para simular esse cenario dentro do projeto e:
+
+- [docs/13-desktop-installed-mode-validation.md](docs/13-desktop-installed-mode-validation.md)

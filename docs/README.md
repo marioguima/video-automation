@@ -39,6 +39,9 @@ FlowShopy é uma plataforma content-first para criar conteúdo uma vez e gerar s
 11. `12-desktop-local-runtime.md`
    - Arquitetura local-first em Electron, distribuição desktop, runtime instalado e plano de execução do produto híbrido.
 
+12. `13-desktop-installed-mode-validation.md`
+   - Guia técnico para desenvolvedor validar o app empacotado, `win-unpacked`, limpeza de runtime instalado, splash, logs e filesystem.
+
 ## Regra de manutenção
 
 Documentação boa é documentação que reduz ambiguidade.
