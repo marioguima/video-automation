@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const productName = process.env.FLOWSHOPY_DESKTOP_PRODUCT_NAME?.trim() || "FlowShopy Desktop";
+const productName = process.env.FLOWSHOPY_DESKTOP_PRODUCT_NAME?.trim() || "FlowShopy";
 const explicitUserDataDir = process.env.FLOWSHOPY_USERDATA_DIR?.trim();
 const localAppDataDir =
   process.env.LOCALAPPDATA?.trim() ||

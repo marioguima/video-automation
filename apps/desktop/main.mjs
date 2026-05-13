@@ -25,9 +25,13 @@ const __dirname = path.dirname(__filename);
 const execFile = promisify(execFileCallback);
 const require = createRequire(import.meta.url);
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
-const DESKTOP_PRODUCT_NAME = "FlowShopy Desktop";
-const desktopSessionDir = path.join(process.env.LOCALAPPDATA || __dirname, "FlowShopy", "electron-session");
+const DESKTOP_PRODUCT_NAME = "FlowShopy";
+const desktopLocalAppDataRoot = path.join(process.env.LOCALAPPDATA || __dirname, DESKTOP_PRODUCT_NAME);
+const desktopSessionDir = path.join(desktopLocalAppDataRoot, "electron-session");
+fs.mkdirSync(desktopLocalAppDataRoot, { recursive: true });
 fs.mkdirSync(desktopSessionDir, { recursive: true });
+app.setPath("userData", desktopLocalAppDataRoot);
+app.setPath("sessionData", desktopSessionDir);
 app.commandLine.appendSwitch("disk-cache-dir", desktopSessionDir);
 app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
 
@@ -58,7 +62,7 @@ function isDev() {
 function resolveDesktopBootstrapLogPath() {
   const rootDir = isDev()
     ? path.join(resolveRepoRoot(), "logs", "desktop")
-    : path.join(process.env.LOCALAPPDATA || __dirname, DESKTOP_PRODUCT_NAME, "logs");
+    : path.join(desktopLocalAppDataRoot, "logs");
   fs.mkdirSync(rootDir, { recursive: true });
   return path.join(rootDir, "desktop-bootstrap.log");
 }
@@ -86,7 +90,7 @@ function resolveDataDir() {
     fs.mkdirSync(explicit, { recursive: true });
     return explicit;
   }
-  const localDataDir = path.join(app.getPath("appData"), "..", "Local", DESKTOP_PRODUCT_NAME, "data");
+  const localDataDir = path.join(desktopLocalAppDataRoot, "data");
   fs.mkdirSync(localDataDir, { recursive: true });
   return localDataDir;
 }
@@ -1144,7 +1148,7 @@ async function bootstrapDesktop() {
   await createMainWindow();
   writeDesktopBootstrapLog("main window created");
   emitBootstrapState({
-    title: "FlowShopy Desktop",
+    title: "FlowShopy",
     message: "A aplicação está preparando o runtime local.",
     progress: 4,
     status: "booting"
@@ -1166,7 +1170,7 @@ async function bootstrapDesktop() {
     });
     await dialog.showErrorBox(
       "Falha ao iniciar o runtime local",
-      `FlowShopy Desktop não conseguiu iniciar a API local, o worker local ou a interface.\n\n${message}`
+      `FlowShopy não conseguiu iniciar a API local, o worker local ou a interface.\n\n${message}`
     );
   }
 
@@ -1175,7 +1179,7 @@ async function bootstrapDesktop() {
       await createSplashWindow();
       await createMainWindow();
       emitBootstrapState({
-        title: "FlowShopy Desktop",
+        title: "FlowShopy",
         message: "A aplicação está preparando o runtime local.",
         progress: 4,
         status: "booting"

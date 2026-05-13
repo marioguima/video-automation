@@ -1,6 +1,6 @@
 {
-  "appId": "com.flowshopy.desktop",
-  "productName": "FlowShopy Desktop",
+  "appId": "com.flowshopy",
+  "productName": "FlowShopy",
   "directories": {
     "output": "dist/desktop"
   },

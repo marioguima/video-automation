@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
-const executableName = process.platform === "win32" ? "FlowShopy Desktop.exe" : "FlowShopy Desktop";
+const executableName = process.platform === "win32" ? "FlowShopy.exe" : "FlowShopy";
 const executablePath = path.join(repoRoot, "dist", "desktop", "win-unpacked", executableName);
 
 if (!fs.existsSync(executablePath)) {

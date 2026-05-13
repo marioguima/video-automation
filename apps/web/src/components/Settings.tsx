@@ -2320,7 +2320,7 @@ const Settings: React.FC<SettingsProps> = ({ currentTheme, setTheme }) => {
                 </div>
               ) : (
                 <div className="rounded-[5px] border border-border p-4 text-xs text-muted-foreground bg-[hsl(var(--secondary))]/20">
-                  Desktop runtime controls are available only when the interface is running inside FlowShopy Desktop.
+                  Desktop runtime controls are available only when the interface is running inside FlowShopy.
                 </div>
               )}
 
