@@ -36,11 +36,17 @@ FlowShopy é uma plataforma content-first para criar conteúdo uma vez e gerar s
 10. `10-api-endpoint-inventory.md`
    - Inventário técnico gerado dos endpoints HTTP declarados na API.
 
-11. `12-desktop-local-runtime.md`
+11. `11-llm-stage-strategy-architecture.md`
+   - Estratégia de orquestração dos estágios LLM, prioridades por etapa, fallbacks e impacto no worker/settings.
+
+12. `12-desktop-local-runtime.md`
    - Arquitetura local-first em Electron, distribuição desktop, runtime instalado e plano de execução do produto híbrido.
 
-12. `13-desktop-installed-mode-validation.md`
+13. `13-desktop-installed-mode-validation.md`
    - Guia técnico para desenvolvedor validar o app empacotado, `win-unpacked`, limpeza de runtime instalado, splash, logs e filesystem.
+
+14. `14-data-model-review.md`
+   - Revisão detalhada do banco: tabela por tabela, campo por campo, relações, problemas atuais e direção de remodelagem.
 
 ## Regra de manutenção
 

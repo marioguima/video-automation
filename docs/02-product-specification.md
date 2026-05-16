@@ -1,5 +1,15 @@
 # FlowShopy Product Specification
 
+## Propósito deste documento
+
+Este documento responde:
+
+- o que o produto precisa fazer;
+- quais entidades, regras e fluxos precisam existir;
+- quais critérios de aceite definem o comportamento esperado.
+
+Ele não é o lugar para justificar posicionamento de negócio em profundidade nem para registrar o estado real do código.
+
 ## Entidades de produto
 
 ### Workspace
@@ -20,8 +30,32 @@ Regra de produto:
 
 - o app roda instalado localmente, mas não e single-user por definição;
 - o usuário autentica primeiro e depois opera dentro de um workspace com autorização por papel;
-- a V1 precisa assumir pelo menos `owner`, `admin` e `member`, mesmo que alguns limites comerciais ainda não estejam fechados;
+- a V0/V1 precisa ao menos suportar um admin/owner da workspace e os demais usuários da workspace;
+- na fase atual, convite deve ser tratado como ação exclusiva do admin/owner da workspace;
+- papéis futuros mais complexos, como gerentes que convidam ou apenas aprovam, ficam apenas como hipótese de produto futura e não fazem parte do contrato validado agora;
 - a área atual de convite de membros é apenas a semente dessa camada e ainda não representa o modelo final de equipe.
+
+Regra de UX para V0 local-first:
+
+- a UI deve deixar claro qual workspace está ativa no momento;
+- um usuário pode vir a participar de mais de uma workspace;
+- a escolha da workspace ativa precisa existir quando houver mais de uma opção disponível;
+- para a V0, o caso mínimo continua sendo um usuário operando uma workspace local.
+
+### Perfil e sessão
+
+O produto precisa distinguir:
+
+- identidade do usuário;
+- workspace ativa;
+- papel do usuário naquela workspace.
+
+Regras:
+
+- o nome do perfil do usuário pode nascer do bootstrap ou do aceite de convite;
+- esse nome deve poder ser alterado depois nas configurações de perfil;
+- o front não precisa tratar troca de e-mails/contas como preocupação principal de UX neste momento;
+- o que importa para a experiência é deixar claro quem está logado e em qual workspace está operando.
 
 ### Project
 
@@ -36,9 +70,22 @@ Definição operacional:
 - projeto concentra objetivos, destinos, formatos, estilo, CTA, pipeline e regras de saída;
 - projeto é o contrato de intenção entre o usuário e a fábrica do FlowShopy.
 
+Leitura correta de produto:
+
+- o projeto não existe para "fabricar mídia por fabricar";
+- ele existe para contextualizar a produção dentro de uma estratégia de aquisição, promoção e conversão;
+- entregáveis são meios operacionais para alimentar a jornada do lead;
+- promoção, CTA, oferta, contexto editorial e destino comercial fazem parte do contrato do projeto.
+
 Regra de UX: criação de projeto não pede tipo/contexto inicial. O usuário informa nome e descrição, depois escolhe destinos e formatos padrão. O assunto do projeto pode ser campanha, música, produto, evento ou qualquer outro tema, mas isso não deve direcionar o primeiro passo da criação.
 
 Regra de domínio: Project não possui `kind`. Canal, perfil, música, campanha, produto, evento e formato são contexto editorial, destination ou entregável, não classificação do projeto.
+
+Regras adicionais:
+
+- projeto deve declarar expectativa de saída, mesmo quando a execução inicial priorizar vídeo;
+- CTAs e linguagem de interação devem poder variar por canal;
+- blocos e partes comuns devem ser reaproveitados quando isso fizer sentido operacional.
 
 Campos conceituais:
 
@@ -89,6 +136,9 @@ Princípio operacional:
 - `ContentItem` não deve ser entendido apenas como texto digitado pelo usuário;
 - ele representa o conteúdo em trânsito dentro de uma esteira editorial;
 - diferentes tipos de entrada apenas colocam o conteúdo em estágios diferentes dessa esteira.
+- a fase `Source Preparation` do conteúdo precisa ser produto real, com estados, artefatos, fila e critérios claros de avanço;
+- `script_ready` não pode ser um atalho visual sem lastro de domínio;
+- `final content mode` não pode ser apenas uma escolha cosmética de UI; ele precisa validar cobertura real por saída quando houver outputs obrigatórios.
 
 Tipos previstos:
 
@@ -100,17 +150,22 @@ Regra: a tela de conteúdo não deve exibir botoes como "vídeo script", "image 
 
 Regra: conteúdo isolado não gera cenas, clips ou vídeo. Segmentação em cenas e renderizacao pertencem ao fluxo do projeto/variante, porque somente o projeto define canal de saída, formato, aspect ratio, CTA e entregável.
 
+Regras adicionais de UX e fluxo:
+
+- a tela `Content` não pede tipo de mídia na criação;
+- a tela `Content` não gera cenas, não abre editor de vídeo e não inicia render;
+- ingestão de links, PDFs, áudios e vídeos locais acontece na área `Content`, não no detalhe do projeto;
+- a tela `Project` não deve virar um segundo lugar para criar conteúdo;
+- a tela `Project` deve localizar, associar e orquestrar conteúdos existentes.
+
 Campos conceituais:
 
 - `id`
 - `workspaceId`
-- `projectIds`
-- `kind`
 - `title`
 - `ideaText`
 - `sourceText`
 - `scriptText`
-- `orientation`
 - `status`
 - `metadataJson`
 - `createdAt`
@@ -118,9 +173,15 @@ Campos conceituais:
 
 Observação: conteúdo é uma entidade independente de projeto. A associação com projetos deve ser feita por uma tabela de vínculo, permitindo conteúdo sem projeto e conteúdo usado em muitos projetos.
 
+Regra de contrato:
+
+- `ContentItem` não deve conhecer `Project`;
+- `ContentItem` não deve carregar referências de projeto, destinos, aspect ratios ou pipeline de entrega;
+- o vínculo, a parametrização e o controle operacional pertencem à visão `Project -> Content` e às entidades de associação/saída derivadas.
+
 Estados editoriais sugeridos:
 
-- fase `preparation`
+- fase `source_preparation`
   - `source_ingested`
   - `downloading_video`
   - `extracting_audio`
@@ -228,10 +289,18 @@ Regra de produto para V1 evolutiva:
 - PDF/documento: extração de texto;
 - texto: persistência direta como texto bruto.
 
+Regras adicionais:
+
+- a preparação de fontes deve ocorrer nos bastidores até convergir para texto bruto utilizável;
+- ao confirmar cada fonte, o sistema já deve iniciar sua preparação;
+- um mesmo conteúdo pode estar associado a um ou muitos projetos;
+- o vínculo entre conteúdo e projeto precisa ser reutilizável e visível.
+- se o conteúdo nascer com script pronto, ele não deve aceitar fontes brutas adicionais no mesmo fluxo.
+
 Regra de associação com projeto:
 
 - um conteúdo pode ser associado a projeto antes do fim da preparação;
-- nesse caso, o detalhe do projeto deve exibir o conteúdo na fase `Preparation`;
+- nesse caso, o detalhe do projeto deve exibir o conteúdo na fase `Source Preparation`;
 - o conteúdo só fica plenamente apto para `Creation` quando todas as fontes confirmadas tiverem convergido para texto bruto.
 
 ### ContentScript
@@ -279,6 +348,7 @@ Regras:
 - o sistema deve permitir revisão humana antes de outputs seguirem para produção.
 - `script_ready` ainda pertence ao conteúdo, não ao output;
 - a produção por output só começa depois dessa convergência, salvo quando o usuário já forneceu script específico aprovado.
+- se o conteúdo já nasceu com script pronto, o sistema não deve aceitar novas fontes brutas nesse mesmo conteúdo;
 - `source mode` e `final content mode` são decisão do usuário, não do formato de saída;
 - em `final content mode`, o sistema deve conseguir verificar se todos os outputs obrigatórios do projeto já receberam seus conteúdos finais;
 - quando um projeto exigir múltiplas saídas, `script_ready` do conteúdo não deve significar que todos os outputs já estão prontos para `Creation`;
@@ -400,7 +470,7 @@ Regra adicional:
 - esse prompt é definido por combinação `canal + formato`;
 - a ferramenta pode fornecer prompts padrão como ponto de partida;
 - na fase atual do projeto, esses prompts devem ficar visíveis ao usuário para aprendizado e validação.
-- a execução desses prompts ainda pertence ao fechamento da fase `Preparation`;
+- a execução desses prompts ainda pertence ao fechamento da fase `Source Preparation`;
 
 Estados sugeridos para outputs:
 
@@ -769,7 +839,7 @@ Aceite inicial:
 - conteúdos aparecem na coluna correta;
 - estado vazio e claro.
 - a tela evita blocos longos de texto explicativo;
-- contagens aparecem inline no título das colunas ou visões, no formato `Preparation (3)`;
+- contagens aparecem inline no título das colunas ou visões, no formato `Source Preparation (3)`;
 - ajuda textual da tela deve migrar para um painel lateral direito aberto por ícone de interrogação na barra superior;
 - o painel de ajuda deve ser sensível ao contexto da tela atual.
 

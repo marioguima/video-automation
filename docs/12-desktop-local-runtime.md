@@ -107,6 +107,23 @@ Não fica no caminho crítico de:
 - geração de imagem;
 - leitura/escrita de assets locais.
 
+Leitura correta de dados:
+
+- autenticação, licença, plano, acesso, organização e governança pertencem ao control plane online do FlowShopy;
+- execução, fila, assets, composição, outputs e estado operacional pertencem primariamente ao runtime local;
+- a base local não deve se organizar como se o `workspace` fosse o ator operacional de cada ação;
+- na trilha de auditoria, `userId` tende a ser mais valioso do que repetir `workspaceId` em massa nas tabelas locais;
+- quando a relação pai-filho já existe no domínio local, ela deve prevalecer sobre redundâncias de escopo.
+
+Regra prática da V0:
+
+- antes do sync online existir, o runtime local ainda precisa conhecer pelo menos:
+  - qual usuário está autenticado;
+  - qual workspace está ativa;
+  - qual papel esse usuário possui naquela workspace;
+- a UI desktop deve deixar explícito quem está logado e qual workspace está ativa;
+- um mesmo usuário pode futuramente participar de várias workspaces, mas a V0 pode operar com o caso mínimo de um usuário em uma workspace.
+
 ## Decisões técnicas aplicadas
 
 - a UI desktop usa Electron;
@@ -160,6 +177,13 @@ Regra importante de implementação atual:
 - metadata de projeto
 - catálogo de presets
 - configurações não sensíveis
+
+Leitura correta do sync futuro:
+
+- o sync online deve preservar estrutura, configuração e estado editorial suficientes para retomada do trabalho em outra instalação;
+- assets locais pesados não fazem parte do sincronismo principal;
+- scripts, configurações de projeto, associação entre entidades, promoção e demais metadados relevantes podem ser copiados para o online;
+- para preservação idêntica de tudo o que existe localmente, a solução correta continua sendo backup/restauração explícitos do runtime local.
 
 Regra:
 
@@ -273,6 +297,7 @@ Regra prática:
 4. mover credenciais comerciais e de licença para integração cloud específica;
 5. introduzir atualização de aplicação e sync opcional;
 6. remover o pareamento como requisito para fluxo local padrão.
+7. deixar a sessão local explicitar usuário autenticado, workspace ativa e troca de workspace quando houver mais de uma opção.
 
 ## Plano de execução direto
 
@@ -290,6 +315,7 @@ Esse plano não é de análise lenta por fases. Ele é a decomposição do traba
 - identificar endpoints que ainda assumem agent remoto;
 - criar caminho local-first sem dependência de pareamento;
 - preservar os contratos da UI enquanto o backend interno simplifica.
+- revisar se `Agent` continua necessário como entidade permanente ou se vira apenas detalhe interno de bootstrap/comunicação local.
 
 ### Trilha 3: worker como engine local
 
@@ -706,6 +732,85 @@ link do YouTube
 ```
 
 Essa é a solução imediata do beta porque entrega valor rápido sem exigir que o usuário prepare máquina manualmente.
+
+### Validacao manual da trilha YouTube em 2026-05-14
+
+Foi executada uma validacao manual em `2026-05-14` no repositório `G:\tool\video-automation`, usando os binários vendorizados do projeto:
+
+- Python: `apps/desktop/vendor/python/python.exe`
+- ffmpeg: `apps/desktop/vendor/ffmpeg/ffmpeg.exe`
+- modelo local: `apps/desktop/vendor/models/faster-whisper`
+
+Resultado da validacao:
+
+- o download com `yt-dlp` funcionou;
+- a extração de áudio com `ffmpeg` funcionou;
+- a transcrição com `faster-whisper` funcionou em vídeo com fala;
+- a transcrição retornou texto vazio em vídeo musical, o que hoje levaria a falha controlada da fonte no worker.
+
+Leitura correta:
+
+- a implementação da trilha `download -> ffmpeg -> transcrição -> raw_text_ready` existe e funciona;
+- ela depende de o vídeo ter fala inteligível para convergir em texto bruto;
+- vídeos musicais, instrumentais ou com fala muito degradada podem terminar em erro por texto vazio, o que é coerente com a implementação atual.
+
+### Como reproduzir a validacao manual
+
+1. testar download:
+
+```powershell
+@'
+{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","output_dir":"G:\\tool\\video-automation\\tmp\\youtube-flow-test"}
+'@ | Set-Content -Encoding utf8 tmp\youtube-test-input.json
+
+& "G:\tool\video-automation\apps\desktop\vendor\python\python.exe" `
+  apps\worker\scripts\youtube_source_download.py `
+  --input tmp\youtube-test-input.json `
+  --output tmp\youtube-test-output.json
+```
+
+2. extrair áudio:
+
+```powershell
+& "G:\tool\video-automation\apps\desktop\vendor\ffmpeg\ffmpeg.exe" `
+  -y -i tmp\youtube-flow-test\video.mp4 `
+  -vn -ac 1 -ar 16000 -c:a pcm_s16le `
+  tmp\youtube-flow-test\audio.wav
+```
+
+3. transcrever áudio:
+
+```powershell
+@'
+{
+  "audio_path":"G:\\tool\\video-automation\\tmp\\youtube-flow-test\\audio.wav",
+  "model":"small",
+  "download_root":"G:\\tool\\video-automation\\apps\\desktop\\vendor\\models\\faster-whisper",
+  "device":"auto",
+  "compute_type":"int8",
+  "language":"en",
+  "beam_size":1
+}
+'@ | Set-Content -Encoding utf8 tmp\youtube-transcribe-input.json
+
+& "G:\tool\video-automation\apps\desktop\vendor\python\python.exe" `
+  apps\worker\scripts\transcribe_audio_faster_whisper.py `
+  --input tmp\youtube-transcribe-input.json `
+  --output tmp\youtube-transcribe-output.json
+```
+
+4. inspecionar resultado:
+
+```powershell
+Get-Content tmp\youtube-transcribe-output.json
+```
+
+Observacao importante:
+
+- o vídeo acima é musical e retornou `text: ""`;
+- isso confirma download e extração, mas não confirma convergência para `raw_text_ready`.
+
+Para validar a etapa completa com fala, foi executado um segundo teste com um vídeo tutorial em inglês. O resultado retornou texto e segmentos válidos em `tmp\youtube-speech-transcribe-output.json`.
 
 ## Como testar do zero
 

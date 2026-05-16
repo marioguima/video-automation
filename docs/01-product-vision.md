@@ -1,18 +1,36 @@
 # FlowShopy Product Vision
 
+## Propósito deste documento
+
+Este documento responde:
+
+- por que o FlowShopy existe;
+- qual problema de negócio ele resolve;
+- qual posicionamento de produto deve orientar decisões.
+
+Ele não é o lugar para detalhar contrato de entidades, arquitetura técnica ou estado real da implementação.
+
 ## Produto
 
 FlowShopy é uma plataforma de criação e automação de conteúdo com foco em vídeo, pensada como uma máquina de atenção para promoção de produtos.
 
 O produto segue o princípio COPE: Create Once, Publish Everywhere. O usuário cria um conteúdo central e gera outputs publicáveis para diferentes destinos, formatos e aspect ratios.
 
-Na V1, o produto entrega vídeos. No futuro, o mesmo domínio deve aceitar imagens, carrosséis, e-books/PDFs e outros formatos, mas isso não deve bloquear a primeira versão.
+Na V1, o produto entrega vídeos. No futuro, o mesmo domínio deve aceitar imagens, carrosséis, áudios, e-books/PDFs e outros formatos, mas isso não deve bloquear a primeira versão.
 
 O objetivo não é gerar views vazias. O objetivo é transformar conteúdo em entregáveis que atraem atenção qualificada e podem promover produtos, eventos, ofertas ou links estratégicos.
 
+Leitura correta do posicionamento:
+
+- FlowShopy não é apenas uma fábrica de entregáveis onde entra texto e sai vídeo;
+- o centro do produto é reduzir atrito operacional para produzir ativos que funcionem como iscas intencionais dentro de uma esteira de tráfego;
+- esses ativos devem ajudar o usuário a conduzir o lead pelos níveis de consciência até decisão e ação;
+- a conversão comercial final não é responsabilidade do FlowShopy;
+- a responsabilidade do FlowShopy é tornar mais suave, rastreável e reutilizável a produção dos ativos que alimentam essa jornada.
+
 ## Proposta de valor
 
-FlowShopy reduz o custo e a complexidade de transformar uma ideia ou roteiro em vídeos prontos para publicação.
+FlowShopy reduz o custo e a complexidade de transformar uma ideia ou roteiro em vídeos prontos para publicação e em ativos que possam sustentar uma jornada de aquisição com intenção comercial.
 
 O valor entregue ao usuário é:
 
@@ -24,7 +42,9 @@ O valor entregue ao usuário é:
 - enxergar o andamento da produção por projeto, feed e Kanban;
 - preparar a automação de publicação sem perder o controle editorial;
 - associar projetos a produtos/ofertas promovidas;
-- permitir que links publicados continuem úteis por meio de short links redirecionáveis.
+- permitir que links publicados continuem úteis por meio de short links redirecionáveis, onde nunca o link final é publicado mas sim um atalho para o link onde o usuário pode alterar, redirecionar o short link para um novo link sem precisar mudar abasolutamente nada nos links publicados nos ativos finais.
+- produzir ativos com mais consistência para que campanhas, funis e rotinas de tráfego não dependam de processos manuais quebrados;
+- preservar a relação entre conteúdo, intenção, oferta promovida e CTA, para que o ROI do conteúdo possa ser avaliado depois.
 
 ## Problema que resolve
 
@@ -41,7 +61,7 @@ Criar conteúdo em vídeo exige várias tarefas desconectadas:
 - acompanhar status de produção;
 - publicar ou agendar em cada destino.
 
-Sem organização, o criador se perde em arquivos, versões, plataformas, prazos, formatos e objetivos comerciais. FlowShopy centraliza esse fluxo em torno de conteúdos e projetos.
+Sem organização, o criador se perde em arquivos, versões, plataformas, prazos, formatos e objetivos comerciais. FlowShopy centraliza esse fluxo em torno de conteúdos e projetos para que a produção sirva à estratégia de aquisição, não apenas à publicação.
 
 ## Usuário principal
 
@@ -64,6 +84,13 @@ Existem dois elementos principais:
 - `Content`: a base reutilizável. Pode nascer de ideia, roteiro, pesquisa, transcrição ou outro insumo.
 - `Project`: o conjunto de parâmetros que orquestra a transformação do conteúdo em entregáveis. Um conteúdo sozinho pode existir como rascunho ou biblioteca, mas passa a ter impacto real quando associado a um projeto.
 
+Leitura de negócio:
+
+- `Content` é o capital editorial reutilizável;
+- `Project` é o contexto estratégico e comercial em que esse capital será usado;
+- `Output` é o ativo publicado ou distribuído;
+- `PromotionTarget` e `ShortLink` conectam o ativo ao objetivo comercial real.
+
 Um projeto não deve começar por uma classificação como canal, perfil, campanha ou música. Ele é um workspace de produção com nome, descrição, destinos padrão e formatos. O assunto, objetivo comercial ou contexto editorial entram na descrição e nos conteúdos associados.
 
 Um mesmo conteúdo pode ser usado em mais de um projeto. O produto deve permitir enxergar facilmente onde cada conteúdo está sendo utilizado.
@@ -75,6 +102,16 @@ Regras de produto:
 - projeto não é o entregável final; ele define parâmetros para o core/fábrica gerar o entregável;
 - a criação de conteúdo pertence a área `Content`;
 - a área de `Project` deve localizar, associar e orquestrar conteúdos existentes, não duplicar a experiência de escrita.
+
+Premissas canônicas de direção:
+
+- este repositório é o produto FlowShopy;
+- `Vizlec` pode existir como origem de aprendizado técnico, mas não é domínio válido deste produto;
+- existem dois elementos centrais: conteúdos e projetos;
+- um conteúdo pode nascer cedo e ganhar fluxo real depois, quando associado a projeto;
+- projeto não deve nascer de classificações como curso, canal, campanha ou música;
+- projeto existe para declarar intenção editorial e comercial sobre o que deve ser produzido a partir do conteúdo;
+- o produto deve evoluir como máquina de atenção para promoção de produtos, ofertas e eventos.
 
 ## Esteira editorial
 
@@ -109,13 +146,13 @@ O que varia é apenas:
 
 Leitura de produto sugerida:
 
-1. `preparation`
+1. `source_preparation`
 2. `creation`
 3. `publication`
 
 Leitura correta:
 
-- `preparation` é a fase compartilhada do conteúdo, antes de existir script final por entregável;
+- `source_preparation` é a fase compartilhada do conteúdo, antes de existir script final por entregável;
 - `creation` é a fase em que cada entregável já pode ser produzido e revisado;
 - `publication` é a fase operacional de distribuição.
 
@@ -123,7 +160,7 @@ Os estados detalhados vivem dentro dessas fases.
 
 Exemplos de estados:
 
-- `preparation`
+- `source_preparation`
   - `source_ingested`
   - `downloading_video`
   - `extracting_audio`
@@ -152,7 +189,7 @@ Exemplos de estados:
 
 Definição de cada etapa:
 
-- `preparation`: fase em que diferentes entradas convergem para texto útil e, depois, para script;
+- `source_preparation`: fase em que diferentes entradas convergem para texto bruto utilizável e, depois, para script;
 - `creation`: fase em que cada output já sabe o que precisa fazer com esse script e passa por ciclos de geração, revisão humana, ajustes e aprovação para seguir;
 - `publication`: fase em que o material pronto é distribuído, agendado ou publicado.
 
@@ -160,7 +197,7 @@ Princípio obrigatório:
 
 - o produto não deve tratar link de vídeo, áudio, PDF e texto como produtos diferentes;
 - o produto deve tratar esses inputs como estados diferentes de uma mesma esteira de transformação editorial.
-- a preparação inicial pertence ao conteúdo e é compartilhada por todos os entregáveis daquele conteúdo;
+- a preparação inicial da fonte/conteúdo bruto pertence ao conteúdo e é compartilhada por todos os entregáveis daquele conteúdo;
 - a criação de cada output só começa depois que o conteúdo já chegou ao ponto necessário para gerar script ou usar um script já fornecido.
 
 ### Convergência em script
@@ -176,6 +213,7 @@ Regra de produto:
 
 - todo conteúdo que vai gerar output precisa chegar a `script_ready`;
 - se o usuário já trouxe o script pronto, isso só significa que etapas anteriores já vieram resolvidas;
+- se o usuário começar com script pronto, esse conteúdo não deve aceitar outras fontes brutas adicionais na mesma entrada;
 - o momento de ser tratado como script sempre existe.
 - `script_ready` não deve ser um estado alterado manualmente por botão;
 - esse estado deve ser derivado do que efetivamente já foi resolvido no fluxo.
@@ -234,11 +272,11 @@ Se o projeto tiver 3 canais e 2 formatos ativos, o sistema precisa trabalhar com
 
 Regra:
 
-- o texto bruto compartilhado pertence à fase `Preparation`;
-- a geração do conteúdo final por saída é o último passo da fase `Preparation`;
+- o texto bruto compartilhado pertence à fase `Source Preparation`;
+- a geração do conteúdo final por saída é o último passo da fase `Source Preparation`;
 - cada combinação `canal + formato` deve ter seu próprio prompt;
 - esses prompts podem nascer pré-cadastrados pela ferramenta, para reduzir carga operacional do usuário.
-- nesta fase do produto, a entrada em `Preparation` também pode ser manual; o usuário inicia o fluxo do conteúdo associado ao projeto e a esteira segue a partir dali.
+- nesta fase do produto, a entrada em `Source Preparation` também pode ser manual; o usuário inicia o fluxo do conteúdo associado ao projeto e a esteira segue a partir dali.
 
 ## Escopo da V1
 
@@ -292,6 +330,7 @@ Regra:
 - o usuário precisa enxergar que o sistema está levando aquele input até o estado em que ele possa virar script.
 - se o usuário escolher `final content mode`, a experiência precisa deixar claro quais saídas ainda estão sem conteúdo final correspondente.
 - se o usuário escolher `source mode`, a experiência precisa deixar claro que o texto bruto será transformado por prompts específicos de cada saída configurada.
+- se o usuário escolher começar com script pronto, a experiência precisa bloquear a adição de novas fontes brutas para aquele conteúdo.
 
 Regra de UX:
 
@@ -341,7 +380,7 @@ Princípio de interação:
 
 ## Ingestão de fontes
 
-O conteúdo precisa ter uma área própria de ingestão e preparação de fontes, separada do projeto.
+O conteúdo precisa ter uma área própria de ingestão e preparação de fontes brutas, separada do projeto.
 
 Essa área deve permitir trabalhar com uma ou muitas fontes para o mesmo conteúdo, por exemplo:
 
@@ -356,6 +395,7 @@ Princípios:
 
 - a UI não deve prender o fluxo a um único `source type`;
 - o conteúdo pode nascer de uma ou várias fontes;
+- isso só vale enquanto ele estiver em fluxo de fontes; se o conteúdo nascer como script pronto, ele não deve aceitar fontes adicionais;
 - a preparação acontece nos bastidores, sem exigir um Kanban próprio nessa etapa;
 - o sistema identifica a origem e escolhe a pipeline correta automaticamente.
 - ao confirmar uma fonte, o processamento dela deve começar imediatamente;
@@ -393,7 +433,7 @@ Ou seja:
 - o projeto define os conjuntos `canal + formato`;
 - cada conjunto usa seu próprio prompt;
 - o resultado é um `final content` por entregável.
-- se o conteúdo já estiver associado a um projeto antes do fim da preparação, o projeto deve exibir esse conteúdo na fase `Preparation`;
+- se o conteúdo já estiver associado a um projeto antes do fim da preparação, o projeto deve exibir esse conteúdo na fase `Source Preparation`;
 - quando todas as fontes virarem texto bruto, o conteúdo passa a estar apto para iniciar `Creation`.
 
 ### Feed
@@ -422,31 +462,31 @@ Visão de produção.
 
 Colunas iniciais:
 
-- Preparation
+- Source Preparation
 - Creation
 - Publication
 
 Leitura correta:
 
-- `Preparation` cobre ingestão, extração, transcrição, análise e desenvolvimento até `script_ready`;
+- `Source Preparation` cobre ingestão, extração, transcrição, análise e desenvolvimento até `script_ready`;
 - `Creation` cobre adaptação por output, estruturação, geração de assets e render;
-- `Review` cobre aprovação humana e ajustes;
 - `Publication` cobre agendamento, publicação e reconciliação operacional.
 
 Regra:
 
 - fases do Kanban não são iguais aos estados internos;
 - cada card precisa mostrar em qual fase está e qual estado detalhado está executando naquele momento.
+- revisão humana acontece dentro de `Creation`, não como fase macro separada;
 - se o conteúdo estiver em `provided script mode`, o Kanban também precisa deixar claro quais entregáveis já têm script final e quais ainda não têm.
 
 Exemplo:
 
-- fase: `Preparation`
+- fase: `Source Preparation`
 - estado: `downloading_video`
 
 Outro exemplo:
 
-- fase: `Preparation`
+- fase: `Source Preparation`
 - estado: `transcribing`
 
 Outro exemplo:

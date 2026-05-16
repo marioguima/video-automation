@@ -1,5 +1,15 @@
 # FlowShopy Technical Architecture
 
+## Propósito deste documento
+
+Este documento responde:
+
+- como o produto está organizado tecnicamente;
+- qual é a arquitetura atual;
+- qual é a arquitetura-alvo para sustentar o domínio definido em `docs/01` e `docs/02`.
+
+Ele não redefine posicionamento de produto. Quando houver dúvida sobre "por que" ou "o que", a referência canônica está em `docs/01-product-vision.md` e `docs/02-product-specification.md`.
+
 ## Stack atual
 
 Monorepo:
@@ -87,6 +97,12 @@ Regra rigida de produto:
 - se ainda existirem em schema, API ou implementação, isso é apenas estado transitivo de migração;
 - o fluxo novo não pode expor esses nomes em UX, onboarding, documentação de produto ou contratos novos.
 
+Regra de migração operacional:
+
+- qualquer permanência de `Course`, `Module`, `Lesson` em código, banco ou endpoint deve ser tratada como dívida técnica de migração;
+- o fluxo novo não deve depender conceitualmente dessas entidades para explicar o produto;
+- enquanto o backing herdado existir, ele deve ser tratado como compatibilidade interna e não como modelo oficial.
+
 Nota de produto:
 
 - `Project` e agrupador editorial/comercial, não destino de publicação;
@@ -101,9 +117,15 @@ Princípio de migração:
 - o backing herdado só deve sobreviver enquanto for necessário para manter entrega e reduzir risco de transição;
 - quando um fluxo novo estabilizar, o equivalente herdado deve ser removido.
 
+Premissa de runtime e operação:
+
+- o produto será lançado como app instalado local-first;
+- autenticação e autorização por workspace/equipe fazem parte da arquitetura-alvo;
+- a área atual de convites é base inicial, não substitui RBAC completo com `owner/admin/member`.
+
 ## Arquitetura alvo de produto
 
-O FlowShopy deve ser tratado como uma fábrica de conteúdo promocional orientada por conteúdo, projeto, output e composição.
+Este documento assume o posicionamento de produto já definido em `docs/01-product-vision.md`.
 
 Fluxo alvo:
 
@@ -153,6 +175,12 @@ Princípio central:
 - vários formatos de entrada precisam convergir para texto analisável e depois para script aprovado.
 - a preparação inicial do conteúdo é compartilhada por todos os outputs derivados;
 - a criação por output só deve começar quando o conteúdo já estiver pronto para isso.
+
+Requisito de arquitetura agora explícito:
+
+- `Source Preparation` precisa existir como parte real do domínio e da implementação;
+- ela não pode ficar reduzida a campos soltos em `metadataJson` e decisões visuais de UI;
+- a fase precisa ter fonte registrada, estado agregado, artefatos, fila, erros e critério de convergência até texto bruto e depois script.
 
 Regra de UX derivada:
 
@@ -224,14 +252,14 @@ Regra adicional:
   - composição quando o output for audiovisual.
 - em `final content mode`, a etapa de adaptação pode ser reduzida, mas a verificação de cobertura por output continua obrigatória.
 - em `source mode`, a adaptação precisa ser guiada por prompts específicos de cada combinação `canal + formato`.
-- a aplicação desses prompts por saída fecha a fase `Preparation` e só depois libera `Creation`.
+- a aplicação desses prompts por saída fecha a fase `Source Preparation` e só depois libera `Creation`.
 
 ### Entidades alvo
 
 Entidades principais do domínio novo:
 
 - `Workspace`: escopo de isolamento;
-- `WorkspaceMembership`: autorização por equipe;
+- `WorkspaceUser`: autorização por equipe;
 - `ContentItem`: conteúdo-base;
 - `ContentSource`: origem do conteúdo;
 - `ContentScript`: script-base ou script por output;
@@ -250,11 +278,45 @@ Entidades principais do domínio novo:
 - `TemplateSelectionStrategy`: estratégia de rotação, fila, aleatoriedade ou escolha contextual;
 - `Asset`: entrada, intermediario ou saída de render.
 
+Leitura importante:
+
+- esta lista descreve o domínio-alvo, não os nomes físicos atuais do schema;
+- por isso aparecem `Project` e `ProjectContent`, e não `ContentProject` e `ContentProjectItem`;
+- hoje o banco ainda está em transição entre nome físico atual e contrato-alvo.
+
+Mapa de nomes para evitar ambiguidade:
+
+| Conceito de produto | Nome físico atual | Nome alvo desejado |
+| --- | --- | --- |
+| Projeto | `ContentProject` | `Project` |
+| Conteúdo | `ContentItem` | `Content` |
+| Vínculo projeto-conteúdo | `ContentProjectItem` | `ProjectContent` |
+| Definição de saída do projeto | `ProjectOutputDefinition` | `ProjectOutputDefinition` |
+| Saída concreta | `ProjectContentOutput` | `ProjectContentOutput` |
+| Unidade narrativa | `NarrativeUnit` | `NarrativeUnit` |
+| Composição | `Composition` | `Composition` |
+
+Leitura registrada:
+
+- `ProjectContentOutput` foi mantido como nome porque a entidade representa a saída concreta de um conteúdo associado a um projeto;
+- cada registro corresponde, em regra, a uma combinação específica de canal + formato + destino dentro daquela relação.
+
+Direção aprovada:
+
+- `Workspace` permanece `Workspace`;
+- `WorkspaceMembership` deve evoluir para `WorkspaceUser`;
+- `ContentProject` deve evoluir para `Project`;
+- `ContentItem` deve evoluir para `Content`;
+- `ContentProjectItem` deve evoluir para `ProjectContent`.
+
 Papéis mínimos de equipe esperados:
 
-- `owner`: controla workspace, billing e membros;
-- `admin`: administra conteúdos, projetos, settings operacionais e equipe conforme permissão;
-- `member`: produz conteúdo e opera entregáveis conforme escopo autorizado.
+- para a fase atual, o produto precisa operar com dois níveis simples:
+  - admin/owner da workspace;
+  - demais usuários da workspace;
+- papéis futuros mais especializados, como gerentes com poder de convite ou aprovação, ficam como hipótese de produto ainda não validada.
+- o papel pertence à relação `WorkspaceUser`, não à entidade `User`;
+- no estado atual do código, `User.role` ainda existe e precisa ser tratado como resíduo transitório do modelo antigo.
 
 ### Composição em vez de slide
 
@@ -378,6 +440,10 @@ Implicacao:
 
 ## Banco de dados
 
+Documento canônico complementar para revisão detalhada do schema:
+
+- `docs/14-data-model-review.md`
+
 Banco padrão:
 
 ```text
@@ -426,6 +492,186 @@ Leitura correta:
 
 - a presenca de `Course/Module/Lesson` no schema atual não autoriza continuar modelando o produto por essas entidades;
 - as proximas tabelas novas devem nascer no domínio `Project/Content/Output/Composition/Team`.
+
+### Visão relacional atual
+
+```text
+User
+  -> WorkspaceMembership -> Workspace
+Workspace
+  -> Agent
+  -> Invitation
+  -> ContentProject
+  -> ContentItem
+  -> ContentProjectItem
+  -> PromotionTarget
+  -> ShortLink
+  -> ProjectOutputDefinition
+  -> ProjectContentOutput
+  -> NarrativeUnit
+  -> Composition
+  -> Course
+  -> Module
+  -> Lesson
+  -> LessonVersion
+  -> Block
+  -> Asset
+  -> Job
+  -> Notification
+
+ContentProject
+  -> ContentProjectItem -> ContentItem
+  -> ProjectOutputDefinition
+  -> ProjectContentOutput
+  -> PromotionTarget -> ShortLink
+
+ProjectOutputDefinition
+  -> ProjectContentOutput
+
+ProjectContentOutput
+  -> NarrativeUnit
+  -> Composition
+
+ContentItem
+  -> metadata.backing -> Course -> Module -> Lesson -> LessonVersion -> Block -> Asset/Job
+```
+
+Leitura objetiva:
+
+- o isolamento principal e por `Workspace`;
+- o domínio novo já existe no banco e na API;
+- o motor real de produção de vídeo ainda depende do backing legado `Course -> Module -> Lesson -> LessonVersion -> Block`;
+- hoje o conteúdo já pode existir sem projeto no banco, mas a API/UI ainda expõem associação por `projectIds` como conveniência de contrato;
+- `ProjectContentOutput`, `NarrativeUnit` e `Composition` já existem como núcleo novo do Studio, porém a geração final ainda passa pelo legado.
+- a nomenclatura física atual do domínio novo ainda está em transição e precisa ser simplificada.
+
+### Tabelas e propósito
+
+#### Núcleo de autenticação e tenancy
+
+- `User`: credencial local e identidade básica do usuário.
+- `Workspace`: contêiner principal de isolamento de dados.
+- `WorkspaceMembership`: vínculo usuário-workspace com papel; no alvo deve evoluir para `WorkspaceUser`.
+- `Invitation`: convites para entrada em workspace. O `inviteeName` é um nome inicial sugerido para bootstrap do perfil e pode ser alterado depois nas configurações do usuário.
+- `Agent`: ponte operacional entre servidor/API e runtime conectado; hoje ainda sustenta canal persistente de comandos/health, mas sua permanência está em revisão na arquitetura local-first.
+
+Status:
+
+- essas tabelas estão ativas no código e sustentam auth, convite e isolamento por workspace;
+- autorização fina por ação ainda não está completa;
+- o estado atual do código ainda aceita mais de um papel com poder de convite e ainda mantém `User.role`, o que diverge da direção alvo de concentrar autorização na relação `WorkspaceUser`.
+
+#### Núcleo novo de produto FlowShopy
+
+- `ContentProject`: projeto editorial/comercial exposto hoje na UI como `Project`; nome técnico atual, mas ruim como destino final do schema.
+- `ContentItem`: conteúdo base reutilizável.
+- `ContentProjectItem`: tabela de associação N:N entre projeto e conteúdo; nome técnico atual, mas ruim como destino final do schema.
+- `ProjectOutputDefinition`: definição das saídas esperadas de um projeto.
+- `ProjectContentOutput`: instância concreta de saída para a combinação projeto + conteúdo + definição de output.
+- `NarrativeUnit`: unidade narrativa/semântica inicial do output.
+- `Composition`: timeline composicional inicial do output.
+- `PromotionTarget`: oferta/produto/destino promovido por um projeto.
+- `ShortLink`: link curto vinculado a `PromotionTarget`.
+
+Status:
+
+- `ContentProject`, `ContentItem` e `ContentProjectItem` estão ativos em banco, API e UI;
+- `ProjectOutputDefinition` e `ProjectContentOutput` estão ativos em banco, API e parcialmente na UI;
+- `NarrativeUnit` e `Composition` estão ativos no fluxo do Studio para narrativa/preview inicial;
+- `PromotionTarget` e `ShortLink` já têm tabela e endpoints, mas ainda não são parte do happy path principal do beta.
+
+#### Motor legado ainda usado pela produção
+
+- `Course`: backing transitório criado para sustentar o pipeline herdado.
+- `Module`: agrupador legado dentro do backing.
+- `Lesson`: unidade herdada usada como ponte para o editor/render.
+- `LessonVersion`: versão roteirizada herdada usada pelo segmentador e pela geração de blocos.
+- `Block`: unidade operacional real hoje usada pelo editor legado e pelo worker.
+- `Asset`: arquivos derivados por bloco (`audio_raw`, `image_raw`, `slide_png`, `clip_mp4`, `final_mp4`, etc.).
+- `Job`: fila real de processamento usada pelo worker.
+- `Notification`: avisos de jobs/eventos na experiência atual.
+- `SlideTemplate`: catálogo legado de templates de slide.
+
+Status:
+
+- essas tabelas continuam ativas de verdade no backend, worker e editor;
+- a produção ponta a ponta ainda depende delas;
+- elas devem ser tratadas como infraestrutura transitória, não como contrato oficial de produto.
+
+### Estado real de uso por tabela
+
+| Tabela | Papel atual | Uso real no código | Leitura correta |
+| --- | --- | --- | --- |
+| `Workspace` | isolamento | ativo | canônico |
+| `WorkspaceMembership` | membros/papel | ativo | canônico, ainda simples |
+| `Invitation` | convites | ativo | canônico |
+| `Agent` | conexão com worker local | ativo | canônico |
+| `ContentProject` | projeto | ativo | canônico, nome técnico ainda legado |
+| `ContentItem` | conteúdo | ativo | canônico, mas schema/API ainda carregam resíduos |
+| `ContentProjectItem` | vínculo projeto-conteúdo | ativo | canônico |
+| `ProjectOutputDefinition` | outputs esperados | ativo | canônico, ainda derivado de `metadata.defaultOutputs` |
+| `ProjectContentOutput` | output concreto | ativo | canônico, mas produção final ainda não nasce totalmente daqui |
+| `NarrativeUnit` | estrutura semântica do output | ativo | canônico |
+| `Composition` | preview/timeline inicial | ativo | canônico |
+| `PromotionTarget` | promoção | parcial | fora do happy path principal |
+| `ShortLink` | redirecionamento | parcial | fora do happy path principal |
+| `Course` | backing técnico | ativo | legado transitório |
+| `Module` | backing técnico | ativo | legado transitório |
+| `Lesson` | backing técnico | ativo | legado transitório |
+| `LessonVersion` | backing técnico | ativo | legado transitório |
+| `Block` | produção real atual | ativo | legado operacional crítico |
+| `Asset` | arquivos de mídia | ativo | legado operacional crítico |
+| `Job` | fila de processamento | ativo | legado operacional crítico |
+| `Notification` | eventos/alertas | ativo | suporte operacional |
+| `SlideTemplate` | template legado | ativo | suporte operacional legado |
+
+### Divergências importantes entre contrato e implementação
+
+- a nomenclatura física `ContentProject` / `ContentProjectItem` ainda não reflete bem o contrato final do produto;
+- a nomenclatura `WorkspaceMembership` também pode ficar mais clara como `WorkspaceUser`;
+- o papel de convite/admin ainda precisa ser simplificado no código para refletir o contrato atual de produto: convite como ação do admin/owner da workspace;
+- o schema de `ContentItem` ainda carrega `kind` e `orientation`, embora a direção de produto trate conteúdo como mídia-agnóstico;
+- a API serializa `ContentItem` com `projectIds`, `projectName` e `projectNames` como conveniência de resposta;
+- a API também aceita `projectIds` em `POST/PATCH /content-items`, o que mantém parte da associação ainda ancorada no contrato do conteúdo;
+- `User.role` ainda existe no schema e no bootstrap, embora o papel correto pertença à relação `WorkspaceUser`;
+- `ensureContentItemBacking()` ainda cria `Course`, `Module`, `Lesson` e `LessonVersion` automaticamente para sustentar segmentação/editor;
+- `GET /content-items/:itemId/blocks` e `POST /content-items/:itemId/segment` continuam sendo pontes diretas para o modelo legado;
+- o editor principal ainda conversa com `/lesson-versions/:versionId/blocks` e `/blocks/:blockId/...`;
+- `ProjectOutputDefinition` ainda nasce a partir de `ContentProject.metadata.defaultOutputs`, não de uma modelagem dedicada de configuração em primeiro nível;
+- `ProjectContentOutput` já existe e é usado para narrativa/composition, mas o render final ainda não é dirigido integralmente por ele.
+- `ContentProject.language` ainda precisa ser tratado consistentemente como idioma-alvo final dos outputs, e não apenas como preferência vaga do projeto.
+- `ContentProject.metadataJson` ainda precisa ser decomposto com base no uso real persistido hoje.
+
+### Direção de remodelagem do schema
+
+Princípios:
+
+- nomes físicos devem convergir para o domínio do produto, não para a história da migração;
+- entidades filhas devem apontar para seu pai de domínio direto;
+- `workspaceId` não deve ser repetido em massa quando a relação já é derivável pelo pai;
+- `userId` deve ser preferido para auditoria/autoria quando essa informação for relevante;
+- controle de acesso/licença/organização deve ser separado conceitualmente da árvore local de execução.
+
+Direção de nomenclatura:
+
+- `WorkspaceMembership` -> `WorkspaceUser`
+- `ContentItem` -> `Content`
+- `ContentProject` -> `Project`
+- `ContentProjectItem` -> `ProjectContent`
+
+Direção relacional:
+
+- `ProjectOutputDefinition` deve depender primariamente de `Project`;
+- `ProjectContentOutput` deve depender primariamente de `ProjectContent` e `ProjectOutputDefinition`;
+- `NarrativeUnit` e `Composition` devem depender primariamente de `ProjectContentOutput`;
+- `Block`, `Asset` e `Job` devem, após a saída do legado, depender do novo pai operacional do output, e não de estruturas herdadas.
+
+Direção de escopo dos dados:
+
+- tabelas locais de execução: projeto, conteúdo, vínculo, outputs, narrativa, composição, blocks/cenas futuras, assets, jobs e estado operacional;
+- tabelas de control plane online: usuário, acesso, licença, planos, governança e catálogos compartilhados;
+- a sincronização entre essas camadas deve ser explícita, não implícita via propagação de `workspaceId` em toda a árvore local.
+- na V0 desktop, o foco continua sendo a base local funcionar primeiro com sessão de usuário e workspace ativa visíveis na UI; a camada de sync vem depois.
 
 ## API
 

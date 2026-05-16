@@ -1,32 +1,26 @@
 # FlowShopy Roadmap, Status and Handoff
 
-Última atualização: 2026-05-09
+Última atualização: 2026-05-14
+
+## Propósito deste documento
+
+Este documento responde:
+
+- o que está implementado de verdade;
+- o que ainda é transição, dívida ou lacuna;
+- qual é a ordem recomendada para os próximos ciclos.
+
+Ele não substitui a visão de produto nem a especificação. Para isso, usar `docs/01-product-vision.md` e `docs/02-product-specification.md`.
 
 ## Estado real atual
 
-Nota importante de produto:
+Premissas canônicas usadas nesta leitura:
 
-- a conversa de 2026-04-30 revisou o conceito de projeto;
-- este repositório é o produto FlowShopy que será lançado como app instalado local-first; `Vizlec` existe como projeto separado e como origem de aprendizado técnico, não como domínio que deve continuar vazando para este produto;
-- o fluxo novo não pode usar, ensinar, expor ou depender conceitualmente de `Course`, `Module`, `Lesson` ou qualquer linguagem de "curso/aula/módulo";
-- se esses nomes ainda existirem em codigo, banco ou endpoint, isso deve ser tratado como divida técnica de migração e não como modelo válido do produto;
-- existem dois elementos centrais: conteúdos e projetos;
-- conteúdo pode ser iniciado rapidamente e reutilizado, mas só ganha fluxo/impacto quando associado a projeto;
-- projeto não deve começar por tipo/contexto como canal, campanha, música ou curso; ele é um agrupador editorial/comercial que informa ao core o que deve ser feito com o conteúdo;
-- projeto deve declarar expectativa de saída: vídeo, imagem, texto, áudio, e-book, infográfico, carousel e outros entregáveis futuros;
-- FlowShopy deve evoluir como máquina de atenção para promoção de produtos/ofertas/eventos, usando short links redirecionáveis;
-- o produto e instalado na máquina do usuário final; ele deve exigir autenticação e depois aplicar autorização por workspace/equipe;
-- a arquitetura deve assumir owner/admin gerenciando membros do time, papéis e permissões; a área de convites existe hoje, mas ainda está superficial e não pode ser confundida com RBAC completo;
-- a tela `Content` deve ser voltada para ingestão e preparação de fontes até texto bruto; canais e formatos pertencem ao projeto.
-- a tela `Content` não deve pedir tipo de mídia na criação; o conteúdo e genérico e entregáveis são definidos no projeto e materializados como outputs.
-- a tela `Content` não deve gerar cenas, abrir editor de vídeo ou iniciar render; segmentação/render pertencem ao projeto/output.
-- a tela `Content` deve evoluir para uma área própria de ingestão e preparação de múltiplas fontes;
-- ingestão de links, PDFs, áudios e vídeos locais não deve acontecer no detalhe do projeto;
-- a preparação de fontes deve ocorrer nos bastidores até convergir para texto bruto.
-- ao confirmar cada fonte, o sistema já deve iniciar sua preparação em fila sequencial;
-- a tela `Project` não deve virar um segundo lugar para criar conteúdo; ela deve localizar, associar e orquestrar conteúdos existentes.
-- um mesmo conteúdo pode estar associado a um ou muitos projetos; o vínculo precisa ser reutilizável e visível.
-- CTAs e linguagem de interação devem poder variar por canal; blocos comuns devem ser reaproveitados quando possível.
+- o domínio válido do produto é `Content -> Project -> Output -> Promotion`, não `Course -> Module -> Lesson`;
+- o posicionamento do produto está em `docs/01-product-vision.md`;
+- as regras funcionais de `Content`, `Project`, ingestão, outputs e associação estão em `docs/02-product-specification.md`;
+- as implicações técnicas, a arquitetura-alvo e a leitura do legado estão em `docs/03-technical-architecture.md`;
+- este documento só detalha o que isso significa no estado real do código e na ordem dos próximos ciclos.
 
 Implementado:
 
@@ -44,15 +38,18 @@ Implementado:
 - teste integrado COPE.
 - tela Projects com grade visual de projetos, cadastro separado e detalhe com Contents, Feed e Kanban; `Agenda` chegou a existir como MVP de metadata, mas foi retirada da tela atual para voltar no momento certo;
 - projeto não possui `kind`; canal, perfil, curso, música e campanha foram removidos do contrato de projeto e ficam como contexto, destinations ou entregáveis;
-- área `Content` criada na sidebar com listagem de conteúdos e tela separada de cadastro; cadastro prioriza produção de conteúdo/roteiro com prompt IA opcional, permite associar apenas a projeto existente e não exibe tipo de mídia antes do conteúdo;
+- área `Content` criada na sidebar com listagem de conteúdos e tela separada de cadastro; cadastro prioriza produção de conteúdo/roteiro e preparação de fontes, permite associar apenas a projeto existente e não exibe tipo de mídia antes do conteúdo;
 - área `Content` não deve exibir `Generate Scenes`, `Open Editor` ou qualquer ação de renderizacao;
 - detalhe de `Projects` não deve criar conteúdo; ele lista conteúdos associados, permite vincular conteúdos existentes e acompanhar os outputs gerados para cada combinação projeto + conteúdo;
 - área `Content` deve listar todos os conteúdos já criados, com filtros por nome/data/projeto/destination, modos grade/lista e acesso ao formulário de edição;
 - área `Content` deve ter foco visual no conteúdo; projeto aparece apenas como uso/associação secundária;
 - preparação inicial de fontes YouTube já está conectada ao worker local em fila sequencial: download do vídeo, extração de áudio e transcrição até texto bruto;
+- validação manual executada em `2026-05-14` confirmou a trilha técnica de YouTube usando os binários vendorizados do projeto;
+- o caminho `yt-dlp -> ffmpeg -> faster-whisper` convergiu com sucesso até texto transcrito em vídeo com fala;
+- vídeo musical retornou transcrição vazia, o que confirma que o caminho técnico existe, mas também mostra a necessidade de regras explícitas para fontes sem fala útil;
 - a solução imediata aceita para o beta usa dependências críticas embarcadas ou standalone, não dependências pré-instaladas no sistema do usuário;
 - V1 bloqueia edição de conteúdo apenas quando algum projeto já iniciou criação/geração de entregável com base nele; simples associação a projeto não bloqueia edição; versionamento de conteúdo usado fica para fase futura;
-- metadados operacionais por ContentItem: destinos, aspect ratios, stage, owner e data planejada;
+- metadados operacionais ainda existem parcialmente por `ContentItem`, mas isso não representa o contrato-alvo; destinos, aspect ratios, stage operacional e regras de entrega devem migrar para a visão `Project -> Content` e para entidades de output;
 - endpoint `PATCH /content-items/:itemId` para atualizar status/metadados preservando backing técnico;
 - inventário de endpoints atualizado em `docs/10-api-endpoint-inventory.md`.
 - `animationPromptJson` persistido em `Block`;
@@ -95,6 +92,9 @@ Implementado:
 
 Não implementado ainda:
 
+- `Source Preparation` como produto real com contrato explícito de fonte, artefatos, estados agregados, erros e convergência;
+- derivação de `script_ready` a partir de domínio real, e não apenas de convenções de UI/metadata;
+- cobertura real de `final content mode` por output obrigatório;
 - remocao efetiva de referências de fluxo novo a `Course`, `Module`, `Lesson` em UI, API e contratos de domínio;
 - modelo explícito de equipe com `owner/admin/member`, convites, papéis e autorização por ação;
 - revisão da área Team para sair de "convite básico" e virar gestão real de time;
@@ -119,6 +119,11 @@ Não implementado ainda:
 - revisão do uso de `Playwright` para geração de slides após estabilizar `Remotion`, para avaliar substituição e redução de dependências;
 - versionamento de ContentItem usado em entregáveis;
 - ContentSource;
+- revisão da nomenclatura física do domínio novo (`ContentProject`, `ContentProjectItem`) para nomes alinhados ao produto;
+- revisão estrutural do uso de `workspaceId` nas tabelas locais, reduzindo redundância e aproximando cada entidade do seu pai de domínio direto;
+- separação explícita entre tabelas locais de execução e tabelas online de control plane;
+- remoção do contrato de associação por `projectIds` do payload/response de `ContentItem`;
+- remoção de `kind`/`orientation` como resíduos de contrato em `ContentItem`, ou sua reinterpretação explícita enquanto ainda existirem;
 - empacotamento oficial de `ffmpeg` e `ffprobe` no desktop runtime;
 - empacotamento oficial de runtime Python e bibliotecas Python no desktop runtime;
 - estratégia final de distribuição de `yt-dlp` e `faster-whisper`;
@@ -138,12 +143,14 @@ Não implementado ainda:
 Prioridade de arquitetura a partir desta decisao:
 
 1. parar de adicionar qualquer capacidade nova em torno do domínio herdado `Course/Module/Lesson`;
-2. consolidar o núcleo `Workspace`, `Membership`, `ContentItem`, `Project`, `ProjectContent`, `ProjectOutputDefinition` e `ProjectContentOutput`;
-3. fazer `Project` ser explicitamente o contrato de intenção do usuário sobre o que o core deve produzir a partir do conteúdo;
-4. introduzir `NarrativeUnit` e `Composition` como fonte de verdade para composição;
-5. usar `Remotion` para preview/timeline;
-6. migrar renderer final para `Composition` quando o preview estiver estável;
-7. remover nomenclatura, endpoints e estruturas herdadas conforme cada parte do fluxo novo estabilizar.
+2. fechar `Source Preparation` como parte real do produto e da implementação;
+3. consolidar o núcleo `Workspace`, `Membership`, `ContentItem`, `Project`, `ProjectContent`, `ProjectOutputDefinition` e `ProjectContentOutput`;
+4. fazer `Project` ser explicitamente o contrato de intenção do usuário sobre o que o core deve produzir a partir do conteúdo;
+5. resolver `final_content` e `script_ready` no domínio real, com cobertura por output quando aplicável;
+6. introduzir `NarrativeUnit` e `Composition` como fonte de verdade para composição;
+7. usar `Remotion` para preview/timeline;
+8. migrar renderer final para `Composition` quando o preview estiver estável;
+9. remover nomenclatura, endpoints e estruturas herdadas conforme cada parte do fluxo novo estabilizar.
 
 ## Decisão operacional de empacotamento para o beta
 
@@ -341,10 +348,14 @@ Itens:
 
 - autenticar usuário no app instalado;
 - resolver workspace ativo;
-- separar papéis `owner`, `admin`, `member` e futuros papéis especializados;
+- para a fase imediata, operar com dois níveis efetivos:
+  - admin/owner da workspace;
+  - demais usuários da workspace;
+- manter papéis mais sofisticados, como gerentes que convidam ou apenas aprovam, somente no roadmap de produto;
 - revisar convites, aceite, revogacao e expiração;
 - aplicar autorização por ação em projeto, conteúdo, settings e billing;
 - preparar limites de equipe por plano sem travar a arquitetura antes da hora.
+- mover semanticamente o papel do usuário para a relação `WorkspaceUser`, removendo dependência futura de `User.role`.
 
 ### Fase 7 - Integrações de contas e canais
 
@@ -393,22 +404,23 @@ Antes de continuar implementação pesada de render/publicação, precisamos fec
 
 Prioridade:
 
-1. revisar e fechar o contrato conceitual de `ContentItem`, `Project`, `ProjectContent`, `ProjectOutputDefinition` e `ProjectContentOutput`;
-2. remover do fluxo novo qualquer referência visível a `course`, `module`, `lesson` na UX e nos contratos que alimentam a UX;
-3. modelar `Project` como contrato de intenção: que tipo de entregável o usuário quer gerar, com que canais, formatos, CTA e pipeline;
-4. fechar o contrato de equipe/autorização com `owner/admin/member` e revisar a área atual de convites;
-5. validar manualmente `Projects -> conteudo associado -> Generate Scenes -> editor` e confirmar log `segment_structure_llm_completed`;
-6. bloquear/avisar quando projeto/output exige TTS e a língua não possui rota TTS configurada;
-7. fazer worker consumir `metadata.pipeline.image.model` na geração de imagem;
-8. tratar limite separado para fala nativa de provider de vídeo, como durações aceitas pelo modelo;
-9. adicionar `render.textLayer`/templates ao projeto e separar `on_screen` da etapa de metadados atual;
-10. modelar saídas não-vídeo no contrato de output mesmo que a execução inicial continue priorizando vídeo;
-11. adicionar biblioteca global de músicas de fundo e selecao de faixas por projeto;
-12. modelar sound effects como etapa opcional de mix/render;
-13. adicionar adaptador `veo_extension` para imagem/vídeo como objetivo central do pipeline;
-14. preparar a camada de integração de contas por workspace antes de recolocar `Agenda` como tela principal;
-15. testar `Content -> produzir roteiro -> associar projeto -> salvar`, sem gerar cenas;
-16. testar `Projects -> abrir projeto com conteudo associado -> gerar cenas -> editor`.
+1. fechar `Source Preparation` como produto real com contrato de fonte, fila, artefatos, estados e erros;
+2. revisar e fechar o contrato conceitual de `ContentItem`, `Project`, `ProjectContent`, `ProjectOutputDefinition` e `ProjectContentOutput`;
+3. resolver `final_content` e `script_ready` no domínio real, com cobertura por output quando aplicável;
+4. remover do fluxo novo qualquer referência visível a `course`, `module`, `lesson` na UX e nos contratos que alimentam a UX;
+5. eliminar a dependência operacional do fluxo novo em `ensureContentItemBacking()` e no backing `Course -> Module -> Lesson -> LessonVersion`;
+6. modelar `Project` como contrato de intenção: que tipo de entregável o usuário quer gerar, com que canais, formatos, CTA e pipeline;
+7. fechar o contrato de equipe/autorização com `owner/admin/member` e revisar a área atual de convites;
+8. validar manualmente `Content -> YouTube source -> raw_text_ready` e `Projects -> conteudo associado -> Studio`;
+9. bloquear/avisar quando projeto/output exige TTS e a língua não possui rota TTS configurada;
+10. fazer worker consumir `metadata.pipeline.image.model` na geração de imagem;
+11. tratar limite separado para fala nativa de provider de vídeo, como durações aceitas pelo modelo;
+12. adicionar `render.textLayer`/templates ao projeto e separar `on_screen` da etapa de metadados atual;
+13. modelar saídas não-vídeo no contrato de output mesmo que a execução inicial continue priorizando vídeo;
+14. adicionar biblioteca global de músicas de fundo e selecao de faixas por projeto;
+15. modelar sound effects como etapa opcional de mix/render;
+16. adicionar adaptador `veo_extension` para imagem/vídeo como objetivo central do pipeline;
+17. preparar a camada de integração de contas por workspace antes de recolocar `Agenda` como tela principal.
 
 ## Leitura real da implementação
 
@@ -429,12 +441,19 @@ O que ainda está enganando e precisa ser tratado como transição:
 - `apps/web/src/App.tsx` ainda e dominado por navegacao e estado do fluxo herdado de `Course/Module/Lesson`;
 - o schema ainda mantem `Course`, `Module`, `Lesson`, `LessonVersion`, `Block`, `Job` e `Notification` como centro técnico do pipeline real;
 - `POST /content-items/:itemId/segment` e `GET /content-items/:itemId/blocks` ainda dependem de `ensureContentItemBacking()` e criam backing em `Course -> Module -> Lesson -> LessonVersion`;
+- `Source Preparation` ainda vive mais em `metadataJson` e convenções de UI do que em um contrato fechado de domínio;
 - a UI de `ContentProjects` ainda oferece canal/output `course`, o que contradiz a direção do produto;
 - `ContentItem.kind` ainda nasce com default antigo e não representa bem a ideia de conteúdo genérico;
+- a API ainda expõe e aceita `projectIds` em `ContentItem`, o que contradiz o contrato-alvo onde conteúdo não conhece projeto;
+- a nomenclatura física `ContentProject` / `ContentProjectItem` ainda deixa o schema menos legível do que deveria;
+- o schema replica `workspaceId` em excesso, inclusive em relações em que o pai de domínio já seria suficiente;
 - a geração de `NarrativeUnit`/`Composition` existe, mas a segmentação e a geração de assets ainda estão acopladas ao pipeline legado;
 - a visão atual de `Selected Output` e o botão `Build Narrative` ainda simplificam demais uma etapa que na prática depende da fase do conteúdo e do tipo de entregável;
+- `final_content` e `script_ready` ainda estão mais fortes na UI do que no domínio real;
 - o preview técnico atual não representa o editor de vídeo real e não deve ser confundido com a experiência final de edição;
 - equipe existe hoje como convites e papéis básicos, não como autorização completa por ação;
+- o estado atual do código ainda usa `WorkspaceMembership` e mantém `User.role`, enquanto o alvo correto é concentrar o papel na relação `WorkspaceUser`;
+- o estado atual do código ainda permite mais de um papel com poder de convite; isso precisa ser simplificado para refletir o contrato atual de produto;
 - `Agenda` já existiu como metadata, mas não tem base operacional real e não deve voltar cedo.
 
 Leitura correta:
@@ -444,17 +463,18 @@ Leitura correta:
 - toda decisao agora deve reduzir dependência visível do modelo antigo e aumentar confiança no fluxo `Content -> Project -> Output -> Studio -> Render`.
 - para output de vídeo, o `Studio`/editor precisa entrar cedo no fluxo e não apenas no fim da pipeline.
 - formatos de entrada diferentes não significam pipelines diferentes; eles apenas entram em estágios diferentes da mesma esteira até chegar a `script_ready`.
-- a preparação do conteúdo vem antes da criação dos outputs e é compartilhada por eles;
+- a preparação da fonte/conteúdo bruto vem antes da criação dos outputs e é compartilhada por eles;
 - a visão principal do projeto deve priorizar fase, estado, fila e capacidade de disparo, não microdecisões manuais por output.
 - `source mode` e `final content mode` são decisão do usuário, não do formato;
 - em `final content mode`, o sistema precisa validar cobertura de conteúdo final por saída antes de entrar em `Creation`;
 - em `source mode`, o sistema precisa aplicar prompts próprios por combinação `canal + formato`.
-- a aplicação desses prompts por saída é o último passo da fase `Preparation`.
+- a aplicação desses prompts por saída é o último passo da fase `Source Preparation`.
 - `script_ready` não deve existir como toggle manual na UI;
 - esse estado precisa ser derivado do que já foi resolvido no conjunto `conteúdo + projeto + saídas`;
 - quando houver granularidade por saída, cada combinação `canal + formato` pode avançar para `Creation` sem esperar artificialmente todas as demais.
 - o fluxo correto da geração é `conteudo -> projeto -> canal -> formato -> prompt -> final content`.
-- se o conteúdo for associado ao projeto antes do fim da preparação, o projeto deve mostrar esse conteúdo em `Preparation` até todas as fontes convergirem para texto bruto.
+- se o conteúdo for associado ao projeto antes do fim da preparação, o projeto deve mostrar esse conteúdo em `Source Preparation` até todas as fontes convergirem para texto bruto.
+- se o conteúdo nascer com script pronto, ele não deve aceitar novas fontes brutas nesse mesmo fluxo.
 
 ## Definição de beta funcional
 
@@ -463,20 +483,21 @@ Beta funcional não e "ter tudo". Beta funcional é um caminho principal confiá
 O beta deve permitir:
 
 1. autenticar no app instalado;
-2. operar em um workspace;
+2. operar em um workspace e deixar a workspace ativa explícita na UI;
 3. criar projeto sem `kind`;
-4. criar conteúdo na biblioteca a partir de texto;
+4. criar conteúdo na biblioteca a partir de texto, link público de YouTube ou PDF;
 5. registrar claramente se o conteúdo ainda está em fonte bruta ou já está em script;
-6. associar conteúdo a um projeto;
-7. configurar pipeline, outputs e regras mínimas do projeto;
-8. disparar manualmente o fluxo do conteúdo associado ao projeto;
-9. colocar conteúdos e outputs em fila respeitando fase e limitação de hardware;
-10. materializar um `ProjectContentOutput` de vídeo quando o conteúdo já estiver pronto para criação;
-11. entrar no `Studio`/editor assim que esse output de vídeo existir;
-12. ajustar prompts, revisar blocos e acompanhar as fases do output dentro do editor;
-13. seguir para segmentação/geração de assets/vídeo sem expor `course/module/lesson` ao usuário;
-14. baixar o resultado final;
-15. convidar pelo menos um membro/admin para o workspace.
+6. bloquear mistura de `script pronto` com fontes brutas adicionais no mesmo conteúdo;
+7. associar conteúdo a um projeto;
+8. configurar pipeline, outputs e regras mínimas do projeto;
+9. disparar manualmente o fluxo do conteúdo associado ao projeto;
+10. colocar conteúdos e outputs em fila respeitando fase e limitação de hardware;
+11. materializar um `ProjectContentOutput` de vídeo quando o conteúdo já estiver pronto para criação;
+12. entrar no `Studio`/editor assim que esse output de vídeo existir;
+13. ajustar prompts, revisar blocos e acompanhar as fases do output dentro do editor;
+14. seguir para segmentação/geração de assets/vídeo sem expor `course/module/lesson` ao usuário;
+15. baixar o resultado final;
+16. convidar pelo menos um membro/admin para o workspace.
 
 Coisas que não precisam bloquear o beta:
 
@@ -533,7 +554,7 @@ Objetivo: fazer o caminho principal funcionar de ponta a ponta.
 Ações:
 
 - usar `ProjectContentOutput` como entidade central do `Studio`;
-- garantir: projeto -> conteúdo associado -> preparation -> script_ready -> start -> outputs em fila -> studio/editor -> adaptação -> estrutura -> composition -> produção;
+- garantir: projeto -> conteúdo associado -> source_preparation -> script_ready -> start -> outputs em fila -> studio/editor -> adaptação -> estrutura -> composition -> produção;
 - garantir que o editor fique acessível assim que existir um `ProjectContentOutput` de vídeo;
 - decidir se a segmentação beta continua usando o backing legado por baixo, mas sempre iniciada a partir de `ProjectContentOutput`;
 - parar de tratar `Build Narrative` como simples quebra de texto e redefinir essa etapa como adaptação/estruturação específica por output;
@@ -555,11 +576,15 @@ Objetivo: tornar o beta utilizável em cenario real de time.
 
 Ações:
 
-- consolidar `owner/admin/member`;
+- consolidar o contrato mínimo atual:
+  - admin/owner da workspace pode convidar;
+  - demais usuários não convidam nesta fase;
+- manter `owner/admin/member` como direção estrutural, mas sem expandir prematuramente papéis de gerente/aprovador;
 - garantir autorização mínima em projetos, conteúdos, convites e settings;
 - manter `Team` como tela principal de convites;
 - evitar duplicacao desnecessaria entre `Security` e `Team` para gerenciamento de convites;
-- revisar se `Security` deve ficar focada em senha/sessoes e `Team` em colaboração.
+- revisar se `Security` deve ficar focada em senha/sessoes e `Team` em colaboração;
+- deixar claro em perfil/sessão que o nome inicial vindo do convite pode ser alterado depois pelo usuário.
 
 Saída esperada:
 
@@ -585,14 +610,19 @@ Saída esperada:
 
 Se a meta e chegar ao beta funcional o mais breve possível, a ordem deve ser esta:
 
-1. limpar a UX nova de referências herdadas;
-2. fechar o contrato do núcleo `Source/Content/Script/Project/Output`;
-3. separar claramente `Preparation` de `Creation` no fluxo do produto;
-4. fazer `ProjectContentOutput` dirigir o `Studio`/editor e o disparo da produção;
-5. consolidar equipe/autorização mínima;
-6. fechar TTS/imagem/vídeo no pipeline do projeto;
-7. validar o fluxo beta ponta a ponta várias vezes;
-8. só depois voltar para contas conectadas, agenda e distribuição.
+1. revisar o banco de dados como frente primária e fechar o mapa `nome físico atual -> conceito de produto -> nome alvo`;
+2. fechar `Source Preparation` como produto real;
+3. limpar a UX nova de referências herdadas;
+4. fechar o contrato do núcleo `Source/Content/Script/Project/Output`;
+5. mover a associação e os metadados operacionais definitivamente para a camada `Project -> Content`, removendo `projectIds` do contrato principal de `ContentItem`;
+6. fazer `ProjectContentOutput` dirigir o `Studio`/editor e o disparo da produção;
+7. remover a dependência do fluxo novo em `ensureContentItemBacking()` e no backing legado;
+8. remover fisicamente `Course/Module/Lesson` e derivados quando o editor e o fluxo de produção já estiverem ancorados no modelo de projeto;
+9. revisar a nomenclatura física do schema e renomear tabelas do domínio novo para nomes alinhados ao produto;
+10. revisar o uso de `workspaceId` nas tabelas locais, separar com clareza a camada local de execução da camada online de control plane e deslocar a auditoria para `userId`/`WorkspaceUser` quando fizer mais sentido;
+11. fechar TTS/imagem/vídeo no pipeline do projeto;
+12. validar o fluxo beta ponta a ponta várias vezes, incluindo YouTube com fala;
+13. só depois voltar para contas conectadas, agenda e distribuição.
 
 O que não fazer agora:
 
@@ -616,8 +646,10 @@ O que não fazer agora:
 - permitir que texto simples e conteúdo final entrem em pontos diferentes da mesma esteira;
 - validar se `final content mode` recebeu todos os conteúdos finais exigidos pelos outputs configurados;
 - preparar catálogo inicial de prompts padrão por combinação `canal + formato`;
+- remover `projectIds` do contrato principal de `ContentItem` e mover associação explícita para endpoints/camadas de vínculo de projeto;
 - manter ponte interna com legado apenas como infraestrutura, sem expor ids/termos;
 - decidir se `GET /content-items/:itemId/blocks` vira compatibilidade e o fluxo principal passa a depender de output.
+- preparar a transição de nomenclatura física `ContentProject` -> `Project` e `ContentProjectItem` -> `ProjectContent`.
 
 ### Bloco C - Studio beta
 
@@ -627,23 +659,60 @@ O que não fazer agora:
 - garantir narrativa/composition inicial para vídeo como primeira implementação;
 - conectar operações de gerar adaptação do output, ajustar prompts, revisar previews e seguir para assets/render;
 - garantir leitura clara de status por output.
+- tornar o editor suficientemente autônomo no modelo de projeto para viabilizar a remoção física do backing `Course/Module/Lesson`.
+
+### Bloco H - Remodelagem do schema
+
+- revisar o banco primeiro como fonte de verdade da migração;
+- fechar um mapa explícito `tabela atual -> conceito de produto -> tabela alvo`;
+- manter nomenclatura aprovada: `Workspace`, `Project`, `Content`, `ProjectContent`;
+- renomear `WorkspaceMembership` para `WorkspaceUser`;
+- renomear tabelas do domínio novo para nomes alinhados ao produto;
+- revisar dependências pai-filho para reduzir propagação desnecessária de `workspaceId`;
+- manter `userId` como base de auditoria onde fizer sentido;
+- separar claramente tabelas locais de execução de tabelas online de control plane;
+- revisar `User.role` como resíduo transitório e mover o papel definitivo para `WorkspaceUser`;
+- decompor `Project.metadataJson` com base no conteúdo real persistido;
+- tratar `Project.language` como idioma-alvo obrigatório dos outputs finais;
+- definir plano de migração física de dados sem quebrar o beta.
+
+### Bloco J - Sessão local, workspace ativa e sync futuro
+
+- tornar explícitos na UI desktop o usuário autenticado e a workspace ativa;
+- suportar escolha de workspace ativa quando o usuário tiver mais de uma opção;
+- manter a V0 funcional mesmo no cenário mínimo de um usuário em uma única workspace;
+- separar claramente o que é estado local obrigatório do que será sync futuro;
+- planejar sync estrutural de projetos, conteúdos, promoções e demais metadados relevantes, sem incluir assets pesados;
+- manter backup/restauração local como solução para preservação integral de assets e estado operacional.
+
+### Bloco I - Saída definitiva do legado Vizlec
+
+- remover `Course`, `Module`, `Lesson` e derivados do schema assim que o editor estiver ancorado no modelo de projeto;
+- migrar o que ainda for necessário de `Block`, `Asset` e `Job` para o novo pai operacional;
+- remover endpoints herdados e pontes como `ensureContentItemBacking()`;
+- revisar worker e editor para operar sem `lessonVersionId`.
 
 ### Bloco F - Esteira de ingestão e script
 
+- transformar `Source Preparation` em produto real, e não apenas agregação de metadata;
+- registrar fonte, artefatos, estado agregado, erros e critério de convergência por conteúdo;
 - formalizar que tipos de entrada chegam em pontos diferentes da mesma pipeline;
 - definir tratamento mínimo para texto, script pronto, áudio, vídeo por link e PDF;
+- bloquear mistura de script pronto com fontes brutas adicionais no mesmo conteúdo;
 - garantir convergência obrigatória em `script_ready`;
+- derivar `script_ready` do que já foi resolvido no domínio, sem toggle manual de UI;
+- validar cobertura real de `final content mode` por output obrigatório;
 - introduzir gate de revisão/aprovação antes de produção automatizada.
 - mover a experiência de ingestão/preparação para a área `Content`, fora do detalhe do projeto;
 - permitir uma ou muitas fontes por conteúdo;
 - automatizar seleção da pipeline de extração/transcrição conforme a origem da fonte.
 - executar preparação inicial em fila sequencial, uma fonte por vez;
-- refletir no projeto apenas o estado agregado do conteúdo associado durante `Preparation`.
+- refletir no projeto apenas o estado agregado do conteúdo associado durante `Source Preparation`.
 
 ### Bloco G - Orquestração do projeto
 
 - substituir a interação principal de cliques por output por uma ação de início no nível do par `projeto + conteúdo`;
-- refletir fases macro `Preparation`, `Creation` e `Publication`;
+- refletir fases macro `Source Preparation`, `Creation` e `Publication`;
 - mostrar estado detalhado dentro de cada fase, como `downloading_video`, `extracting_audio` e `transcribing`;
 - garantir que a preparação do conteúdo aconteça antes da criação dos outputs;
 - tratar fila e prioridade de outputs como parte explícita do runtime.
@@ -666,7 +735,7 @@ O que não fazer agora:
 
 O próximo ciclo de implementação deve ter um objetivo único:
 
-`fazer o beta rodar no fluxo novo sem linguagem herdada, com projeto + conteudo + output + studio + render`
+`revisar o banco primeiro e fazer o beta rodar com Source Preparation real, sem linguagem herdada, com projeto + conteudo + output + studio + render`
 
 Leitura complementar obrigatória para o próximo ciclo:
 
@@ -676,18 +745,24 @@ Leitura complementar obrigatória para o próximo ciclo:
 
 Sequencia do próximo ciclo:
 
-1. limpar `ContentProjects.tsx` e shell principal do beta;
-2. ajustar contrato de `content` para deixar explícito o estado `script_ready`;
-3. separar fase `Preparation` da fase `Creation` no contrato e na UI;
-4. introduzir ação principal de início no conteúdo associado ao projeto;
-5. ajustar API do fluxo novo onde ainda depende de `content-item` isolado em vez de `output`;
-6. fechar `Studio` como centro operacional do output de vídeo;
-7. remover a ambiguidade da visão `Selected Output`;
-8. redefinir `Build Narrative` como etapa de adaptação/estruturação do output;
-9. revisar base para presets/templates e estratégia de seleção no projeto;
-10. validar TTS/imagem/render no pipeline;
-11. revisar equipe/autorização mínima;
-12. executar validação manual completa.
+1. revisar o banco e fechar o mapa de entidades atuais, transitórias e alvo;
+2. decidir a nomenclatura-alvo de `Content`, `Project` e `ProjectContent`;
+3. fechar o contrato de `Source Preparation` e seus estados reais;
+4. limpar `ContentProjects.tsx` e shell principal do beta;
+5. ajustar contrato de `content` para deixar explícito como `script_ready` é derivado;
+6. validar cobertura de `final content mode` por output;
+7. separar fase `Source Preparation` da fase `Creation` no contrato e na UI;
+8. introduzir ação principal de início no conteúdo associado ao projeto;
+9. ajustar API do fluxo novo onde ainda depende de `content-item` isolado em vez de `output`;
+10. remover dependência de `ensureContentItemBacking()` no fluxo principal;
+11. fechar `Studio` como centro operacional do output de vídeo;
+12. remover a ambiguidade da visão `Selected Output`;
+13. redefinir `Build Narrative` como etapa de adaptação/estruturação do output;
+14. revisar base para presets/templates e estratégia de seleção no projeto;
+15. validar TTS/imagem/render no pipeline;
+16. revisar equipe/autorização mínima;
+17. executar validação manual completa, incluindo YouTube com fala.
+18. mover de `ContentItem` para a camada `Project -> Content` qualquer metadado operacional que ainda descreva entrega, canal, aspect ratio, stage ou fila.
 
 Direcionamento registrado em 2026-05-09:
 

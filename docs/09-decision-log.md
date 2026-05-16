@@ -63,7 +63,7 @@ Decisão:
 
 - a entrada `Content` deve ser voltada para produção do conteúdo/roteiro;
 - configuração de canais de entrega, formatos e aspect ratios pertence ao projeto/outputs;
-- a tela de conteúdo deve ter área principal de escrita e um bloco de prompt/conversa para solicitações a IA;
+- a tela de conteúdo deve ter área principal de escrita voltada para criação e preparação do conteúdo;
 - conteúdo precisa ser associado a projeto para entrar no fluxo de produção, mas a associação não deve dominar a experiência visual da tela.
 - a tela de conteúdo não deve pedir o tipo de mídia antes da escrita; vídeo, imagem, música, texto e PDF são entregáveis/outputs, não o conteúdo em si.
 
@@ -73,6 +73,12 @@ Motivo:
 - o projeto define canais, formatos e entregáveis;
 - a tela atual estava parecendo mais configuração de delivery channels do que produção de roteiro.
 - uma ideia não é vídeo, imagem ou música; ela pode se tornar qualquer uma dessas saídas conforme o projeto/canal/formato.
+
+Observação:
+
+- interação conversacional/prompt direto na tela `Content` pode voltar no futuro como hipótese de UX;
+- isso não faz parte do foco aprovado para o V0;
+- nesta fase, o uso principal de prompts deve permanecer nos prompts pré-configurados e ajustáveis por projeto, canal e formato.
 
 ## 2026-04-30 - Produto orientado a promoção
 
@@ -103,6 +109,34 @@ Motivo:
 - entregar rápido;
 - reduzir risco;
 - preservar editor/jobs/render existentes.
+
+## 2026-05-16 - Revisão do modelo físico de dados
+
+Decisão:
+
+- a nomenclatura física atual de tabelas do domínio novo ainda não está boa o suficiente;
+- `ContentProject` deve evoluir para um nome físico alinhado ao produto, preferencialmente `Project`;
+- `ContentProjectItem` deve evoluir para um nome físico alinhado à função de vínculo, preferencialmente `ProjectContent`;
+- a remoção física do legado `Course/Module/Lesson` só deve acontecer depois que o editor e o fluxo de produção estiverem dirigidos por `Project`/`ProjectContentOutput`;
+- tabelas filhas devem apontar para seu pai de domínio direto, e não repetir `workspaceId` por padrão sem necessidade clara;
+- `workspace` deve ser entendido principalmente como camada organizacional e de controle de acesso, não como pai operacional de quase todas as entidades locais;
+- quando for necessário registrar autoria/auditoria, `userId` é mais importante do que propagar `workspaceId` em toda a árvore;
+- tabelas de controle de acesso, licença e gestão do produto pertencem ao FlowShopy online/control plane;
+- tabelas de execução, assets, jobs e produção pertencem primariamente ao runtime local.
+- `WorkspaceMembership` deve evoluir para `WorkspaceUser` para refletir melhor a relação direta entre workspace e usuário;
+- o papel do usuário deve viver nessa relação, e não em `User.role`;
+- `Invitation.inviteeName` é apenas o nome inicial sugerido para bootstrap do perfil e deve poder ser ajustado depois nas configurações do usuário;
+- `Project.language` deve definir o idioma-alvo dos outputs finais do projeto, independentemente do idioma da fonte bruta;
+- `Project.metadataJson` precisa ser decomposto com base no conteúdo real já persistido hoje;
+- a V0 desktop precisa explicitar na UI quem está logado e qual workspace está ativa, mesmo antes da camada de sync online.
+- `ProjectContentOutput` permanece como nome preferido para a entidade de output concreto, porque cada linha representa a saída específica de um conteúdo associado a um projeto para uma definição de canal/formato/destino.
+
+Motivo:
+
+- os nomes atuais carregam transição técnica demais e deixam o schema menos legível;
+- manter o legado no banco por tempo demais aumenta custo de migração futura;
+- propagar `workspaceId` em excesso gera redundância estrutural e enfraquece a leitura real das relações pai-filho;
+- o produto é local-first no plano de execução, mas login, acesso e governança pertencem a uma camada online separada.
 
 ## 2026-05-05 - Saída definitiva do modelo de curso
 
@@ -155,12 +189,14 @@ Decisão:
 - `Project` não deve duplicar essa experiência com um segundo formulário principal de conteúdo;
 - dentro do projeto, a ação correta é localizar e associar conteúdos existentes;
 - um mesmo conteúdo pode se relacionar com um, vários ou nenhum projeto;
+- o conteúdo não deve conhecer projeto; o projeto é que conhece o conteúdo por meio da camada de vínculo e orquestração;
 - `Studio` existe para transformar conteúdo associado em output/composição, não para competir com a área `Content`.
 
 Motivo:
 
 - conteúdo é matéria-prima e precisa existir por si;
 - projeto sozinho não gera valor; ele apenas parametriza a fábrica/core;
+- manter o conteúdo sem campos/controle de projeto evita acoplamento indevido entre matéria-prima e entrega;
 - duplicar a criação de conteúdo em mais de um lugar aumenta ambiguidade e deixa a UI menos clara;
 - a complexidade precisa ficar debaixo do capo, com um fluxo único e direto para o usuário.
 
